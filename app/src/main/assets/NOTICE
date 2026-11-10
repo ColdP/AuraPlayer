@@ -1,0 +1,33 @@
+Aura Player 0.1.0
+Copyright 2026 btm_m
+Distributed under AGPL-3.0-or-later. See licenses/AGPL-3.0-or-later.txt.
+
+HyperChanger — https://github.com/ColdP/HyperChanger
+Copyright 2026 btm_m, AGPL-3.0-or-later.
+Ported GlassNavigation, LiquidInteraction, navigation material defaults, predictive
+back, GlassDropdownMenu, GlassWindowDialog, SoftGlassHeaderTabs, HomeSearchOverlay,
+NavigationAppSearchField, ScreenCornerAlignment, AboutMaterialBackground,
+MiuiBlendImageView, CompletionConfetti, and the About / Donate page layouts.
+Changes: app namespace, music-specific search results, removal of Xposed and
+ColorOS integration, independent persistence and Aura navigation destinations.
+Original author avatar, donation artwork and about branding retained on request.
+
+Retro Music Player — https://github.com/RetroMusicPlayer/RetroMusicPlayer
+Copyright Hemanth Savarala and contributors, GPL-3.0-or-later.
+Home page structure adapted from fragment_home.xml, home_content.xml,
+abs_playlists.xml and HomeFragment.kt to MIUIX Compose. No Material UI is used.
+
+Backdrop — https://github.com/Kyant0/AndroidLiquidGlass
+Copyright Kyant and contributors, Apache-2.0.
+LiquidBottomTabs interaction portions retain the upstream attribution in source.
+MIUIX — https://github.com/miuix-kotlin-multiplatform/miuix
+Copyright Yukonga and contributors, Apache-2.0.
+AndroidX / Media3 — Copyright The Android Open Source Project, Apache-2.0.
+Coil — https://github.com/coil-kt/coil, Apache-2.0.
+OkHttp — https://github.com/square/okhttp, Apache-2.0.
+
+NeteaseCloudMusicApiEnhanced — MIT
+https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced
+The app implements the HTTP client protocol; server code is a separate deployment.
+Original server authors and contributors retain their copyrights.
+Aura requests song/url/v1 with unblock=false and does not implement downloads.

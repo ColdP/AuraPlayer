@@ -1,0 +1,17 @@
+services:
+  netease-api:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm ci --omit=dev && npm start"
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - api-dependencies:/app/node_modules
+    environment:
+      PORT: "3000"
+      ENABLE_GENERAL_UNBLOCK: "false"
+      ENABLE_PROXY: "false"
+    restart: unless-stopped
+volumes:
+  api-dependencies:

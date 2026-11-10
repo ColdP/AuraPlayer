@@ -1,0 +1,9 @@
+{
+  "name": "aura-player-music-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted NetEase API for Aura Player",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node start.cjs" },
+  "dependencies": { "@neteasecloudmusicapienhanced/api": "4.41.1" }
+}

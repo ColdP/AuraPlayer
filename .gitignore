@@ -1,0 +1,17 @@
+.gradle/
+.kotlin/
+**/build/
+local.properties
+.idea/
+*.iml
+/docs/
+.verification/
+server/node_modules/
+server/.runtime/
+server/*.log
+
+.env
+.env.*
+*.jks
+*.keystore
+*.hprof
