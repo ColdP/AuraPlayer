@@ -128,6 +128,7 @@ fun GlassDropdownMenu(
     Box(modifier) {
         BasicComponent(
             modifier = Modifier.fillMaxWidth(),
+            insideMargin = CompactPreferencePadding,
             interactionSource = remember { MutableInteractionSource() },
             title = title,
             summary = selectedSummary.takeUnless { showValueOnEnd },
@@ -372,33 +373,7 @@ private fun GlassPopupSurface(
                     this.alpha = alpha
                     transformOrigin = TransformOrigin(.5f, 0f)
                 }
-                .then(
-                    if (backdrop != null) {
-                        Modifier.drawBackdrop(
-                            backdrop = backdrop,
-                            shape = { shape },
-                            effects = {
-                                vibrancy()
-                                backdropBlur(4.dp.toPx())
-                                lens(10.dp.toPx(), 28.dp.toPx(), chromaticAberration = true)
-                            },
-                            highlight = { Highlight.Default.copy(alpha = .70f) },
-                            shadow = {
-                                Shadow.Default.copy(
-                                    radius = 12.dp,
-                                    color = shadowColor,
-                                    alpha = .35f,
-                                )
-                            },
-                            innerShadow = null,
-                            onDrawSurface = { drawRect(tint) },
-                        )
-                    } else {
-                        Modifier
-                            .clip(shape)
-                            .background(tint)
-                    }
-                )
+                .glassMenuSurface(backdrop, shape)
                 .then(touchHighlight.gestureModifier)
                 .then(touchHighlight.modifier),
         ) {

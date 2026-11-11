@@ -13,14 +13,18 @@ import java.util.concurrent.TimeUnit
 
 class CloudApiException(val status: Int, message: String) : IOException(message)
 
-/** NeteaseCloudMusicApiEnhanced-compatible HTTP adapter. No third-party public host is trusted by default. */
+/** Uses official NetEase endpoints by default, or an optional user-configured Enhanced API service. */
 class NeteaseApi(
     private val endpoint: () -> String,
     private val cookie: () -> String,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(25, TimeUnit.SECONDS)
         .followRedirects(false).build(),
+    private val metadataCache: CloudMetadataCache? = null,
 ) {
+    private val official = OfficialNeteaseClient(cookie, client, metadataCache = metadataCache)
+    private fun cacheScope() = CloudMetadataCache.digest(endpoint() + "\n" + cookie())
+    fun clearMetadataCache() { metadataCache?.clear() }
     companion object {
         fun normalizeEndpoint(value: String): String {
             val url = value.trim().trimEnd('/').toHttpUrl()
@@ -34,7 +38,21 @@ class NeteaseApi(
     }
 
     fun requestBlocking(path: String, values: Map<String, String> = emptyMap(), authenticated: Boolean = true): JSONObject {
-        val base = endpoint().takeIf { it.isNotBlank() } ?: throw IOException("API_NOT_CONFIGURED")
+        val cacheable = path in setOf("user/playlist", "playlist/track/all")
+        val key = cacheScope() + "/" + path + "/" + (values["uid"] ?: values["id"]).orEmpty() + "/" +
+            values.toSortedMap().entries.joinToString("&") { "${it.key}=${it.value}" }
+        if (cacheable) metadataCache?.read(key)?.let { return it }
+        return try {
+            requestNetwork(path, values, authenticated).also { if (cacheable) metadataCache?.write(key, it) }
+        } catch (e: IOException) {
+            // HTTP/authentication failures must stay visible; only a transport outage uses stale data.
+            if (cacheable && e !is CloudApiException) metadataCache?.read(key, stale = true)?.let { return it }
+            throw e
+        }
+    }
+    private fun requestNetwork(path: String, values: Map<String, String>, authenticated: Boolean): JSONObject {
+        val base = endpoint().takeIf { it.isNotBlank() }
+            ?: return official.request(path, values, authenticated)
         val url = (normalizeEndpoint(base) + "/" + path.trimStart('/')).toHttpUrl()
         val body = FormBody.Builder().apply {
             add("timestamp", System.currentTimeMillis().toString())
@@ -69,37 +87,47 @@ class NeteaseApi(
         return parseAccount(profile)
     }
     suspend fun logout() { request("logout") }
-    suspend fun playlists(uid: Long): List<CloudPlaylist> {
+    suspend fun playlists(uid: Long, offset: Int = 0, limit: Int = 30, refresh: Boolean = false): CloudPage<CloudPlaylist> {
+        require(offset >= 0 && limit in 1..100)
+        if (refresh) withContext(Dispatchers.IO) { metadataCache?.removePrefix(cacheScope() + "/user/playlist/$uid/") }
         val result = mutableListOf<CloudPlaylist>()
-        var offset = 0
-        do {
-            val response = request("user/playlist", mapOf("uid" to "$uid", "limit" to "100", "offset" to "$offset"))
-            val items = response.optJSONArray("playlist") ?: JSONArray()
-            for (i in 0 until items.length()) items.getJSONObject(i).let {
-                result += CloudPlaylist(it.getLong("id"), it.optString("name"), it.optInt("trackCount"), it.optString("coverImgUrl"))
-            }
-            offset += items.length()
-        } while (response.optBoolean("more") && items.length() > 0)
-        return result.distinctBy { it.id }
+        val response = request("user/playlist", mapOf("uid" to "$uid", "limit" to "$limit", "offset" to "$offset"))
+        val items = response.optJSONArray("playlist") ?: JSONArray()
+        for (i in 0 until items.length()) items.getJSONObject(i).let {
+            result += CloudPlaylist(it.getLong("id"), it.optString("name"), it.optInt("trackCount"), it.optString("coverImgUrl"))
+        }
+        return CloudPage(result.distinctBy { it.id }, offset + items.length(),
+            items.length() > 0 && response.optBoolean("more", items.length() == limit))
     }
-    suspend fun playlistSongs(id: Long): List<Song> {
-        val result = mutableListOf<Song>()
-        var offset = 0
-        do {
-            val response = request("playlist/track/all", mapOf("id" to "$id", "limit" to "500", "offset" to "$offset"))
-            val items = response.optJSONArray("songs") ?: JSONArray()
-            result += parseSongs(items)
-            offset += items.length()
-        } while (items.length() == 500)
-        return result.distinctBy { it.id }
+    suspend fun playlistSongs(id: Long, offset: Int = 0, limit: Int = 50, refresh: Boolean = false): CloudPage<Song> {
+        require(offset >= 0 && limit in 1..100)
+        if (refresh) withContext(Dispatchers.IO) {
+            metadataCache?.removePrefix(cacheScope() + "/playlist/track/all/$id/")
+            official.invalidatePlaylist(id)
+        }
+        val response = request("playlist/track/all", mapOf("id" to "$id", "limit" to "$limit", "offset" to "$offset"))
+        val items = response.optJSONArray("songs") ?: JSONArray()
+        // Advance through source IDs, even if some tracks are unavailable or duplicated.
+        val nextOffset = response.optInt("nextOffset", offset + items.length())
+        return CloudPage(parseSongs(items).distinctBy { it.id }, nextOffset,
+            nextOffset > offset && response.optBoolean("more", items.length() == limit),
+            response.optInt("total").takeIf { response.has("total") })
     }
     suspend fun search(query: String, offset: Int = 0): List<Song> {
         val response = request("cloudsearch", mapOf("keywords" to query, "type" to "1", "limit" to "50", "offset" to "$offset"))
         return parseSongs(response.optJSONObject("result")?.optJSONArray("songs") ?: JSONArray())
     }
-    fun resolveBlocking(id: Long): String {
-        val response = requestBlocking("song/url/v1", mapOf("id" to "$id", "level" to "standard", "unblock" to "false"))
+    suspend fun availableQualities(id: Long): List<btm.m.auraplayer.playback.StreamQuality> {
+        val data = request("song/music/detail", mapOf("id" to "$id")).optJSONObject("data") ?: return emptyList()
+        val fields = mapOf("standard" to "l", "higher" to "m", "exhigh" to "h", "lossless" to "sq", "hires" to "hr",
+            "jyeffect" to "je", "sky" to "sk", "dolby" to "db", "vivid" to "vi", "jymaster" to "jm")
+        return btm.m.auraplayer.playback.StreamQuality.entries.filter { data.optJSONObject(fields[it.level] ?: "") != null }
+    }
+    fun resolveBlocking(id: Long, level: String = "standard"): String {
+        val response = requestBlocking("song/url/v1", mapOf("id" to "$id", "level" to level, "unblock" to "false"))
         val song = response.optJSONArray("data")?.optJSONObject(0) ?: throw IOException("UNAVAILABLE_SONG")
+        btm.m.auraplayer.playback.PlaybackStreams.records[id] = btm.m.auraplayer.playback.StreamInfo(
+            song.optString("level", level), song.optString("type"), song.optInt("br"), song.optInt("sr"))
         val url = song.optString("url").takeIf { it.isNotBlank() && it != "null" } ?: throw IOException("UNAVAILABLE_SONG")
         val parsed = url.toHttpUrl()
         // NetEase occasionally returns HTTP CDN URLs. HTTPS is supported by its CDN.

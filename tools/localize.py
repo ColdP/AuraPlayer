@@ -76,7 +76,7 @@ icons_only|Icons only|アイコンのみ
 text_only|Text only|テキストのみ
 predictive_back|Predictive back animation|予測型戻るアニメーション
 back_maximum|Maximum predictive back progress|予測型戻るの最大進行度
-login_summary|Log in with an SMS verification code|SMS認証コードでログイン
+login_summary|Sign in on the official NetEase page|NetEase 公式ページでログイン
 blacklist|Blacklist|ブラックリスト
 blacklist_disabled|Whitelist is enabled; blacklist is inactive|ホワイトリスト有効中のため無効です
 folder_count|folders|フォルダー
@@ -167,7 +167,7 @@ invalid_api|Enter an HTTPS URL. Local network services may use HTTP.|HTTPS URL�
 configure_api|Configure a NetEase API service URL first|まず NetEase API サービスのURLを設定してください
 session_expired|Your session expired. Please log in again.|セッションが切れました。再ログインしてください。
 cloud_request_failed|NetEase request failed|NetEase リクエストに失敗しました
-cloud_network_error|Connection failed. Check the service URL and network.|接続に失敗しました。サービスURLとネットワークを確認してください。
+cloud_network_error|Connection failed. Check your network and retry.|接続に失敗しました。ネットワークを確認して再試行してください。
 captcha_sent|Verification code sent|認証コードを送信しました
 login_success|Logged in|ログインしました
 logged_out|Logged out|ログアウトしました
@@ -199,6 +199,81 @@ for line in translations.strip().splitlines():
     en[key], ja[key] = english, japanese
 
 extra = {
+    "play": ("Play", "再生"),
+    'previous_track': ('Previous track', '前の曲'),
+    'next_track': ('Next track', '次の曲'),
+    'pause': ('Pause', '一時停止'),
+    'collapse_player': ('Collapse player', 'プレーヤーを閉じる'),
+    'lyrics_loading': ('Fetching lyrics…', '歌詞を取得中…'),
+    'lyrics_empty': ('No lyrics available', '歌詞がありません'),
+    'lyrics_options': ('Lyrics options', '歌詞の設定'),
+    'playback_progress': ('Playback position', '再生位置'),
+    'lyrics': ('Lyrics', '歌詞'),
+    'shuffle_mode': ('Shuffle', 'シャッフル再生'),
+    'repeat_one_mode': ('Repeat one', '1曲リピート'),
+    'repeat_all_mode': ('Repeat all', '全曲リピート'),
+    'unfavorite': ('Remove from favorites', 'お気に入りから削除'),
+    'favorite': ('Favorite', 'お気に入りに追加'),
+    'play_queue': ('Play queue', '再生キュー'),
+    'reorder_queue': ('Reorder queue', '再生順序を変更'),
+    'move_up': ('Move up', '上へ移動'),
+    'move_down': ('Move down', '下へ移動'),
+    'media_volume': ('Media volume', 'メディアの音量'),
+    'quality_standard': ('Standard', '標準'),
+    'quality_higher': ('Higher', '高音質'),
+    'quality_high': ('Very high', '最高音質'),
+    'quality_lossless': ('Lossless', 'ロスレス'),
+    'quality_hires': ('Hi-Res', 'Hi-Res'),
+    'quality_spatial': ('HD clarity', '高精細サウンド'),
+    'quality_surround': ('Immersive surround', 'イマーシブサラウンド'),
+    'quality_dolby': ('Dolby Atmos', 'Dolby Atmos'),
+    'quality_vivid': ('Vivid spatial audio', '全方位サウンド'),
+    'quality_master': ('Master quality', 'マスター音質'),
+    'khz': ('kHz', 'kHz'),
+    'bit': ('bit', 'bit'),
+    'kbps': ('kb/s', 'kb/s'),
+    'audio_details_loading': ('Reading audio format…', '音声形式を読み取り中…'),
+    'audio_quality': ('Audio quality', '音質'),
+    'quality_access': ('Quality is provided by NetEase. Playback depends on the recording and your account access.', '音質はNetEaseが提供します。曲とアカウントの利用権限により再生できる音質が異なります。'),
+    'quality_retry': ('Unable to fetch quality options. Tap to retry.', '音質を取得できません。タップして再試行'),
+    'quality_unavailable': ('No quality options available for this song', 'この曲に利用可能な音質がありません'),
+    'selected': ('Selected', '選択中'),
+    'lyrics_translation': ('Show translation', '翻訳を表示'),
+    'lyrics_pronunciation': ('Show pronunciation', '発音を表示'),
+    'hide_translation': ('Hide translation', '翻訳を非表示'),
+    'show_translation': ('Show translation', '翻訳を表示'),
+    'hide_pronunciation': ('Hide pronunciation', '発音を非表示'),
+    'show_pronunciation': ('Show pronunciation', '発音を表示'),
+    'lyrics_size': ('Lyric size', '歌詞のサイズ'),
+    'lyrics_size_extra_small': ('Extra small', '極小'),
+    'lyrics_size_small': ('Small', '小'),
+    'lyrics_size_regular': ('Regular', '標準'),
+    'lyrics_size_large': ('Large', '大'),
+    'lyrics_size_extra_large': ('Extra large', '極大'),
+
+    'official_login': ('Sign in with NetEase Music', 'NetEase Music にログイン'),
+    'official_login_summary': ('Sign in directly. No server or API address required.', 'サーバーや API アドレスの設定は不要です。'),
+    'advanced_connection': ('Advanced connection settings', '高度な接続設定'),
+    'advanced_connection_summary': ('Optional: use your own API service', '任意：独自の API サービスを使用'),
+    'use_official': ('Use the official NetEase connection', 'NetEase 公式接続を使用'),
+    'verifying_account': ('Verifying account…', 'アカウントを確認中…'),
+    'official_page_failed': ('Could not load the sign-in page. Check your connection and retry.', 'ログインページを読み込めません。接続を確認して再試行してください。'),
+    'retry': ('Retry', '再試行'),
+    'retry_verification': ('Verify sign-in again', 'ログインを再確認'),
+    'sort': ('Sort', '並べ替え'),
+    'more': ('More', 'その他'),
+    'sort_default': ('Default', '既定'),
+    'sort_az': ('Name A–Z', '名前 A–Z'),
+    'sort_za': ('Name Z–A', '名前 Z–A'),
+    'sort_artist': ('Artist', 'アーティスト'),
+    'sort_album': ('Album', 'アルバム'),
+    'sort_year': ('Year', '年'),
+    'sort_added': ('Date added', '追加日'),
+    'sort_modified': ('Date modified', '更新日'),
+    'sort_composer': ('Composer', '作曲者'),
+    'sort_album_artist': ('Album artist', 'アルバムアーティスト'),
+    'sort_duration': ('Duration', '再生時間'),
+
     'categories': ('Categories', '分類'),
     'welcome': ('Welcome,', 'ようこそ、'),
     'suggestion_songs': ('Suggestions', 'おすすめ'),
@@ -212,10 +287,10 @@ extra = {
     '保存': ('Save', '保存'),
     '数值调整': ('Adjust value', '数値を調整'),
     '恢复默认数值': ('Restore default value', '既定値に戻す'),
-    'privacy_body': ('Aura Player reads audio metadata on your device and does not upload local music files. NetEase login information is sent through the API service you configure. Session cookies are encrypted using Android Keystore and cleared when you log out or change services. Artwork and streaming contact the corresponding network services. Only connect to a service you trust.', 'Aura Player は端末の音声情報を読み取り、ローカル音楽をアップロードしません。ログイン情報は設定したAPIサービスに送信されます。CookieはAndroid Keystoreで暗号化され、ログアウトや接続先変更で削除されます。画像と再生には通信を使用します。信頼できるサービスを利用してください。'),
+    'privacy_body': ('Aura Player reads audio metadata on your device and does not upload local music files. By default, you sign in on the official NetEase HTTPS page and connect directly to NetEase. If you select a custom API service, requests are sent to that service. Session cookies are encrypted using Android Keystore and cleared when you log out or change services. Artwork and streaming contact the corresponding network services. Lyric searches send the title, artist, album and duration to NetEase, QQ, Kuwo, KuGou or LrcLib, and online song IDs to AMLL / TTML Hub. Local audio is never uploaded. Only connect to a service you trust.', 'Aura Player は端末の音声情報を読み取り、ローカル音楽をアップロードしません。既定ではNetEase公式HTTPSページでログインし、NetEaseに直接接続します。独自のAPIを選ぶと、そのサービスにリクエストが送信されます。CookieはAndroid Keystoreで暗号化され、ログアウトや接続先変更で削除されます。画像と再生には通信を使用します。歌詞検索では曲名・アーティスト・アルバム・長さをNetEase、QQ、Kuwo、KuGou、LrcLibに送り、オンライン曲IDでAMLL / TTML Hubを検索します。ローカル音声はアップロードしません。信頼できるサービスを利用してください。'),
     'agreement_body': ('Only play music you are entitled to access. NetEase account, regional and subscription restrictions still apply. This app does not unlock paid content or download music.', 'アクセス権のある音楽のみ再生してください。NetEaseの地域・会員制限が適用されます。有料コンテンツの解除や音楽ダウンロードは提供しません。'),
     'disclaimer_body': ('This software is provided as is. Availability of third-party services is not guaranteed. Music copyrights belong to their respective owners. Do not use this software to infringe the rights of others.', '本ソフトウェアは現状のまま提供されます。第三者サービスの可用性は保証されません。音楽の著作権は権利者に帰属します。他者の権利を侵害しないでください。'),
-    'contributors_body': ('Aura Player: btm_m\n\nUI & glass components: HyperChanger / btm_m\nHome structure: Retro Music / Hemanth Savarala & contributors\nMIUIX: Yukonga & contributors\nBackdrop: Kyant & contributors\nNetEase API: NeteaseCloudMusicApiEnhanced & contributors', 'Aura Player: btm_m\n\nUIとガラス部品: HyperChanger / btm_m\nホーム構成: Retro Music / Hemanth Savarala と貢献者\nMIUIX: Yukonga と貢献者\nBackdrop: Kyant と貢献者\nNetEase API: NeteaseCloudMusicApiEnhanced と貢献者'),
+    'contributors_body': ('Aura Player: btm_m\n\nUI & glass components: HyperChanger / btm_m\nHome structure: Retro Music / Hemanth Savarala & contributors\nMIUIX: Yukonga & contributors\nBackdrop: Kyant & contributors\nNetEase API: NeteaseCloudMusicApiEnhanced & contributors\nLyrics: HyperMusicCover / zyl6932, HyperChanger / btm_m\nLyric matching & decryption: HyperLyrics Enhanced / juren233\nParser: Accompanist Lyrics Core\nCover palette: MaterialKolor\nPlayer icons: Apple Music / Apple Inc. (adapted selected queue and background-free favorite)', 'Aura Player: btm_m\n\nUIとガラス部品: HyperChanger / btm_m\nホーム構成: Retro Music / Hemanth Savarala と貢献者\nMIUIX: Yukonga と貢献者\nBackdrop: Kyant と貢献者\nNetEase API: NeteaseCloudMusicApiEnhanced と貢献者\n歌詞: HyperMusicCover / zyl6932、HyperChanger / btm_m\n歌詞照合と復号: HyperLyrics Enhanced / juren233\n解析: Accompanist Lyrics Core\nカバーの配色: MaterialKolor\nプレイヤーアイコン: Apple Music / Apple Inc.（キュー選択状態と背景なしのお気に入りを調整）'),
 }
 for key, (english,japanese) in extra.items(): en[key],ja[key]=english,japanese
 strings = {}

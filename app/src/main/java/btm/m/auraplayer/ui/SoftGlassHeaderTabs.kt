@@ -37,7 +37,7 @@ internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, widthScale: 
         onDrawSurface = { drawRect(surface.copy(alpha = .6f)) },
     ) else Modifier.background(surface, shape)
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val tabsWidth = ((maxWidth - 56.dp).coerceAtLeast(0.dp) * widthScale).coerceAtMost(maxWidth) * finalWidthScale
+        val tabsWidth = ((maxWidth - LocalAuraLayout.current.pageMargin * 2).coerceAtLeast(0.dp) * widthScale).coerceAtMost(maxWidth) * finalWidthScale
         BoxWithConstraints(Modifier.align(Alignment.Center).width(tabsWidth).padding(vertical = 8.dp)) {
         Box(
             Modifier.matchParentSize()
@@ -45,7 +45,7 @@ internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, widthScale: 
                 .then(glass),
         )
         Row(
-            Modifier.fillMaxWidth().height(53.dp * 0.93f * 0.97f).padding(4.dp),
+            Modifier.fillMaxWidth().height(53.dp * 0.93f * 0.97f * 0.92f).padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             tabs.forEachIndexed { index, label ->

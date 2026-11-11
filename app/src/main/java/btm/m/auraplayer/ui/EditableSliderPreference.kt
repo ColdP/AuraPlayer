@@ -55,6 +55,7 @@ internal fun EditableSliderPreference(
         steps = if (center == null) steps else 0,
         enabled = enabled,
         modifier = modifier,
+        insideMargin = CompactPreferencePadding,
         onClick = if (enabled) ({ showValueDialog = true }) else null,
     )
     if (showValueDialog) {

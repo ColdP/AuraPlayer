@@ -15,6 +15,10 @@ data class Song(
     val track: Int = 0,
     val cloud: Boolean = false,
     val volume: String = "external_primary",
+    val year: Int = 0,
+    val modified: Long = 0,
+    val composer: String = "",
+    val albumArtist: String = "",
 ) { val key: String get() = if (cloud) "cloud:$id" else "local:$uri" }
 
 data class MusicCollection(val key: String, val title: String, val subtitle: String, val songs: List<Song>, val artwork: String = "")

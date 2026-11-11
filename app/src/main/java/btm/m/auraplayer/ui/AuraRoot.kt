@@ -74,13 +74,13 @@ fun AuraRoot(model: AuraViewModel) {
         ThemeController(mode, keyColor = seed?.let(::Color), paletteStyle = paletteStyles[settings.palette.coerceIn(paletteStyles.indices)],
             colorSpec = if (settings.colorSpec == 0) ThemeColorSpec.Spec2021 else ThemeColorSpec.Spec2025)
     }
-    MiuixTheme(controller = controller) {
+    MiuixTheme(controller = controller, textStyles = remember { auraTextStyles() }) {
         val activity = context as btm.m.auraplayer.MainActivity
         val dark = MiuixTheme.colorScheme.surface.luminance() < .5f
         SideEffect { WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
             isAppearanceLightStatusBars = !dark; isAppearanceLightNavigationBars = !dark
         } }
-        AuraShell(model)
+        AuraAdaptiveLayout { AuraShell(model) }
     }
 }
 
@@ -101,12 +101,29 @@ private fun AuraShell(model: AuraViewModel) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { model.refreshLibrary() }
     val selected = rememberSaveable { mutableIntStateOf(0) }
     var playlistsTab by rememberSaveable { mutableIntStateOf(0) }
-    var albumTab by rememberSaveable { mutableIntStateOf(0) }
     val pages = remember { mutableStateListOf<String>() }
     val seamless = remember { SeamlessNavigationState() }
     val scope = rememberCoroutineScope()
     var closing by remember { mutableStateOf(false) }
     var closingIndex by remember { mutableIntStateOf(-1) }
+    var playerOpen by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(model.current) { if (model.current == null) playerOpen = false }
+    val playerDark = MiuixTheme.colorScheme.surface.luminance() < .5f
+    SideEffect {
+        val activity = context as btm.m.auraplayer.MainActivity
+        WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
+            isAppearanceLightStatusBars = !playerDark && !playerOpen
+            isAppearanceLightNavigationBars = !playerDark && !playerOpen
+        }
+        activity.window.statusBarColor = android.graphics.Color.TRANSPARENT
+        activity.window.navigationBarColor = android.graphics.Color.TRANSPARENT
+    }
+    LaunchedEffect(playerOpen, playerDark) {
+        val activity = context as btm.m.auraplayer.MainActivity
+        val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+        controller.isAppearanceLightStatusBars = !playerOpen && !playerDark
+        controller.isAppearanceLightNavigationBars = !playerOpen && !playerDark
+    }
     var searchOpen by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
     var searchProgress by remember { mutableFloatStateOf(0f) }
@@ -145,13 +162,13 @@ private fun AuraShell(model: AuraViewModel) {
         }
     }
     val backState = rememberMomentumPredictiveBack(
-        enabled = page != null && settings.predictive && seamless.entries[pages.lastIndex] == null && !closing && !searchVisible,
+        enabled = page != null && settings.predictive && seamless.entries[pages.lastIndex] == null && !closing && !searchVisible && !playerOpen,
         maxProgress = settings.maxBackProgress, onBack = dismissPage)
     val exitDirection = remember(closingIndex) { backState.exitDirection }
     val momentumOwner = remember(backState.isSwiping) { pages.lastIndex to page }
     LaunchedEffect(pages.size) { if (pages.isNotEmpty()) backState.reset() }
-    BackHandler(enabled = page != null && (closing || !settings.predictive) && !searchVisible, onBack = dismissPage)
-    SeamlessPredictiveBack(seamless.entries[pages.lastIndex], page != null && settings.predictive && !closing && !searchVisible,
+    BackHandler(enabled = page != null && (closing || !settings.predictive) && !searchVisible && !playerOpen, onBack = dismissPage)
+    SeamlessPredictiveBack(seamless.entries[pages.lastIndex], page != null && settings.predictive && !closing && !searchVisible && !playerOpen,
         settings.maxBackProgress, dismissPage)
     val surface = MiuixTheme.colorScheme.surface
     val backdrop = rememberLayerBackdrop { drawRect(surface); drawContent() }
@@ -164,13 +181,13 @@ private fun AuraShell(model: AuraViewModel) {
         (backState.isSwiping || topEntry != null) && pages.size == 1 -> gestureBlur
         else -> 12f
     }, animationSpec = if (!revealingBase && (backState.isSwiping || topEntry != null) && pages.size == 1) snap() else tween(252, easing = FastOutSlowInEasing))
-    val rootLabels = listOf(tr("home", "首页"), tr("playlists", "歌单"), tr("songs", "歌曲"), tr("categories", "分类"))
+    val rootLabels = listOf(tr("home", "首页"), tr("playlists", "歌单"), tr("songs", "歌曲"))
     val saveableTabs = rememberSaveableStateHolder()
     CompositionLocalProvider(LocalSeamlessNavigation provides seamless, LocalDialogBackdrop provides backdrop) {
         // MIUIX PopupLayout(renderInRootScaffold=true) must be hosted outside recorded pages.
         Scaffold(containerColor = Color.Transparent) {
             Box(Modifier.fillMaxSize().background(surface)) {
-                Box(Modifier.fillMaxSize().blur(baseBlur.dp).layerBackdrop(backdrop)) {
+                Box(Modifier.fillMaxSize().blur((baseBlur + searchProgress * 14f).dp).layerBackdrop(backdrop)) {
                     AnimatedContent(targetState = selected.intValue, transitionSpec = {
                         val direction = if (targetState >= initialState) 1 else -1
                         (slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { direction * it / 7 } + fadeIn(tween(210)) + scaleIn(tween(280), initialScale = .985f)) togetherWith
@@ -183,28 +200,31 @@ private fun AuraShell(model: AuraViewModel) {
                             Box(Modifier.fillMaxSize().blur(tabBlur.dp)) {
                                 AppPage(if (tab == 0) "Aura Player" else rootLabels[tab], actions = {
                                     if (tab == 0) GlassToolbarIconButton(MiuixIcons.Regular.Settings, tr("settings", "设置")) { open("settings") }
+                                    else if (tab == 2) SongsToolbarMenu(model)
                                     else GlassToolbarIconButton(MiuixIcons.Regular.Refresh, tr("refresh", "刷新")) {
                                         model.refreshLibrary(); if (tab == 1 && playlistsTab == 1) model.refreshCloud()
                                     }
                                 }, header = {
                                     if (tab == 1) SoftGlassHeaderTabs(listOf(tr("local", "本地"), tr("netease", "网易云音乐")), playlistsTab) { playlistsTab = it }
-                                    if (tab == 3) SoftGlassHeaderTabs(listOf(tr("albums", "专辑"), tr("artists", "艺术家")), albumTab) { albumTab = it }
                                 }) { padding, _ ->
-                                    val contentPadding = auraContentPadding(padding, 112)
+                                    val contentPadding = auraContentPadding(padding, if (model.current != null) 184 else 112)
                                     when (tab) {
                                         0 -> HomePage(model, contentPadding, requestPermission)
                                         1 -> PlaylistsPage(model, contentPadding, playlistsTab) { open("login") }
-                                        2 -> SongsPage(model, contentPadding, requestPermission)
-                                        else -> AlbumsArtistsPage(model, contentPadding, albumTab)
+                                        2 -> SongsPage(model, contentPadding, requestPermission) { secondary ->
+                                            open(if (secondary == 0) "albums" else "artists")
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                AuraBottomBar(selected, model, backdrop, Modifier.align(Alignment.BottomCenter).blur(baseBlur.dp),
+                AuraBottomBar(selected, model, backdrop, Modifier.align(Alignment.BottomCenter).blur((baseBlur + searchProgress * 14f).dp),
                     searchVisible, searchProgress, { if (searchAnchor.width > 0f) { searchVisible = true; searchOpen = true } },
                     { if (!searchVisible) searchAnchor = it })
+                btm.m.auraplayer.ui.player.PlayerHost(model, backdrop, miniVisible = !searchVisible,
+                    open = playerOpen, onOpenChange = { playerOpen = it })
                 pages.forEachIndexed { index, stackPage ->
                     key(index, stackPage) {
                         val entry = remember { seamless.entries[index] }
@@ -252,17 +272,20 @@ private fun AuraShell(model: AuraViewModel) {
     }
 }
 
-private fun auraContentPadding(padding: PaddingValues, bottom: Int) = PaddingValues(16.dp,
-    padding.calculateTopPadding() + 4.dp, 16.dp, padding.calculateBottomPadding() + bottom.dp)
+@Composable
+private fun auraContentPadding(padding: PaddingValues, bottom: Int) = PaddingValues(LocalAuraLayout.current.pageMargin,
+    padding.calculateTopPadding() + 4.dp, LocalAuraLayout.current.pageMargin, padding.calculateBottomPadding() + bottom.dp)
 
 @Composable
 private fun DetailPage(page: String, model: AuraViewModel, back: () -> Unit, open: (String) -> Unit) {
     val title = when (page) {
         "settings" -> tr("settings", "设置")
         "theme" -> tr("theme_color", "主题与颜色")
-        "login" -> tr("netease_login", "网易云音乐登录")
+        "login" -> tr("netease", "网易云音乐")
         "about" -> tr("about", "关于")
         "donate" -> tr("donate", "捐赠")
+        "albums" -> tr("albums", "专辑")
+        "artists" -> tr("artists", "艺术家")
         "collection" -> model.collection?.title.orEmpty()
         "directory" -> model.directory?.title.orEmpty()
         else -> legalTitle(page)
@@ -275,6 +298,8 @@ private fun DetailPage(page: String, model: AuraViewModel, back: () -> Unit, ope
             "login" -> LoginPage(model, contentPadding)
             "about" -> AboutPage(model, contentPadding, open)
             "donate" -> DonatePage(contentPadding)
+            "albums" -> AlbumsArtistsPage(model, contentPadding, 0)
+            "artists" -> AlbumsArtistsPage(model, contentPadding, 1)
             "collection" -> CollectionPage(model, contentPadding)
             "directory" -> DirectoryPage(model, contentPadding)
             else -> LegalPage(page, contentPadding)
@@ -282,7 +307,7 @@ private fun DetailPage(page: String, model: AuraViewModel, back: () -> Unit, ope
     }
 }
 
-/** Original HyperChanger BottomBar geometry and search-exit animation; adapted only for four tabs. */
+/** Original HyperChanger BottomBar geometry and search-exit animation. */
 @Composable
 private fun AuraBottomBar(selected: MutableIntState, model: AuraViewModel, backdrop: com.kyant.backdrop.Backdrop,
     modifier: Modifier, searchMounted: Boolean, searchProgress: Float, onSearch: () -> Unit, onPositioned: (Rect) -> Unit) {
@@ -290,15 +315,16 @@ private fun AuraBottomBar(selected: MutableIntState, model: AuraViewModel, backd
     val liquid = settings.navigation == "liquid_glass"
     val view = LocalView.current
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val barHeight = (72f * .82f * .95f).dp
+    val barHeight = btm.m.auraplayer.ui.player.PlayerNavigationGeometry.barHeight
     val navExit = searchPhase(searchProgress, 0f, .65f)
-    val labels = listOf(tr("home", "首页"), tr("playlists", "歌单"), tr("songs", "歌曲"), tr("categories", "分类"))
+    val labels = listOf(tr("home", "首页"), tr("playlists", "歌单"), tr("songs", "歌曲"))
     BoxWithConstraints(modifier.fillMaxWidth().height(100.dp + navInset)) {
         val buttonSize = barHeight
         val gap = 8.dp
         // Reserve the same outer insets and gap as the original; measure the real pill width.
-        val barWidth = maxWidth - 28.dp - buttonSize - gap
-        val shift = -(buttonSize + gap) / 2
+        val externalButtons = buttonSize + gap
+        val barWidth = maxWidth - btm.m.auraplayer.ui.player.PlayerNavigationGeometry.outerInset * 2 - externalButtons
+        val shift = -externalButtons / 2
         val right = maxWidth / 2 + barWidth / 2 + shift
         val centerY = maxHeight - navInset - (8f * .82f).dp - barHeight / 2
         val widthFactor = if (liquid) barWidth.value / ((maxWidth.value - 28f) * .53f * .82f * 1.10f)
@@ -321,6 +347,7 @@ private fun AuraBottomBar(selected: MutableIntState, model: AuraViewModel, backd
                 tabIconContent = { index, color -> AuraTabIcon(index, color) })
         }
         if (!searchMounted) SearchRoundButton(backdrop, buttonSize, false, 0f, settings.navigation,
+            icon = appleMusicTabIcon(4),
             modifier = Modifier.offset(right + gap, centerY - buttonSize / 2).onGloballyPositioned { onPositioned(it.boundsInWindow()) },
             enabled = true, onClick = onSearch)
     }

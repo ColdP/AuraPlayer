@@ -104,7 +104,7 @@ fun HomePage(model: AuraViewModel, padding: PaddingValues, requestPermission: ()
                         .background(MiuixTheme.colorScheme.primary.copy(alpha = .12f))
                         .clickable { model.playNext(suggestions) }.padding(8.dp), contentAlignment = Alignment.CenterStart) {
                         Text(tr("new_music_mix", "新歌混烧"), color = MiuixTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold, fontSize = 28.sp)
+                            fontWeight = FontWeight.Bold, fontSize = 24.sp)
                     }
                     Column(Modifier.width(small), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         SuggestionCover(suggestions[0], model, Modifier.fillMaxWidth().aspectRatio(1f))
@@ -131,8 +131,8 @@ fun HomePage(model: AuraViewModel, padding: PaddingValues, requestPermission: ()
             item("favorites_content") {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     items(library.favorites, key = { it.key }) { song ->
-                        Column(Modifier.width(156.dp).clip(RoundedCornerShape(16.dp)).clickable { model.play(library.favorites, library.favorites.indexOf(song)) }) {
-                            Artwork(song.artwork, Modifier.fillMaxWidth().height(200.dp))
+                        Column(Modifier.width(LocalAuraLayout.current.homeTileWidth).clip(RoundedCornerShape(14.dp)).clickable { model.play(library.favorites, library.favorites.indexOf(song)) }) {
+                            Artwork(song.artwork, Modifier.fillMaxWidth().aspectRatio(.82f))
                             Text(song.title, Modifier.padding(12.dp), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MiuixTheme.textStyles.body1)
                         }
                     }
@@ -183,9 +183,10 @@ private fun HomeSectionHeader(title: String, onClick: () -> Unit) {
 
 @Composable
 private fun HomeCollection(collection: MusicCollection, artists: Boolean, onClick: () -> Unit) {
-    Column(Modifier.width(156.dp).clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick)) {
-        Artwork(collection.artwork, Modifier.size(156.dp), circular = artists)
-        Text(collection.title, Modifier.fillMaxWidth().padding(top = 12.dp, start = if (artists) 0.dp else 12.dp, end = if (artists) 0.dp else 12.dp, bottom = 8.dp),
+    val tile = LocalAuraLayout.current.homeTileWidth
+    Column(Modifier.width(tile).clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick)) {
+        Artwork(collection.artwork, Modifier.size(tile), circular = artists)
+            Text(collection.title, Modifier.fillMaxWidth().padding(top = 9.dp, start = if (artists) 0.dp else 9.dp, end = if (artists) 0.dp else 9.dp, bottom = 6.dp),
             maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = if (artists) TextAlign.Center else TextAlign.Start, style = MiuixTheme.textStyles.body1)
     }
 }
@@ -193,11 +194,12 @@ private fun HomeCollection(collection: MusicCollection, artists: Boolean, onClic
 @Composable
 fun DirectoryPage(model: AuraViewModel, padding: PaddingValues) {
     val directory = model.directory ?: return
+    val layout = LocalAuraLayout.current
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        items(directory.collections.chunked(2)) { pair ->
+        items(directory.collections.chunked(layout.gridColumns)) { pair ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
                 pair.forEach { collection -> HomeCollection(collection, directory.artists) { model.openCollection(collection) } }
-                if (pair.size == 1) Spacer(Modifier.width(156.dp))
+                repeat(layout.gridColumns - pair.size) { Spacer(Modifier.width(layout.homeTileWidth)) }
             }
         }
     }

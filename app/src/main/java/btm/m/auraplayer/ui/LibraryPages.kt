@@ -27,18 +27,18 @@ import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.*
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import btm.m.auraplayer.ui.navigation.appleMusicTabIcon
 import java.util.Calendar
 import java.util.UUID
 
 @Composable
 fun AuraTabIcon(index: Int, color: Color) {
     val icon = when (index) {
-        0 -> MiuixIcons.Regular.Home
-        1 -> MiuixIcons.Regular.Playlist
-        2 -> MiuixIcons.Regular.Music
-        else -> MiuixIcons.Regular.Backup
+        0 -> appleMusicTabIcon(0)
+        1 -> appleMusicTabIcon(1)
+        else -> appleMusicTabIcon(3)
     }
-    androidx.compose.foundation.Image(icon, null, Modifier.size(28.dp), colorFilter = ColorFilter.tint(color))
+    androidx.compose.foundation.Image(icon, null, Modifier.size(24.dp), colorFilter = ColorFilter.tint(color))
 }
 
 @Composable
@@ -54,21 +54,23 @@ private fun durationText(ms: Long): String = "${ms / 60000}:${(ms / 1000 % 60).t
 
 @Composable
 fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction: (() -> Unit)? = null) {
+    val layout = LocalAuraLayout.current
+    val artworkSize = if (layout.tablet) 48.dp else 44.dp
     val revision = model.history.revision
     val favorite = remember(song.key, revision) { song.key in model.history.favorites() }
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 9.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Artwork(song.artwork, Modifier.size(54.dp))
-        Column(Modifier.weight(1f).padding(horizontal = 13.dp)) {
-            Text(song.title.ifBlank { tr("unknown_title", "未命名歌曲") }, maxLines = 1, overflow = TextOverflow.Ellipsis,
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(vertical = 7.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Artwork(song.artwork, Modifier.size(artworkSize))
+        Column(Modifier.weight(1f).padding(horizontal = 11.dp)) {
+            Text(song.title.ifBlank { tr("unknown_title", "未命名歌曲") }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 15.sp,
                 fontWeight = if (model.current?.key == song.key) FontWeight.Bold else FontWeight.Medium,
                 color = if (model.current?.key == song.key) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface)
             Text("${song.artist} · ${song.album}", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
         }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(durationText(song.duration), style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-            IconButton(onClick = { if (onLongAction != null) onLongAction() else model.history.toggle(song) }, modifier = Modifier.size(38.dp)) {
-                Text(if (onLongAction != null) "−" else if (favorite) "♥" else "♡", color = MiuixTheme.colorScheme.primary, fontSize = 22.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(durationText(song.duration), style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            IconButton(onClick = { if (onLongAction != null) onLongAction() else model.history.toggle(song) }, modifier = Modifier.size(44.dp)) {
+                Text(if (onLongAction != null) "−" else if (favorite) "♥" else "♡", color = MiuixTheme.colorScheme.primary, fontSize = 19.sp)
             }
         }
     }
@@ -76,6 +78,21 @@ fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction:
 
 @Composable
 fun SectionTitle(title: String) { Text(title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold) }
+
+private fun LazyListScope.songRows(tracks: List<Song>, model: AuraViewModel, columns: Int,
+                                   onRemove: ((Song) -> Unit)? = null,
+                                   onPlay: ((Int) -> Unit)? = null) {
+    items(tracks.chunked(columns), key = { it.first().key }) { row ->
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            row.forEach { song ->
+                Box(Modifier.weight(1f)) {
+                    SongRow(song, model, { onPlay?.invoke(tracks.indexOf(song)) ?: model.play(tracks, tracks.indexOf(song)) }, onRemove?.let { { it(song) } })
+                }
+            }
+            repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+        }
+    }
+}
 
 @Composable
 internal fun PermissionCard(onClick: () -> Unit) {
@@ -88,17 +105,22 @@ internal fun PermissionCard(onClick: () -> Unit) {
 }
 
 @Composable
-fun SongsPage(model: AuraViewModel, padding: PaddingValues, requestPermission: () -> Unit) {
+fun SongsPage(model: AuraViewModel, padding: PaddingValues, requestPermission: () -> Unit,
+              onOpenSecondary: (Int) -> Unit = {}) {
+    val songs = model.sortedSongs
+    val columns = LocalAuraLayout.current.listColumns
     LazyColumn(pageContentModifier(), contentPadding = padding) {
-        item {
-            Row(Modifier.fillMaxWidth().padding(bottom = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(if (model.scanning) tr("scanning", "正在扫描…") else "${model.songs.size} ${tr("song_count", "首歌曲")}", color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                GlassDialogButton({ model.play(model.songs, shuffle = true) }, enabled = model.songs.isNotEmpty()) { Text(tr("shuffle", "随机播放")) }
+        item("song_categories") {
+            SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+                Column {
+                    Preference(tr("albums", "专辑"), onClick = { onOpenSecondary(0) })
+                    Preference(tr("artists", "艺术家"), onClick = { onOpenSecondary(1) })
+                }
             }
         }
         if (!model.hasPermission) item { PermissionCard(requestPermission) }
         else if (model.songs.isEmpty()) item { EmptyState(tr("no_songs", "没有找到歌曲"), tr("check_filters", "请检查音乐权限、文件夹与筛选设置"), tr("rescan", "重新扫描"), { model.refreshLibrary() }) }
-        items(model.songs, key = { it.key }) { song -> SongRow(song, model, { model.play(model.songs, model.songs.indexOf(song)) }) }
+        songRows(songs, model, columns)
     }
 }
 
@@ -122,12 +144,13 @@ fun AlbumsArtistsPage(model: AuraViewModel, padding: PaddingValues, tab: Int) {
             MusicCollection("artist:$key", tracks.first().artist, "${tracks.size} ${tr("song_count", "首歌曲")}", tracks, tracks.first().artwork)
         }.sortedBy { it.title }
     }
-    LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(22.dp)) {
+    val layout = LocalAuraLayout.current
+    LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (collections.isEmpty()) item { EmptyState(tr("no_collections", "暂无内容"), tr("library_content_hint", "本地音乐会自动归类到这里")) }
-        items(collections.chunked(2)) { pair ->
-            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+        items(collections.chunked(layout.gridColumns)) { pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(if (layout.tablet) 12.dp else 14.dp)) {
                 pair.forEach { collection -> CollectionTile(collection.title, collection.subtitle, collection.artwork, Modifier.weight(1f), tab == 1) { model.openCollection(collection) } }
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
+                repeat(layout.gridColumns - pair.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -136,30 +159,34 @@ fun AlbumsArtistsPage(model: AuraViewModel, padding: PaddingValues, tab: Int) {
 @Composable
 fun CollectionPage(model: AuraViewModel, padding: PaddingValues) {
     val collection = model.collection ?: return
+    val cloud = model.cloudCollection
     var addToPlaylist by remember { mutableStateOf(false) }
     val revision = model.history.revision
     val localPlaylist = remember(collection.key, revision) { model.history.playlists().find { "playlist:${it.id}" == collection.key } }
     val visible = remember(model.songs) { model.songs.map { it.key }.toSet() }
     val tracks = if (localPlaylist != null) model.songs.filter { it.key in localPlaylist.songKeys }
-        else collection.songs.filter { it.cloud || it.key in visible }
+        else cloud?.songs ?: collection.songs.filter { it.cloud || it.key in visible }
+    val columns = LocalAuraLayout.current.listColumns
     LazyColumn(pageContentModifier(), contentPadding = padding) {
         item {
             Row(Modifier.fillMaxWidth().padding(bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                 Artwork(collection.artwork.ifBlank { tracks.firstOrNull()?.artwork.orEmpty() }, Modifier.size(90.dp))
                 Column(Modifier.padding(start = 18.dp)) {
-                    Text("${tracks.size} ${tr("song_count", "首歌曲")}", color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    Text("${cloud?.total ?: tracks.size} ${tr("song_count", "首歌曲")}", color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 12.dp)) {
-                        GlassDialogButton({ model.play(tracks) }, enabled = tracks.isNotEmpty(), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("play_all", "播放全部")) }
+                        GlassDialogButton({ model.playCollection(tracks) }, enabled = tracks.isNotEmpty(), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("play_all", "播放全部")) }
                         if (localPlaylist != null) GlassDialogButton({ addToPlaylist = true }) { Text(tr("add", "添加")) }
+                        if (cloud != null) GlassDialogButton(model::refreshCloudSongs, enabled = !cloud.loading) { Text(tr("refresh", "刷新")) }
                     }
                 }
             }
         }
-        if (tracks.isEmpty()) item { EmptyState(tr("no_songs", "没有找到歌曲")) }
-        items(tracks, key = { it.key }) { song ->
-            SongRow(song, model, { model.play(tracks, tracks.indexOf(song)) }, onLongAction = localPlaylist?.let { playlist -> ({
+        if (tracks.isEmpty() && (cloud == null || !cloud.loading && !cloud.failed && !cloud.hasMore)) item { EmptyState(tr("no_songs", "没有找到歌曲")) }
+        songRows(tracks, model, columns, onRemove = localPlaylist?.let { playlist -> { song ->
                 model.history.savePlaylists(model.history.playlists().map { if (it.id == playlist.id) it.copy(songKeys = it.songKeys - song.key) else it })
-            }) })
+        } }, onPlay = { model.playCollection(tracks, it) })
+        if (cloud != null && (cloud.hasMore || cloud.loading || cloud.failed)) item("cloud_song_paging") {
+            CloudPagingFooter(cloud.loading, cloud.failed, model::loadMoreCloudSongs)
         }
     }
     if (addToPlaylist && localPlaylist != null) PlaylistSongPicker(model, localPlaylist) { addToPlaylist = false }
@@ -175,13 +202,12 @@ fun PlaylistsPage(model: AuraViewModel, padding: PaddingValues, tab: Int, login:
     var deletion by remember { mutableStateOf<LocalPlaylist?>(null) }
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (tab == 0) {
-            item { GlassDialogButton({ creating = true; name = "" }, Modifier.fillMaxWidth()) { Text(tr("new_playlist", "新建歌单")) } }
             items(playlists, key = { it.id }) { playlist ->
                 val tracks = model.songs.filter { it.key in playlist.songKeys }
                 SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                     Row(Modifier.fillMaxWidth().clickable { model.openCollection(MusicCollection("playlist:${playlist.id}", playlist.name, "", tracks)) }
-                        .padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Artwork(tracks.firstOrNull()?.artwork.orEmpty(), Modifier.size(60.dp))
+                        .padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Artwork(tracks.firstOrNull()?.artwork.orEmpty(), Modifier.size(50.dp))
                         Column(Modifier.weight(1f).padding(start = 14.dp)) {
                             Text(playlist.name, fontWeight = FontWeight.SemiBold)
                             Text("${tracks.size} ${tr("song_count", "首歌曲")}", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
@@ -193,25 +219,32 @@ fun PlaylistsPage(model: AuraViewModel, padding: PaddingValues, tab: Int, login:
                     }
                 }
             }
-            if (playlists.isEmpty()) item { EmptyState(tr("playlist_empty", "创建第一张歌单"), tr("playlist_empty_summary", "把喜欢的本地音乐收在一起")) }
+            item("create_playlist") {
+                SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+                    Preference(tr("new_playlist", "新建歌单")) { creating = true; name = "" }
+                }
+            }
         } else {
             item {
                 SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                    Preference(model.account?.nickname ?: tr("netease_login", "网易云音乐登录"),
+                    Preference(model.account?.nickname ?: tr("netease", "网易云音乐"),
                         if (model.cloudBusy) tr("loading", "正在加载…") else if (model.account == null) tr("login_to_playlists", "登录后查看你的网易云歌单") else tr("account_manage", "管理账号与连接"), onClick = login)
                 }
             }
             items(model.cloudPlaylists, key = { it.id }) { playlist ->
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable(enabled = !model.cloudBusy) { model.openCloudPlaylist(playlist) }
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable { model.openCloudPlaylist(playlist) }
                     .padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Artwork(playlist.artwork, Modifier.size(68.dp))
+                    Artwork(playlist.artwork, Modifier.size(52.dp))
                     Column(Modifier.padding(start = 16.dp)) {
                         Text(playlist.name, fontWeight = FontWeight.SemiBold)
                         Text("${playlist.count} ${tr("song_count", "首歌曲")}", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     }
                 }
             }
-            if (model.account != null && model.cloudPlaylists.isEmpty() && !model.cloudBusy) item { EmptyState(tr("no_cloud_playlists", "暂无网易云歌单"), action = tr("refresh", "刷新"), onAction = model::refreshCloud) }
+            if (model.account != null && (model.cloudPlaylistsHasMore || model.cloudPlaylistsLoading || model.cloudPlaylistsFailed)) item("cloud_playlist_paging") {
+                CloudPagingFooter(model.cloudPlaylistsLoading, model.cloudPlaylistsFailed, model::loadMoreCloudPlaylists)
+            }
+            if (model.account != null && model.cloudPlaylists.isEmpty() && !model.cloudBusy && !model.cloudPlaylistsLoading && !model.cloudPlaylistsFailed) item { EmptyState(tr("no_cloud_playlists", "暂无网易云歌单"), action = tr("refresh", "刷新"), onAction = model::refreshCloud) }
         }
     }
     WindowDialog(creating, title = tr("new_playlist", "新建歌单"), onDismissRequest = { creating = false }) {
@@ -228,6 +261,15 @@ fun PlaylistsPage(model: AuraViewModel, padding: PaddingValues, tab: Int, login:
         }
     }
     editing?.let { PlaylistSongPicker(model, it) { editing = null } }
+}
+
+@Composable
+private fun CloudPagingFooter(loading: Boolean, failed: Boolean, load: () -> Unit) {
+    if (!loading && !failed) LaunchedEffect(Unit) { load() }
+    Box(Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
+        if (failed) GlassDialogButton(load) { Text(tr("cloud_load_retry", "加载失败，点击重试")) }
+        else Text(tr("loading", "正在加载…"), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+    }
 }
 
 @Composable

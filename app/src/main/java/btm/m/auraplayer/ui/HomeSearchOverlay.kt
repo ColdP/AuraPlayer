@@ -29,6 +29,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -139,7 +140,7 @@ internal fun HomeSearchOverlay(
         val targetTop = maxHeight - cornerInset - buttonSize
         val sourceLeft = with(density) { source.center.x.toDp() } - buttonSize / 2
         val sourceTop = with(density) { source.center.y.toDp() } - buttonSize / 2
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .10f * progress))
+        Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface.copy(alpha = .26f * progress))
             .clickable(interactionSource = null, indication = null, onClick = onDismiss)
             .clearAndSetSemantics {})
         // The scroll viewport starts at the screen top. Padding sets the initial position;
@@ -336,6 +337,8 @@ internal fun SearchRoundButton(
     primary: Boolean,
     closeProgress: Float,
     navigationStyle: String,
+    icon: ImageVector? = null,
+    iconRes: Int? = null,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     motionAlpha: Float = 1f,
@@ -420,8 +423,14 @@ internal fun SearchRoundButton(
                 .clickable(enabled = enabled, interactionSource = interactions, indication = null, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(MiuixIcons.Regular.Search, if (closeProgress < .5f) tr("category_search_open", "搜索音乐") else null,
-                Modifier.size(24.dp).graphicsLayer { alpha = 1f - closeProgress }.contentBlur(iconBlur.dp), tint = iconColor)
+            if (iconRes != null) {
+                androidx.compose.foundation.Image(painterResource(iconRes), tr("next_track", "下一曲"),
+                    Modifier.size(24.dp).graphicsLayer { alpha = 1f - closeProgress }.contentBlur(iconBlur.dp),
+                    colorFilter = ColorFilter.tint(iconColor))
+            } else {
+                Icon(icon ?: MiuixIcons.Regular.Search, if (closeProgress < .5f) tr("category_search_open", "搜索音乐") else null,
+                    Modifier.size(24.dp).graphicsLayer { alpha = 1f - closeProgress }.contentBlur(iconBlur.dp), tint = iconColor)
+            }
             Icon(MiuixIcons.Regular.Close, if (closeProgress >= .5f) tr("category_search_close", "关闭搜索") else null,
                 Modifier.size(24.dp).graphicsLayer { alpha = closeProgress }.contentBlur(iconBlur.dp), tint = iconColor)
         }

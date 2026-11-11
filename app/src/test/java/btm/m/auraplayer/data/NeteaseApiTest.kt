@@ -42,15 +42,32 @@ class NeteaseApiTest {
         assertFalse(form.contains("password"))
         assertFalse(form.contains("secret-session"))
     }
-    @Test fun paginatesPlaylistsUntilMoreIsFalse() = runBlocking {
+    @Test fun loadsOnePlaylistPageAtATimeAndKeepsServerOffset() = runBlocking {
         reply("""{"code":200,"more":true,"playlist":[{"id":1,"name":"One","trackCount":2}]}""")
         reply("""{"code":200,"more":false,"playlist":[{"id":2,"name":"Two","trackCount":3}]}""")
-        assertEquals(listOf(1L, 2L), api.playlists(42).map { it.id })
+        val firstPage = api.playlists(42)
+        assertEquals(listOf(1L), firstPage.items.map { it.id })
+        assertTrue(firstPage.hasMore)
+        assertEquals(1, server.requestCount)
+        val secondPage = api.playlists(42, firstPage.nextOffset)
+        assertEquals(listOf(2L), secondPage.items.map { it.id })
+        assertFalse(secondPage.hasMore)
         val first = server.takeRequest().body.readUtf8()
         val second = server.takeRequest().body.readUtf8()
         assertTrue(first.contains("offset=0"))
+        assertTrue(first.contains("limit=30"))
         assertTrue(second.contains("offset=1"))
         assertTrue(first.contains("cookie=MUSIC_U%3Dsecret-session"))
+    }
+    @Test fun loadsOnlyOneSongSliceAndDoesNotSkipUnavailableTrackOffsets() = runBlocking {
+        reply("""{"code":200,"songs":[{"id":2,"name":"Two"}],"nextOffset":50,"total":120,"more":true}""")
+        val page = api.playlistSongs(10)
+        assertEquals(listOf(2L), page.items.map { it.id })
+        assertEquals(50, page.nextOffset)
+        assertEquals(120, page.total)
+        assertTrue(page.hasMore)
+        assertEquals(1, server.requestCount)
+        assertTrue(server.takeRequest().body.readUtf8().contains("limit=50"))
     }
     @Test fun streamResolutionKeepsRightsRestrictionAndRejectsNullUrl() {
         reply("""{"code":200,"data":[{"id":1,"url":null}]}""")
@@ -88,4 +105,19 @@ class NeteaseApiTest {
         assertEquals("http://192.168.1.2:3000", NeteaseApi.normalizeEndpoint("http://192.168.1.2:3000/"))
         assertEquals("https://example.org/api", NeteaseApi.normalizeEndpoint("https://example.org/api/"))
     }
+    @Test fun qualityDialogContainsOnlyLevelsReturnedByTheSong() = runBlocking {
+        reply("""{"code":200,"data":{"l":{"br":128000},"h":{"br":320000},"sq":{"br":797831},"hr":null,"vi":{"br":832042},"jm":{"br":4460284}}}""")
+        val levels = api.availableQualities(347230).map { it.level }
+        assertEquals(listOf("standard", "exhigh", "lossless", "vivid", "jymaster"), levels)
+        assertEquals("/api/song/music/detail", server.takeRequest().path)
+    }
+    @Test fun qualityRequestPreservesRequestedLevelAndReportsActualFallback() {
+        reply("""{"code":200,"data":[{"id":42,"url":"http://example.org/song.mp3","level":"standard","type":"mp3","br":128000,"sr":44100}]}""")
+        assertEquals("https://example.org/song.mp3", api.resolveBlocking(42, "hires"))
+        assertTrue(server.takeRequest().body.readUtf8().contains("level=hires"))
+        val actual = btm.m.auraplayer.playback.PlaybackStreams.records[42]!!
+        assertEquals("standard", actual.level)
+        assertEquals(128000, actual.bitrate)
+    }
+
 }

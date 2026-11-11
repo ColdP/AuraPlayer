@@ -50,7 +50,7 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
         }
         item {
             Group(tr("settings", "设置")) {
-                Preference(tr("netease_login", "网易云音乐登录"), model.account?.nickname ?: tr("login_summary", "使用手机号验证码登录")) { open("login") }
+                Preference(tr("netease", "网易云音乐"), model.account?.nickname ?: tr("login_summary", "通过网易云官方页面登录")) { open("login") }
                 Preference(tr("blacklist", "黑名单"), if (value.whitelist) tr("blacklist_disabled", "白名单已开启，黑名单暂不生效") else
                     "${value.blacklist.size} ${tr("folder_count", "个文件夹")}", enabled = !value.whitelist) { blacklist = true }
                 SwitchPreference(tr("whitelist", "白名单"), tr("whitelist_summary", "仅显示 Music 目录下的音乐"), value.whitelist) { checked -> model.updateSettings { it.copy(whitelist = checked) } }
@@ -188,15 +188,20 @@ fun LoginPage(model: AuraViewModel, padding: PaddingValues) {
     var captcha by remember { mutableStateOf("") }
     var confirmLogout by remember { mutableStateOf(false) }
     val account = model.account
+    var advanced by rememberSaveable { mutableStateOf(false) }
+    var showingWeb by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(account) { if (account != null) showingWeb = false }
+    androidx.activity.compose.BackHandler(showingWeb) { showingWeb = false }
+    if (showingWeb) {
+        OfficialLoginView(padding, model.cloudBusy, model::completeOfficialLogin)
+        return
+    }
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item {
-            Group(tr("connection", "连接")) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TextField(endpoint, { endpoint = it }, label = tr("api_address", "网易云 API 服务地址"), singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth())
-                    GlassDialogButton({ model.configureApi(endpoint) }, Modifier.fillMaxWidth(), enabled = endpoint.isNotBlank() && !model.cloudBusy) { Text(tr("save_address", "保存服务地址")) }
-                    Text(tr("api_hint", "连接你信任的网易云 API 服务，支持 NeteaseCloudMusicApiEnhanced 接口。"), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    Preference(tr("api_project", "查看 API 开源项目与部署说明")) { openUrl(context, "https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced") }
+        if (account == null) item {
+            SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+                Preference(tr("official_login", "网易云音乐官方登录"), tr("official_login_summary", "直接登录，无需配置服务器或 API 地址")) {
+                    if (model.app.endpoint.isNotBlank()) model.useOfficialService()
+                    showingWeb = true
                 }
             }
         }
@@ -207,7 +212,7 @@ fun LoginPage(model: AuraViewModel, padding: PaddingValues) {
                     Column(Modifier.padding(start = 16.dp)) { Text(account.nickname); Text("UID ${account.userId}", style = MiuixTheme.textStyles.body2) }
                 }
                 Preference(tr("logout", "退出登录")) { confirmLogout = true }
-            } else Group(tr("phone_login", "手机号验证码登录")) {
+            } else if (model.app.endpoint.isNotBlank()) Group(tr("phone_login", "手机号验证码登录")) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     TextField(country, { country = it.filter(Char::isDigit).take(4) }, label = tr("country_code", "国际区号"), singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth())
@@ -222,6 +227,29 @@ fun LoginPage(model: AuraViewModel, padding: PaddingValues) {
                     GlassDialogButton({ model.login(phone, country, captcha); captcha = "" }, Modifier.fillMaxWidth(),
                         enabled = !model.cloudBusy && phone.length >= 5 && captcha.length >= 4 && country.isNotBlank() && model.app.endpoint.isNotBlank(),
                         colors = ButtonDefaults.buttonColorsPrimary()) { Text(if (model.cloudBusy) tr("connecting", "正在连接…") else tr("login", "登录")) }
+                }
+            }
+        }
+        item {
+            SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+                CloudCachePreference(model)
+            }
+        }
+        item {
+            SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+                Preference(tr("advanced_connection", "高级连接设置"), tr("advanced_connection_summary", "可选：使用自建 API 服务")) { advanced = !advanced }
+            }
+        }
+        if (advanced) item {
+            Group(tr("connection", "连接")) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (model.app.endpoint.isNotBlank()) Preference(tr("use_official", "使用网易云官方连接")) {
+                        model.useOfficialService(); endpoint = ""; advanced = false
+                    }
+                    TextField(endpoint, { endpoint = it }, label = tr("api_address", "网易云 API 服务地址"), singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth())
+                    GlassDialogButton({ model.configureApi(endpoint) }, Modifier.fillMaxWidth(), enabled = endpoint.isNotBlank() && !model.cloudBusy) { Text(tr("save_address", "保存服务地址")) }
+                    Preference(tr("api_project", "查看 API 开源项目与部署说明")) { openUrl(context, "https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced") }
                 }
             }
         }

@@ -329,67 +329,17 @@ internal fun GlassToolbarIconButton(
     iconTranslationX: Dp = 0.dp,
     onClick: () -> Unit,
 ) {
-    val animationScope = rememberCoroutineScope()
-    val drag = remember(animationScope) {
-        DampedDragAnimation(
-            animationScope = animationScope,
-            initialValue = 0f,
-            valueRange = -1f..1f,
-            visibilityThreshold = .001f,
-            initialScale = 1f,
-            pressedScale = 1.08f,
-            onDragStopped = { animateToValue(0f) },
-            onDrag = { size, amount -> updateValue((targetValue + amount.x / size.width.coerceAtLeast(1)).coerceIn(-1f, 1f)) },
-        )
-    }
-    val highlight = remember(animationScope) {
-        InteractiveHighlight(animationScope) { size, offset ->
-            androidx.compose.ui.geometry.Offset(offset.x.coerceIn(0f, size.width), offset.y.coerceIn(0f, size.height))
-        }
-    }
-    val glassTint = MiuixTheme.colorScheme.surface.copy(alpha = TOOLBAR_GLASS_SURFACE_ALPHA)
-    val iconColor = MiuixTheme.colorScheme.onSurface
     val glassAlpha by animateFloatAsState(collapsedFraction, tween(180), label = "toolbarButtonGlassAlpha")
-    Box(
-        Modifier.padding(containerPadding)
-            .then(Modifier.size(46.dp))
-            .then(highlight.gestureModifier)
-            .then(drag.modifier)
-            .clickable(interactionSource = null, indication = null, onClick = onClick),
-        contentAlignment = Alignment.Center,
+    val iconColor = MiuixTheme.colorScheme.onSurface
+    InteractiveToolbarGlass(
+        modifier = Modifier.padding(containerPadding).size(46.dp),
+        backdrop = backdrop,
+        tint = MiuixTheme.colorScheme.surface.copy(alpha = TOOLBAR_GLASS_SURFACE_ALPHA),
+        glassAlpha = glassAlpha,
+        onClick = onClick,
     ) {
-        Box(
-            Modifier.matchParentSize()
-                .graphicsLayer { alpha = glassAlpha }
-                .then(if (backdrop != null) Modifier.drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { CircleShape },
-                    effects = {
-                        vibrancy()
-                        blur(TOOLBAR_GLASS_BLUR_RADIUS.toPx())
-                        toolbarGlassLens(drag.pressProgress)
-                    },
-                    highlight = { toolbarGlassHighlight(drag.pressProgress) },
-                    shadow = { Shadow.Default.copy(radius = 5.dp, color = ComposeColor.Black, alpha = .24f) },
-                    innerShadow = null,
-                    layerBlock = {
-                        scaleX = drag.scaleX
-                        scaleY = drag.scaleY
-                        val velocity = abs(drag.velocity.coerceIn(-1f, 1f))
-                        scaleX *= 1f + velocity * .12f
-                        scaleY /= 1f + velocity * .08f
-                        translationX = drag.value * 5.dp.toPx()
-                    },
-                    onDrawSurface = { drawCircle(glassTint) },
-                ) else Modifier.background(glassTint, CircleShape))
-                .then(highlight.modifier),
-        ) {
-        }
-        Image(
-            icon,
-            description,
+        Image(icon, description,
             Modifier.size(22.dp).graphicsLayer { translationX = iconTranslationX.toPx() },
-            colorFilter = ColorFilter.tint(iconColor),
-        )
+            colorFilter = ColorFilter.tint(iconColor))
     }
 }

@@ -50,12 +50,12 @@ fun Group(title: String, content: @Composable ColumnScope.() -> Unit) {
 
 @Composable
 fun Preference(title: String, summary: String? = null, enabled: Boolean = true, onClick: () -> Unit) {
-    top.yukonga.miuix.kmp.preference.ArrowPreference(title = title, summary = summary, enabled = enabled, onClick = onClick)
+    top.yukonga.miuix.kmp.preference.ArrowPreference(title = title, summary = summary, enabled = enabled, onClick = onClick, insideMargin = CompactPreferencePadding)
 }
 
 @Composable
 fun SwitchPreference(title: String, summary: String? = null, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    top.yukonga.miuix.kmp.preference.SwitchPreference(checked = checked, onCheckedChange = onCheckedChange, title = title, summary = summary)
+    top.yukonga.miuix.kmp.preference.SwitchPreference(checked = checked, onCheckedChange = onCheckedChange, title = title, summary = summary, insideMargin = CompactPreferencePadding)
 }
 
 @Composable
