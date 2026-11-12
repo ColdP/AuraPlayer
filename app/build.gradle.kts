@@ -26,6 +26,7 @@ android {
     }
 }
 dependencies {
+    implementation("com.github.Adonai:jaudiotagger:2.3.15")
     implementation("com.google.zxing:core:3.5.3")
     implementation("androidx.work:work-runtime-ktx:2.11.0")
     implementation("com.mocharealm.accompanist:lyrics-core:0.4.7")

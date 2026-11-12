@@ -67,17 +67,14 @@ class PlayerLyricView(context: Context) : View(context) {
     private var jumped = false
     private var primeAppearance = true
     var onSeek: (Long) -> Unit = {}
-    var hdrEnabled: Boolean = false
-    private val extended = ColorSpace.get(ColorSpace.Named.EXTENDED_SRGB)
     private val colors = object : LyricWordRenderer.Colors {
         override fun ink(alpha: Float, emphasis: Float, backing: Boolean) = Color.pack(1f, 1f, 1f, alpha.coerceIn(0f, 1f))
-        override fun white(alpha: Float, gain: Float) = if (hdrEnabled) Color.pack(gain, gain, gain, alpha.coerceIn(0f, 1f), extended)
-            else Color.pack(1f, 1f, 1f, alpha.coerceIn(0f, 1f))
-        override fun glowGain(glow: Float) = if (hdrEnabled) 1f + 2f * glow else 1f
+        override fun white(alpha: Float, gain: Float) = Color.pack(1f, 1f, 1f, alpha.coerceIn(0f, 1f))
+        override fun glowGain(glow: Float) = 1f
     }
 
     override fun onAttachedToWindow() { super.onAttachedToWindow(); scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate); rebuild(); invalidate() }
-    override fun onDetachedFromWindow() { scope?.cancel(); scope = null; pending.clear(); super.onDetachedFromWindow() }
+    override fun onDetachedFromWindow() { keepScreenOn = false; scope?.cancel(); scope = null; pending.clear(); super.onDetachedFromWindow() }
     fun submit(lines: List<LyricLine>, translation: Boolean, pronunciation: Boolean, textScale: Float = 1f) {
         val mode = (if (translation) 1 else 0) or (if (pronunciation) 2 else 0)
         val scale = textScale.coerceIn(.5f, 1.5f)
@@ -90,11 +87,6 @@ class PlayerLyricView(context: Context) : View(context) {
         if (abs(ms - expected) > 800) jumped = true
         playhead = ms; sampledAt = now; playing = isPlaying
         invalidate()
-    }
-    fun hdrHighlightWanted(): Boolean {
-        if (!playing || source.isEmpty() || dragging || SystemClock.uptimeMillis() < manualUntil) return false
-        val ms = (playhead + SystemClock.uptimeMillis() - sampledAt).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        return source.any { line -> LyricGlow.arm(line, ms, LyricWordRenderer.GLOW_MIN_MS, 250, LyricWordRenderer.GLOW_TAIL_MS) }
     }
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -113,8 +105,7 @@ class PlayerLyricView(context: Context) : View(context) {
         if (width <= 0) return
         // Reserve a stable timestamp gutter; browsing never reflows or clips the lyric text.
         val lines = requestedSource; val mode = below; val scale = lyricScale
-        // HDR moves the same view between parents. Its rows and masks remain valid at the
-        // same width; rebuilding them would restart every row's appearance mid-transition.
+        // Retain the layout and appearance when the same content is attached again unchanged.
         if (source === lines && builtWidth == width && builtMode == mode && builtScale == scale) return
         val gen = ++generation
         val targetWidth = width

@@ -90,6 +90,9 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
             } else action(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, !song.cloud || song.artistId > 0) {
                 dismiss(); model.openSongArtist(song); closePlayer()
             }
+            if (!song.cloud) action(MiuixIcons.Regular.File, tr("tag_editor", "标签编辑器")) {
+                dismiss(); closePlayer(); openPage(tagEditorRoute(song))
+            }
             divider()
             SheetDropdown(MiuixIcons.Regular.Timer, tr("sleep_timer", "定时关闭"),
                 if (model.sleepRemaining > 0) timerText(model.sleepRemaining) else tr("timer_off", "未开启"), menuBackdrop,

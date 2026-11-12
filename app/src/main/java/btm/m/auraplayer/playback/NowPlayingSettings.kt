@@ -17,7 +17,6 @@ data class NowPlayingConfig(
     val showVolume: Boolean = true,
     val openFromNotification: Boolean = true,
     val keepLyricsAwake: Boolean = false,
-    val lyricHdr: Boolean = false,
     val showAudioInfo: Boolean = true,
     val swipeTracks: Boolean = true,
     val immersiveLyrics: Boolean = false,
@@ -46,7 +45,7 @@ internal object NowPlayingCodec {
         put("theme", c.theme.name); put("blur", c.blur); put("weather", c.weather.name)
         put("coverAnimation", c.coverAnimation.name); put("showVolume", c.showVolume)
         put("openFromNotification", c.openFromNotification); put("keepLyricsAwake", c.keepLyricsAwake)
-        put("lyricHdr", c.lyricHdr); put("showAudioInfo", c.showAudioInfo); put("swipeTracks", c.swipeTracks)
+        put("showAudioInfo", c.showAudioInfo); put("swipeTracks", c.swipeTracks)
         put("immersiveLyrics", c.immersiveLyrics); put("immersiveSeconds", c.immersiveSeconds)
         put("fullscreenGlass", c.fullscreenGlass)
     }.toString()
@@ -60,7 +59,6 @@ internal object NowPlayingCodec {
             showVolume = j.optBoolean("showVolume", defaults.showVolume),
             openFromNotification = j.optBoolean("openFromNotification", defaults.openFromNotification),
             keepLyricsAwake = j.optBoolean("keepLyricsAwake", defaults.keepLyricsAwake),
-            lyricHdr = j.optBoolean("lyricHdr", defaults.lyricHdr),
             showAudioInfo = j.optBoolean("showAudioInfo", defaults.showAudioInfo),
             swipeTracks = j.optBoolean("swipeTracks", defaults.swipeTracks),
             immersiveLyrics = j.optBoolean("immersiveLyrics", defaults.immersiveLyrics),

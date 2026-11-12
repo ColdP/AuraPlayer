@@ -17,6 +17,7 @@ class LyricsRepository(private val context: Context) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<LyricLine>>) = size > 24
     }
     private data class Answer(val rank: Int, val lines: List<LyricLine>)
+    fun invalidate(songKey: String) { cache.remove(songKey) }
 
     fun lyrics(song: Song): Flow<List<LyricLine>> = flow {
         cache[song.key]?.let { emit(it); return@flow }
@@ -124,6 +125,11 @@ class LyricsRepository(private val context: Context) {
 
     private fun local(song: Song): List<LyricLine> {
         if (song.cloud) return emptyList()
+        val embedded = runCatching { btm.m.auraplayer.tags.LocalAudioTags.embeddedLyrics(context, song) }.getOrDefault("")
+        if (embedded.isNotBlank()) {
+            val parsed = LyricParse.splitInlineTranslations(LyricParse.parse(embedded))
+            if (parsed.isNotEmpty()) return parsed
+        }
         return runCatching {
             val uri = Uri.parse(song.uri)
             val resolver = context.contentResolver

@@ -193,7 +193,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                         animate = open && foreground && !gesturing,
                         modifier = Modifier.fillMaxSize().graphicsLayer { alpha = e }.layerBackdrop(playerBackdrop).miuixLayerBackdrop(miuixBackdrop))
                     FullPlayer(model, lyricProgress.value, expansion = e, miniColor = miniColor, miniSwipe = miniSwipeOffset.value + miniSwipeDrag,
-                        appearance = appearance, active = open && foreground, hdrAllowed = !actionsBusy && !lyricMenuOpen,
+                        appearance = appearance, active = open && foreground, controlsUnobscured = !actionsBusy && !lyricMenuOpen,
                         onExpand = { onOpenChange(true) }, onClose = { onOpenChange(false) },
                         swipeEnabled = open && !settlingSwipe && !lyricMenuOpen && !actionsBusy,
                         onSwipeStart = { gesturing = true; scope.launch { expansion.stop() } },
@@ -293,7 +293,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
 
 @Composable
 private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
-                       appearance: NowPlayingConfig, active: Boolean, hdrAllowed: Boolean,
+                       appearance: NowPlayingConfig, active: Boolean, controlsUnobscured: Boolean,
                        miniColor: Color, miniSwipe: Float, onExpand: () -> Unit,
                        swipeEnabled: Boolean, onSwipeStart: () -> Unit, onSwipeDelta: (Float) -> Unit,
                        onSwipeRelease: (Float) -> Unit, onSwipeCancel: () -> Unit,
@@ -314,7 +314,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
     var touchPoint by remember { mutableStateOf(Offset.Zero) }
     var immersive by remember { mutableStateOf(false) }
     var qualityMenuOpen by remember { mutableStateOf(false) }
-    val immersionEligible = active && lyricsOpen && !queueOpen && appearance.immersiveLyrics && hdrAllowed && !qualityMenuOpen && p > .999f
+    val immersionEligible = active && lyricsOpen && !queueOpen && appearance.immersiveLyrics && controlsUnobscured && !qualityMenuOpen && p > .999f
     LaunchedEffect(immersionEligible, appearance.immersiveSeconds, lastInteraction, touching) {
         immersive = false
         if (immersionEligible && !touching) {
@@ -412,12 +412,11 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             .blur(((1f - p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp)) {
                 if (model.lyrics.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(if (model.lyricsLoading) tr("lyrics_loading", "正在获取歌词…") else tr("lyrics_empty", "暂无歌词"), color = Color.White.copy(alpha = .55f), fontSize = 20.sp)
-                } else AndroidView(factory = { btm.m.auraplayer.lyrics.PlayerLyricHost(it) }, update = {
-                    it.lyrics.submit(model.lyrics, model.showTranslation, model.showPronunciation, model.lyricSize.scale)
-                    it.lyrics.position(model.position, model.playing)
-                    it.lyrics.onSeek = model::seekTo
-                    it.configure(hdr = appearance.lyricHdr && hdrAllowed && !qualityMenuOpen && active && p > .999f && queueBlend < .001f && expansion > .999f,
-                        keepAwake = appearance.keepLyricsAwake && active && lyricsOpen)
+                } else AndroidView(factory = { PlayerLyricView(it) }, update = {
+                    it.submit(model.lyrics, model.showTranslation, model.showPronunciation, model.lyricSize.scale)
+                    it.position(model.position, model.playing)
+                    it.onSeek = model::seekTo
+                    it.keepScreenOn = appearance.keepLyricsAwake && active && lyricsOpen
                 }, modifier = Modifier.fillMaxSize())
         }
         }
@@ -515,8 +514,11 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         val compactTextX = smallX + small + 12.dp * PlayerPaddingScale
         val expandedTextX = if (fullscreen) fullCard.left + 16.dp else coverX
         val fullTextX = expandedTextX + (compactTextX - expandedTextX) * p
+        // Only the fullscreen controls card uses smaller metadata. Restore the normal
+        // typography continuously as it morphs into lyrics/queue or the mini player.
+        val metadataSize = if (fullscreen) 1f - .12f * e * (1f - p) else 1f
         var textHeight by remember { mutableIntStateOf(0) }
-        val measuredTextHeight = with(density) { if (textHeight > 0) textHeight.toDp() else 46.sp.toDp() }
+        val measuredTextHeight = with(density) { if (textHeight > 0) textHeight.toDp() else (46.sp * metadataSize).toDp() }
         val compactTextY = smallY + (small - measuredTextHeight * .78f) / 2
         val fullTextY = titleY + (compactTextY - titleY) * p
         val textScale = .7f + ((1f - .22f * p) - .7f) * e
@@ -532,9 +534,9 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 translationX = miniShift
                 this.alpha = miniAlpha
             }.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = sharedClick)) {
-            Text(song.title, color = textColor, fontSize = 20.sp * .88f, lineHeight = 25.sp * .88f,
+            Text(song.title, color = textColor, fontSize = 20.sp * metadataSize, lineHeight = 25.sp * metadataSize,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(song.artist, color = textColor.copy(alpha = .8f), fontSize = 16.sp * .88f, lineHeight = 21.sp * .88f,
+            Text(song.artist, color = textColor.copy(alpha = .8f), fontSize = 16.sp * metadataSize, lineHeight = 21.sp * metadataSize,
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
 

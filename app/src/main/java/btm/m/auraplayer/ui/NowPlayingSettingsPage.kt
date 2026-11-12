@@ -66,7 +66,6 @@ fun NowPlayingSettingsPage(padding: PaddingValues) {
                             "${state.immersiveSeconds} s", steps = 29, defaultValue = 5f) { value -> store.update { it.copy(immersiveSeconds = value.roundToInt()) } }
                     }
                 }
-                SwitchPreference(tr("player_lyric_hdr", "歌词拖尾时添加 HDR 效果"), checked = state.lyricHdr) { value -> store.update { it.copy(lyricHdr = value) } }
                 SwitchPreference(tr("player_show_audio_info", "正在播放界面显示音频信息"), checked = state.showAudioInfo) { value -> store.update { it.copy(showAudioInfo = value) } }
                 SwitchPreference(tr("player_swipe_tracks", "左右滑动切歌"), checked = state.swipeTracks) { value -> store.update { it.copy(swipeTracks = value) } }
             }

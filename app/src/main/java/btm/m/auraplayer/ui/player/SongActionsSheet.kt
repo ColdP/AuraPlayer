@@ -24,11 +24,13 @@ import java.util.UUID
 
 internal data class SongActionRequest(val song: Song, val backdrop: Backdrop?, val remove: (() -> Unit)? = null)
 internal val LocalSongActions = staticCompositionLocalOf<(SongActionRequest) -> Unit> { {} }
+internal val LocalOpenTagEditor = staticCompositionLocalOf<(Song) -> Unit> { {} }
 
 @Composable
 internal fun SongActionsSheet(model: AuraViewModel, request: SongActionRequest, show: Boolean,
                               dismiss: () -> Unit, onDismissFinished: () -> Unit) {
     val song = request.song
+    val editTags = LocalOpenTagEditor.current
     val foreground = sheetForeground()
     var artists by remember(song.key) { mutableStateOf(song.creditedArtists()) }
     var playlistOpen by remember(song.key) { mutableStateOf(false) }
@@ -74,6 +76,7 @@ internal fun SongActionsSheet(model: AuraViewModel, request: SongActionRequest, 
                     icon = { Artwork(artist.artwork, it.size(30.dp), circular = true) },
                     onClick = { model.openSongArtist(song, artist); dismiss() }) }))
             else action(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, song.artistId > 0 || !song.cloud) { model.openSongArtist(song); dismiss() }
+            if (!song.cloud) action(MiuixIcons.Regular.File, tr("tag_editor", "标签编辑器")) { dismiss(); editTags(song) }
         }
     }
     if (playlistMounted) SongPlaylistPicker(model, song, playlistOpen, request.backdrop,

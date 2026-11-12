@@ -6,6 +6,7 @@
 - Backdrop / Shapes — Kyant and contributors; Apache-2.0. Glass rendering and shapes.
 - NeteaseCloudMusicApiEnhanced — MIT. `OfficialNeteaseClient.kt` ports request field mapping and WEAPI/EAPI encryption from module files and util/crypto.js to Kotlin/JCA. The Node service remains an optional separate deployment. The original MIT license is included in `app/src/main/assets/licenses/NeteaseCloudMusicApiEnhanced-MIT.txt`.
 - AndroidX Media3, Compose, Coil, OkHttp and other runtime dependencies retain their respective upstream notices and licenses.
+- jaudiotagger — LGPL-2.1, https://github.com/Adonai/jaudiotagger-android. Used for local audio tag editing; the complete license is included in `app/src/main/assets/licenses/jaudiotagger-LGPL-2.1.txt`.
 
 The HyperChanger About/Donate assets and author references are retained at the user's explicit request.
 
@@ -48,4 +49,4 @@ The former NetEase player controls have been replaced.
 
 - ZXing Core 3.5.3 — ZXing authors; Apache-2.0. Used unmodified for DSP preset QR images. License and upstream third-party notices: `app/src/main/assets/licenses/ZXing-Apache-2.0.txt`. DSP is independently implemented from documented formulas; research and parameter audit: `AUDIO_EFFECTS.md`.
 
-Player appearance additions (2026-11-12): PlayerLyricHost adapts the bounded attached-panel HDR isolation approach from HyperChanger LyricWindow/LyricView (HyperMusicCover-derived, AGPL-3.0). Extended-sRGB highlights and the 3x requested headroom apply only to held-note lyrics; inline SDR fallback and Aura activity lifecycle replace lockscreen/Xposed ownership. PlayerLyricView adds visual-center focus while browsing and smooth sharp/depth-mask blending. Existing upstream notices and license texts remain applicable.
+Player appearance additions (2026-11-12): PlayerLyricView adds visual-center focus while browsing and smooth sharp/depth-mask blending to the HyperChanger/HyperMusicCover-derived renderer (AGPL-3.0). Lyrics render inline in SDR with the original held-note animation; the separate HDR panel and extended-range output have been removed. Existing upstream notices and license texts remain applicable.

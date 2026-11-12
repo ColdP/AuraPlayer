@@ -211,6 +211,44 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun dismissError() { error = null }
+    fun localSong(uri: String): Song = songs.firstOrNull { it.uri == uri }
+        ?: queue.firstOrNull { !it.cloud && it.uri == uri }
+        ?: current?.takeIf { !it.cloud && it.uri == uri }
+        ?: Song(0, "", "", "", uri = uri)
+
+    fun localTagsSaved(song: Song, tags: btm.m.auraplayer.tags.AudioTagDocument) {
+        val updated = song.copy(title = tags[btm.m.auraplayer.tags.AudioTagField.TITLE],
+            artist = tags[btm.m.auraplayer.tags.AudioTagField.ARTIST], album = tags[btm.m.auraplayer.tags.AudioTagField.ALBUM],
+            composer = tags[btm.m.auraplayer.tags.AudioTagField.COMPOSER], albumArtist = tags[btm.m.auraplayer.tags.AudioTagField.ALBUM_ARTIST],
+            year = tags[btm.m.auraplayer.tags.AudioTagField.YEAR].take(4).toIntOrNull() ?: 0,
+            track = tags[btm.m.auraplayer.tags.AudioTagField.TRACK].toIntOrNull() ?: 0, artists = emptyList())
+        knownSongs[song.key] = updated
+        songs = songs.map { if (it.key == song.key) updated else it }
+        queue = queue.map { if (it.key == song.key) updated else it }
+        searchResults = searchResults.map { if (it.key == song.key) updated else it }
+        songArtistCache.remove(song.key)
+        lyricRepository.invalidate(song.key)
+        if (current?.key == song.key) { current = updated; lyricKey = null; loadLyrics(updated) }
+        controller?.let { player ->
+            val playingNow = player.isPlaying
+            val positionNow = player.currentPosition.coerceAtLeast(0)
+            val currentWasEdited = player.currentMediaItem?.mediaId == song.key
+            val currentIndex = player.currentMediaItemIndex
+            // Tag sizes can change the byte offsets of the current audio stream. Reopen it
+            // after writing, retaining its position and playback intent.
+            if (currentWasEdited) player.stop()
+            for (index in 0 until player.mediaItemCount) if (player.getMediaItemAt(index).mediaId == song.key) {
+                player.replaceMediaItem(index, mediaItem(updated))
+            }
+            if (currentWasEdited) {
+                player.prepare()
+                player.seekTo(currentIndex, positionNow)
+                if (playingNow) player.play()
+            }
+        }
+        updateSortedSongs()
+        refreshLibrary()
+    }
     fun updateSettings(transform: (Appearance) -> Appearance) {
         val before = settings.value
         settings.update(transform)

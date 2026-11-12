@@ -34,6 +34,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.ui.navigation.*
 import btm.m.auraplayer.ui.player.LocalSongActions
+import btm.m.auraplayer.ui.player.LocalOpenTagEditor
 import btm.m.auraplayer.ui.player.SongActionRequest
 import btm.m.auraplayer.ui.player.SongActionsSheet
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -99,6 +100,7 @@ private fun AuraShell(model: AuraViewModel) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { model.refreshLibrary() }
     val selected = rememberSaveable { mutableIntStateOf(0) }
     val pages = remember { mutableStateListOf<String>() }
+    val tagEditorExitGuard = remember { TagEditorExitGuard() }
     val seamless = remember { SeamlessNavigationState() }
     val scope = rememberCoroutineScope()
     var closing by remember { mutableStateOf(false) }
@@ -164,7 +166,7 @@ private fun AuraShell(model: AuraViewModel) {
         if (model.directory != null && "directory" !in pages) open("directory")
     }
     val dismissPage: () -> Unit = {
-        if (!closing && pages.isNotEmpty()) {
+        if (!closing && pages.isNotEmpty() && !tagEditorExitGuard.intercept(pages.lastOrNull())) {
             val index = pages.lastIndex
             val leaving = pages.last()
             val entry = seamless.entries[index]
@@ -206,6 +208,8 @@ private fun AuraShell(model: AuraViewModel) {
     val rootLabels = listOf(tr("home", "首页"), tr("cloud", "云端"), tr("local", "本地"))
     val saveableTabs = rememberSaveableStateHolder()
     CompositionLocalProvider(LocalSeamlessNavigation provides seamless, LocalDialogBackdrop provides backdrop,
+        LocalTagEditorExitGuard provides tagEditorExitGuard,
+        LocalOpenTagEditor provides { song -> playerOpen = false; searchOpen = false; open(tagEditorRoute(song)) },
         LocalSongActions provides { request -> songActions = request; songActionsOpen = true }) {
         // MIUIX PopupLayout(renderInRootScaffold=true) must be hosted outside recorded pages.
         Scaffold(containerColor = Color.Transparent) {
@@ -311,9 +315,11 @@ private fun auraContentPadding(padding: PaddingValues, bottom: Int) = PaddingVal
 @Composable
 private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, open: (String) -> Unit, isActive: Boolean) {
     var presetTab by rememberSaveable { mutableIntStateOf(0) }
+    val tagEditorExitGuard = LocalTagEditorExitGuard.current
     val destination = route.takeIf { it.startsWith("collection:") }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)
     val albumInfoDestination = route.takeIf { it.substringBefore(':') in setOf("albumInfo", "artistSongs", "artistAlbums") }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)
     val page = when {
+        route.startsWith("tagEditor:") -> "tagEditor"
         route.startsWith("collection:") -> "collection"
         route.substringBefore(':') in setOf("albumInfo", "artistSongs", "artistAlbums") -> route.substringBefore(':')
         else -> route
@@ -325,6 +331,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         Color(palette.a2.tone(if (MiuixTheme.colorScheme.surface.luminance() < .5f) 16 else 90))
     } else null
     val title = when (page) {
+        "tagEditor" -> tr("tag_editor", "标签编辑器")
         "settings" -> tr("settings", "设置")
         "theme" -> tr("theme_color", "主题与颜色")
         "login" -> tr("netease", "网易云音乐")
@@ -346,6 +353,11 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "artistAlbums" -> tr("albums", "专辑")
         "directory" -> model.directory?.title.orEmpty()
         else -> legalTitle(page)
+    }
+    if (page == "tagEditor") {
+        val uri = Uri.decode(route.substringAfter(':'))
+        TagEditorPage(model, model.localSong(uri), { if (!tagEditorExitGuard.intercept(route)) back() }, isActive)
+        return
     }
     AppPage(title, back, showLargeTitle = page != "about" && (!catalog || page in setOf("artistSongs", "artistAlbums")),
         header = { if (page == "effect_library") SoftGlassHeaderTabs(listOf(tr("builtin_presets", "内置预设"), tr("user_presets", "用户预设")), presetTab) { presetTab = it } },

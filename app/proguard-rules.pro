@@ -1,1 +1,2 @@
 -keepattributes Signature,InnerClasses,EnclosingMethod
+-keep class org.jaudiotagger.** { *; }

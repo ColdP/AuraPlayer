@@ -10,7 +10,7 @@ class NowPlayingSettingsTest {
         assertEquals(expected, NowPlayingCodec.decode("not json"))
         assertEquals(PlayerTheme.AURORA, expected.theme)
         assertTrue(expected.showVolume && expected.showAudioInfo && expected.swipeTracks)
-        assertFalse(expected.immersiveLyrics || expected.keepLyricsAwake || expected.lyricHdr)
+        assertFalse(expected.immersiveLyrics || expected.keepLyricsAwake)
         assertTrue(expected.fullscreenGlass)
     }
 
@@ -18,10 +18,18 @@ class NowPlayingSettingsTest {
         for (theme in PlayerTheme.entries) for (animation in CoverAnimation.entries) for (weather in PlayerWeather.entries) {
             val config = NowPlayingConfig(theme, -32, weather, animation,
                 showVolume = false, openFromNotification = false, keepLyricsAwake = true,
-                lyricHdr = true, showAudioInfo = false, swipeTracks = false,
+                showAudioInfo = false, swipeTracks = false,
                 immersiveLyrics = true, immersiveSeconds = 27, fullscreenGlass = false)
             assertEquals(config, NowPlayingCodec.decode(NowPlayingCodec.encode(config)))
         }
+    }
+
+    @Test fun removedHdrSettingIsIgnoredWithoutResettingOtherPreferences() {
+        val config = NowPlayingCodec.decode("""{"lyricHdr":true,"theme":"BLUR","blur":12,"keepLyricsAwake":true,"immersiveLyrics":true}""")
+        assertEquals(PlayerTheme.BLUR, config.theme)
+        assertEquals(12, config.blur)
+        assertTrue(config.keepLyricsAwake && config.immersiveLyrics)
+        assertFalse(NowPlayingCodec.encode(config).contains("lyricHdr"))
     }
 
     @Test fun unknownEnumsFallBackIndividuallyAndSlidersClampToRequestedRanges() {
