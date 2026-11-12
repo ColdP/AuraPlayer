@@ -78,6 +78,7 @@ internal data class HomeSearchResult(
     val description: String,
     val scopes: String,
     val iconRes: Int? = null,
+    val artwork: String = "",
     val requiresService: Boolean = true,
     val onClick: () -> Unit,
 )
@@ -96,6 +97,7 @@ internal fun HomeSearchOverlay(
     onQueryChange: (String) -> Unit,
     results: List<HomeSearchResult>,
     searching: Boolean,
+    filterContent: (@Composable () -> Unit)? = null,
     enabled: Boolean,
     onDismiss: () -> Unit,
     onClosed: () -> Unit,
@@ -129,6 +131,7 @@ internal fun HomeSearchOverlay(
         val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val fieldTop = topInset + 64.dp
+        val filtersHeight = if (filterContent != null) 116.dp else 0.dp
         val fieldWidth = minOf(maxWidth - 32.dp, 560.dp)
         val fieldLeft = (maxWidth - fieldWidth) / 2
         val source = anchorInWindow.translate(-origin)
@@ -155,7 +158,7 @@ internal fun HomeSearchOverlay(
             .drawWithContent {
                 drawContent()
                 val start = with(density) { (fieldTop - 24.dp).toPx() } / size.height
-                val end = with(density) { (fieldTop + 72.dp).toPx() } / size.height
+                val end = with(density) { (fieldTop + 72.dp + filtersHeight).toPx() } / size.height
                 drawRect(Brush.verticalGradient(
                     0f to Color.Transparent,
                     start.coerceIn(0f, 1f) to Color.Transparent,
@@ -185,7 +188,7 @@ internal fun HomeSearchOverlay(
                     state = listState,
                     userScrollEnabled = expanded && contentAlpha > .98f,
                     contentPadding = PaddingValues(start = fieldLeft, end = fieldLeft,
-                        top = fieldTop + 76.dp, bottom = 144.dp),
+                        top = fieldTop + 76.dp + filtersHeight, bottom = 144.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     if (snapshot.searching && snapshot.query.isNotBlank()) {
@@ -220,7 +223,7 @@ internal fun HomeSearchOverlay(
             }
         }
         // Unmasked cards remain available to the field and progressive header material.
-        Box(Modifier.fillMaxWidth().height(fieldTop + 112.dp)
+        Box(Modifier.fillMaxWidth().height(fieldTop + 112.dp + filtersHeight)
             .graphicsLayer { alpha = contentAlpha }
             .drawPlainBackdrop(
                 backdrop = foregroundBackdrop, shape = { RectangleShape },
@@ -247,6 +250,9 @@ internal fun HomeSearchOverlay(
             floating = false, drawSurface = false,
             requestFocus = interactionEnabled && expanded && progress > .96f, enabled = interactionEnabled && expanded && progress > .96f,
         )
+        if (filterContent != null) Box(Modifier.offset(y = fieldTop + 64.dp).fillMaxWidth().searchContentMotion(contentAlpha)) {
+            CompositionLocalProvider(LocalToolbarBackdrop provides resultsBackdrop) { filterContent() }
+        }
         // One fixed circle moves between the two anchors; it never stretches or fuses.
         // Render it last so both its background and icon stay above every card.
         val buttonMotion = searchPhase(progress, 0f, 1f)
@@ -281,6 +287,7 @@ private fun SearchResultPreference(result: HomeSearchResult, enabled: Boolean, o
             .padding(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 14.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            if (result.artwork.isNotBlank()) Artwork(result.artwork, Modifier.padding(end = 12.dp).size(44.dp), cornerRadius = ListArtworkCornerRadius)
             Column(Modifier.weight(1f).padding(end = 12.dp)) {
                 Text(
                     result.title,

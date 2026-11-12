@@ -23,6 +23,7 @@ import androidx.compose.ui.geometry.*
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.*
@@ -34,6 +35,9 @@ import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.R
 import btm.m.auraplayer.lyrics.PlayerLyricView
 import btm.m.auraplayer.playback.StreamQuality
+import btm.m.auraplayer.playback.NowPlayingConfig
+import btm.m.auraplayer.playback.PlayerTheme
+import btm.m.auraplayer.playback.CoverAnimation
 import btm.m.auraplayer.ui.*
 import btm.m.auraplayer.ui.GlassIconDropdownMenu
 import coil3.compose.AsyncImage
@@ -48,12 +52,15 @@ import com.kyant.backdrop.shadow.Shadow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop as rememberMiuixBackdrop
+import top.yukonga.miuix.kmp.blur.layerBackdrop as miuixLayerBackdrop
 import kotlin.math.*
 
 private const val PlayerPaddingScale = 1.15f
@@ -70,8 +77,14 @@ internal object PlayerNavigationGeometry {
 
 @Composable
 internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: Boolean,
-                        open: Boolean, onOpenChange: (Boolean) -> Unit) {
+                        open: Boolean, onOpenChange: (Boolean) -> Unit, openPage: (String) -> Unit) {
     val song = model.current ?: return
+    val appearance by model.app.nowPlaying.state.collectAsState()
+    var foreground by remember { mutableStateOf(false) }
+    LifecycleResumeEffect(Unit) {
+        foreground = true
+        onPauseOrDispose { foreground = false }
+    }
     val scope = rememberCoroutineScope()
     val expansion = remember { Animatable(if (open) 1f else 0f) }
     var lyricsOpen by rememberSaveable { mutableStateOf(false) }
@@ -83,6 +96,8 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
     var swipeDistance by remember { mutableFloatStateOf(0f) }
     var settlingSwipe by remember { mutableStateOf(false) }
     var lyricMenuOpen by remember { mutableStateOf(false) }
+    var actionsOpen by remember { mutableStateOf(false) }
+    var actionsBusy by remember { mutableStateOf(false) }
     val miniSwipeOffset = remember { Animatable(0f) }
     var miniSwipeDrag by remember { mutableFloatStateOf(0f) }
     var miniVerticalProgress by remember { mutableFloatStateOf(0f) }
@@ -101,8 +116,8 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
         if (compactOpen) { lyricsOpen = false; queueOpen = false }
         else onOpenChange(false)
     }
-    BackHandler(open && !model.settings.value.predictive && !lyricMenuOpen) { back() }
-    PredictiveBackHandler(enabled = open && model.settings.value.predictive && !lyricMenuOpen && swipeDistance == 0f && !settlingSwipe) { events ->
+    BackHandler(open && !model.settings.value.predictive && !lyricMenuOpen && !actionsBusy) { back() }
+    PredictiveBackHandler(enabled = open && model.settings.value.predictive && !lyricMenuOpen && !actionsBusy && swipeDistance == 0f && !settlingSwipe) { events ->
         val secondary = compactOpen
         val target = if (secondary) lyricProgress else expansion
         val start = target.value
@@ -125,6 +140,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
         else if (dark) Color.Black.copy(alpha = if (harmony) .36f else .30f)
         else Color(0xFFF5F5F5).copy(alpha = if (harmony) .48f else .42f)
     val playerBackdrop = rememberLayerBackdrop()
+    val miuixBackdrop = rememberMiuixBackdrop()
     val coverPalette = rememberPlayerMonetPalette(song.artwork)
     val hostAlpha by animateFloatAsState(if (miniVisible || open) 1f else 0f, tween(280, easing = FastOutSlowInEasing), label = "playerHostVisibility")
     BoxWithConstraints(Modifier.fillMaxSize().graphicsLayer {
@@ -173,16 +189,20 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
             // Full content keeps its final measurement during the morph; only the container changes.
             Box(Modifier.wrapContentSize(Alignment.TopStart, unbounded = true).requiredSize(screenWidth, screenHeight)) {
                 Box(Modifier.fillMaxSize()) {
-                    PlayerAmbientBackground(coverPalette, Modifier.fillMaxSize().graphicsLayer { alpha = e }.layerBackdrop(playerBackdrop), animate = open && !gesturing)
+                    if (e > 0f) PlayerThemeBackground(song.artwork, coverPalette, appearance, lyricProgress.value.coerceIn(0f, 1f),
+                        animate = open && foreground && !gesturing,
+                        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = e }.layerBackdrop(playerBackdrop).miuixLayerBackdrop(miuixBackdrop))
                     FullPlayer(model, lyricProgress.value, expansion = e, miniColor = miniColor, miniSwipe = miniSwipeOffset.value + miniSwipeDrag,
+                        appearance = appearance, active = open && foreground, hdrAllowed = !actionsBusy && !lyricMenuOpen,
                         onExpand = { onOpenChange(true) }, onClose = { onOpenChange(false) },
-                        swipeEnabled = open && !settlingSwipe && !lyricMenuOpen,
+                        swipeEnabled = open && !settlingSwipe && !lyricMenuOpen && !actionsBusy,
                         onSwipeStart = { gesturing = true; scope.launch { expansion.stop() } },
                         onSwipeDelta = { swipeDistance = (swipeDistance + it).coerceIn(0f, swipeRange) },
                         onSwipeRelease = { settleSwipe(it, false) }, onSwipeCancel = { settleSwipe(0f, true) },
                         onLyrics = { lyricsOpen = !lyricsOpen; queueOpen = false }, queueOpen = queueOpen,
                         lyricsOpen = lyricsOpen, queueBlend = queueBlend.value, backdrop = playerBackdrop, menuTint = Color(coverPalette.a2.tone(20)),
                         onLyricMenuExpanded = { lyricMenuOpen = it },
+                        miuixBackdrop = miuixBackdrop, onMore = { actionsOpen = true },
                         onQueue = { queueOpen = !queueOpen; lyricsOpen = false })
                 }
             }
@@ -191,7 +211,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                 Box(Modifier.offset(metrics.outerInset, miniY).size(screenWidth - metrics.outerInset * 2, metrics.miniHeight)
                     .clickable(enabled = !open, interactionSource = remember { MutableInteractionSource() }, indication = null,
                         onClick = { onOpenChange(true) })
-                    .pointerInput(open, screenWidthPx, swipeRange) {
+                    .pointerInput(open, screenWidthPx, swipeRange, appearance.swipeTracks) {
                         var totalX = 0f
                         var totalY = 0f
                         detectDragGestures(
@@ -241,7 +261,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                         ) { change, amount ->
                             totalX += amount.x; totalY += amount.y
                             if (!miniHorizontal && !miniVertical && max(abs(totalX), abs(totalY)) > miniDragSlopPx) {
-                                if (abs(totalX) > abs(totalY)) miniHorizontal = true else if (totalY < 0f) {
+                                if (abs(totalX) > abs(totalY)) miniHorizontal = appearance.swipeTracks else if (totalY < 0f) {
                                     miniVertical = true
                                     onOpenChange(true)
                                     scope.launch { expansion.stop() }
@@ -265,16 +285,22 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
             }
         }
     }
+    CompositionLocalProvider(LocalDialogBackdrop provides playerBackdrop) {
+        PlayerActionsSheet(model, actionsOpen, playerBackdrop,
+            dismiss = { actionsOpen = false }, openPage = openPage, closePlayer = { onOpenChange(false) }, onBusy = { actionsBusy = it })
+    }
 }
 
 @Composable
 private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
+                       appearance: NowPlayingConfig, active: Boolean, hdrAllowed: Boolean,
                        miniColor: Color, miniSwipe: Float, onExpand: () -> Unit,
                        swipeEnabled: Boolean, onSwipeStart: () -> Unit, onSwipeDelta: (Float) -> Unit,
                        onSwipeRelease: (Float) -> Unit, onSwipeCancel: () -> Unit,
                        onClose: () -> Unit, onLyrics: () -> Unit, queueOpen: Boolean,
                        lyricsOpen: Boolean, queueBlend: Float, backdrop: Backdrop, menuTint: Color,
                        onLyricMenuExpanded: (Boolean) -> Unit,
+                       miuixBackdrop: top.yukonga.miuix.kmp.blur.Backdrop, onMore: () -> Unit,
                        onQueue: () -> Unit) {
     val song = model.current ?: return
     val density = LocalDensity.current
@@ -283,30 +309,93 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
     val status = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val headerBottom = with(density) { (status + 48.dp * PlayerPaddingScale + 84.dp).toPx() }
+    var lastInteraction by remember { mutableLongStateOf(android.os.SystemClock.uptimeMillis()) }
+    var touching by remember { mutableStateOf(false) }
+    var touchPoint by remember { mutableStateOf(Offset.Zero) }
+    var immersive by remember { mutableStateOf(false) }
+    var qualityMenuOpen by remember { mutableStateOf(false) }
+    val immersionEligible = active && lyricsOpen && !queueOpen && appearance.immersiveLyrics && hdrAllowed && !qualityMenuOpen && p > .999f
+    LaunchedEffect(immersionEligible, appearance.immersiveSeconds, lastInteraction, touching) {
+        immersive = false
+        if (immersionEligible && !touching) {
+            // A 0 s timeout hides immediately on entry, while a wake touch remains usable.
+            val waitMs = if (lastInteraction == 0L) appearance.immersiveSeconds * 1000L else maxOf(appearance.immersiveSeconds * 1000L, 700L)
+            delay(waitMs)
+            immersive = true
+        }
+    }
+    LaunchedEffect(lyricsOpen, active) { lastInteraction = if (lyricsOpen && active) 0L else android.os.SystemClock.uptimeMillis() }
+    val controlsVisibility by animateFloatAsState(if (immersive) 0f else 1f, tween(280, easing = FastOutSlowInEasing), label = "immersiveControls")
     BoxWithConstraints(Modifier.fillMaxSize()
+        .pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    touching = event.changes.any { it.pressed }
+                    event.changes.firstOrNull { it.pressed }?.let { touchPoint = it.position }
+                    lastInteraction = android.os.SystemClock.uptimeMillis()
+                }
+            }
+        }
         .playerDismissGesture(swipeEnabled, p > .5f, headerBottom, onSwipeStart, onSwipeDelta, onSwipeRelease, onSwipeCancel)
         .clickable(indication = null, interactionSource = remember { MutableInteractionSource() },
             enabled = expansion == 0f, onClick = onExpand)) {
         val w = maxWidth; val h = maxHeight
-        val margin = w * .058f * PlayerPaddingScale
+        val fullscreen = appearance.theme == PlayerTheme.FULLSCREEN
+        val fullCard = fullscreenPlayerCard(w, h, status, nav)
+        val normalMargin = w * .058f * PlayerPaddingScale
+        fun controlSize(cardSize: Dp, normalSize: Dp): Dp = if (fullscreen) cardSize + (normalSize - cardSize) * p else normalSize
+        val margin = controlSize(fullCard.left + 16.dp, normalMargin)
         val coverY = maxOf(h * .142f, status + 44.dp * PlayerPaddingScale)
         // Reserve the actual fixed controls height before sizing the cover on short screens.
-        val controlsHeight = 250.dp
+        val controlsHeight = if (appearance.showVolume) 250.dp else 206.dp
         val seekCeiling = h - nav - controlsHeight - 10.dp
         val titleGap = 20.dp * PlayerPaddingScale
         val titleToSeek = 63.dp * PlayerPaddingScale
-        val coverSize = minOf(w - margin * 2, (h - status - nav) * .46f,
-            (seekCeiling - coverY - titleGap - titleToSeek).coerceAtLeast(1.dp))
+        val coverSize = minOf(w - normalMargin * 2, (h - status - nav) * .46f,
+            (seekCeiling - coverY - titleGap - titleToSeek).coerceAtLeast(1.dp)).coerceAtLeast(1.dp)
         // Subtracting equivalent Float expressions can produce a tiny negative Dp.
-        val coverInset = playerCoverInset(w, coverSize, margin)
-        val coverX = margin + coverInset
-        val titleY = coverY + coverSize + titleGap
+        val coverInset = playerCoverInset(w, coverSize, normalMargin)
+        val coverX = normalMargin + coverInset
+        val normalTitleY = coverY + coverSize + titleGap
         val small = minOf(64.dp, coverSize * .4f) * .86f
         val smallY = status + 48.dp * PlayerPaddingScale
         val smallX = 26.dp * PlayerPaddingScale
         val e = expansion.coerceIn(0f, 1f)
-        val seekY = maxOf(titleY + titleToSeek, h * .637f).coerceAtMost(seekCeiling)
+        val normalSeekY = maxOf(normalTitleY + titleToSeek, h * .637f).coerceAtMost(seekCeiling)
+        val seekY = controlSize(fullCard.top + 64.dp, normalSeekY)
+        val titleY = if (fullscreen) fullCard.top + 14.dp else normalTitleY
+        val controlsScale = if (fullscreen) ((fullCard.height - 76.dp) / 180.dp).coerceIn(.5f, 1.12f) else 1f
         val fullWidthPx = with(density) { w.toPx() }
+        if (fullscreen && alpha > 0f) {
+            val glassTop = fullCard.top
+            val cardLeftPx = with(density) { fullCard.left.toPx() }
+            val cardTopPx = with(density) { glassTop.toPx() }
+            val cardWidthPx = with(density) { fullCard.width.toPx() }
+            val cardHeightPx = with(density) { fullCard.height.toPx() }
+            val localTouch = touchPoint - Offset(cardLeftPx, cardTopPx)
+            val touchInside = touching && localTouch.x in 0f..cardWidthPx && localTouch.y in 0f..cardHeightPx
+            val touchLight by animateFloatAsState(if (appearance.fullscreenGlass && touchInside) .19f else 0f,
+                tween(if (touchInside) 100 else 320), label = "playerCardTouchLight")
+            val cardMaterial = if (appearance.fullscreenGlass) Modifier.drawBackdrop(
+                backdrop = backdrop, shape = { RoundedCornerShape(30.dp) }, effects = {
+                    vibrancy(); backdropBlur(5.dp.toPx()); lens(28.dp.toPx(), 42.dp.toPx(), chromaticAberration = true)
+                }, highlight = { Highlight.Default.copy(alpha = .60f) },
+                onDrawSurface = { drawRect(menuTint.copy(alpha = .18f)) })
+            else Modifier.playerMenuMaterial(miuixBackdrop, menuTint, 30.dp)
+            Box(Modifier.offset(fullCard.left, glassTop).size(fullCard.width, fullCard.height)
+                .graphicsLayer { this.alpha = alpha * (1f - p) }
+                .then(cardMaterial).clip(RoundedCornerShape(30.dp)).drawWithContent {
+                    drawContent()
+                    if (appearance.fullscreenGlass && touchLight > .001f) {
+                        val radius = size.width * .65f
+                        drawRect(Brush.radialGradient(listOf(Color.White.copy(alpha = touchLight), Color.White.copy(alpha = touchLight * .32f), Color.Transparent),
+                            center = localTouch, radius = radius.coerceAtLeast(1f)))
+                    }
+                })
+            if (p < .01f) Box(Modifier.fillMaxWidth().height(glassTop.coerceAtLeast(0.dp))
+                .playerTrackSwipe(appearance.swipeTracks && active, model::next, model::previous))
+        }
         // Only controls and secondary content blur/fade; artwork and metadata stay sharp.
         if (alpha > 0f) Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }
             .blur(((1f - alpha) * 14f).dp)) {
@@ -318,15 +407,17 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         }
         if (p > 0f && queueBlend < .999f) {
             Box(Modifier.offset(y = smallY + small + 20.dp * PlayerPaddingScale).fillMaxWidth()
-            .height((seekY - smallY - small - 35.dp * PlayerPaddingScale).coerceAtLeast(1.dp))
+            .height((seekY - smallY - small - 35.dp * PlayerPaddingScale + (h - nav - seekY) * (1f - controlsVisibility)).coerceAtLeast(1.dp))
             .graphicsLayer { this.alpha = p * (1f - queueBlend); translationY = (1f - p) * 24.dp.toPx() }
             .blur(((1f - p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp)) {
                 if (model.lyrics.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(if (model.lyricsLoading) tr("lyrics_loading", "正在获取歌词…") else tr("lyrics_empty", "暂无歌词"), color = Color.White.copy(alpha = .55f), fontSize = 20.sp)
-                } else AndroidView(factory = { PlayerLyricView(it) }, update = {
-                    it.submit(model.lyrics, model.showTranslation, model.showPronunciation, model.lyricSize.scale)
-                    it.position(model.position, model.playing)
-                    it.onSeek = model::seekTo
+                } else AndroidView(factory = { btm.m.auraplayer.lyrics.PlayerLyricHost(it) }, update = {
+                    it.lyrics.submit(model.lyrics, model.showTranslation, model.showPronunciation, model.lyricSize.scale)
+                    it.lyrics.position(model.position, model.playing)
+                    it.lyrics.onSeek = model::seekTo
+                    it.configure(hdr = appearance.lyricHdr && hdrAllowed && !qualityMenuOpen && active && p > .999f && queueBlend < .001f && expansion > .999f,
+                        keepAwake = appearance.keepLyricsAwake && active && lyricsOpen)
                 }, modifier = Modifier.fillMaxSize())
         }
         }
@@ -335,36 +426,35 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             .fillMaxWidth().height((seekY + 50.dp - smallY - small - 28.dp * PlayerPaddingScale).coerceAtLeast(1.dp))
             .graphicsLayer { this.alpha = p * queueBlend; translationY = (1f - p) * 24.dp.toPx() }
             .blur(((1f - p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp).padding(horizontal = smallX))
-        if (p > 0f) Box(Modifier.offset(w - 68.dp, smallY + 10.dp * PlayerPaddingScale).size(46.dp)
-            .clip(RoundedCornerShape(50)).clickable { /* Reserved for future player actions. */ }, contentAlignment = Alignment.Center) {
-            Box(Modifier.size(46.dp * .85f * .92f).background(Color.White.copy(alpha = .12f), RoundedCornerShape(50))) {
-                Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.align(Alignment.Center).size(24.dp * PlayerIconScale * .92f), colorFilter = ColorFilter.tint(Color.White))
-            }
-        }
-        Column(Modifier.offset(y = seekY).fillMaxWidth().height((h - seekY - nav - 10.dp).coerceAtLeast(controlsHeight)).padding(horizontal = margin)) {
+        if (controlsVisibility > .001f) Column(Modifier.offset(y = seekY).fillMaxWidth()
+            .graphicsLayer { this.alpha = controlsVisibility }.blur(((1f - controlsVisibility) * 14f).dp)
+            .height(controlSize((fullCard.height - 76.dp).coerceAtLeast(1.dp),
+                (h - normalSeekY - nav - 10.dp).coerceAtLeast(controlsHeight))).padding(horizontal = margin)) {
             var scrub by remember(song.key) { mutableStateOf<Float?>(null) }
             val value = scrub ?: if (model.duration > 0) model.position.toFloat() / model.duration else 0f
             Column(Modifier.graphicsLayer { this.alpha = 1f - queueBlend }) {
-            PillSlider(value, tr("playback_progress", "播放进度"), Modifier.padding(horizontal = coverInset.coerceAtLeast(0.dp)).fillMaxWidth().height(24.dp)
+            PillSlider(value, tr("playback_progress", "播放进度"), Modifier.padding(horizontal = controlSize(0.dp, coverInset.coerceAtLeast(0.dp))).fillMaxWidth().height(controlSize(20.dp * controlsScale, 24.dp))
                 .then(if (queueBlend > .5f) Modifier.clearAndSetSemantics {} else Modifier),
                 onChange = { scrub = it }, onFinished = { model.seekTo(((scrub ?: value) * model.duration).toLong()); scrub = null }, enabled = model.duration > 0 && !queueOpen)
-            Box(Modifier.padding(horizontal = coverInset.coerceAtLeast(0.dp)).fillMaxWidth().height(26.dp)) {
+            Box(Modifier.padding(horizontal = controlSize(0.dp, coverInset.coerceAtLeast(0.dp))).fillMaxWidth().height(controlSize(20.dp * controlsScale, 26.dp))) {
                 Text(timeText(((scrub?.let { it * model.duration } ?: model.position.toFloat())).toLong()), color = Color.White.copy(alpha = .85f), fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.CenterStart))
                 Text(timeText(model.duration), color = Color.White.copy(alpha = .85f), fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.CenterEnd))
                 val actualQuality = model.streamInfo?.level?.let { level -> StreamQuality.entries.firstOrNull { it.level == level } }
-                if (song.cloud) {
+                if (appearance.showAudioInfo && song.cloud) {
                     val qualityItems = buildList {
                         if (model.qualityLoading) add(DropdownItem(tr("loading", "加载中…"), enabled = false))
                         if (model.qualityError) add(DropdownItem(tr("quality_retry", "获取音质失败，点击重试"), onClick = model::refreshQualities))
-                        model.availableQualities.forEach { item ->
+                        val menuQualities = model.availableQualities.ifEmpty { actualQuality?.let { listOf(it) }.orEmpty() }
+                        menuQualities.forEach { item ->
                             add(DropdownItem(qualityName(item), selected = item == (actualQuality ?: model.quality), onClick = { model.selectQuality(item) }))
                         }
                         if (isEmpty()) add(DropdownItem(tr("quality_unavailable", "此歌曲暂无可用音质"), enabled = false))
                     }
                     GlassIconDropdownMenu(
                         entry = DropdownEntry(qualityItems), backdrop = backdrop, modifier = Modifier.align(Alignment.Center), enabled = !queueOpen,
+                        onExpandedChange = { qualityMenuOpen = it },
                         trigger = { toggle, enabled ->
                             Box(Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = enabled) {
                                 model.refreshQualities(); toggle()
@@ -373,33 +463,35 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
                             }
                         }, content = {})
-                } else Text(localAudioText(model), color = Color.White.copy(alpha = .85f), fontSize = 11.sp,
+                } else if (appearance.showAudioInfo) Text(localAudioText(model), color = Color.White.copy(alpha = .85f), fontSize = 11.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.align(Alignment.Center).padding(horizontal = 45.dp))
             }
             }
             Spacer(Modifier.weight(1f))
-            Row(Modifier.fillMaxWidth().height(100.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
-                PlayerButton(R.drawable.ic_player_previous, tr("previous_track", "上一首"), Color.White, 48.dp, 76.dp, model::previous)
+            Row(Modifier.fillMaxWidth().height(controlSize(64.dp * controlsScale, 100.dp)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
+                PlayerButton(R.drawable.ic_player_previous, tr("previous_track", "上一首"), Color.White, controlSize(32.dp * controlsScale, 48.dp), controlSize(52.dp * controlsScale, 76.dp), model::previous)
                 PlayerButton(if (model.playbackRequested) R.drawable.ic_player_pause else R.drawable.ic_player_play,
-                    if (model.playbackRequested) tr("pause", "暂停") else tr("play", "播放"), Color.White, 60.dp * .88f, 96.dp, model::togglePlayback)
-                PlayerButton(R.drawable.ic_player_next, tr("next_track", "下一首"), Color.White, 48.dp, 76.dp, model::next)
+                    if (model.playbackRequested) tr("pause", "暂停") else tr("play", "播放"), Color.White, controlSize(44.dp * controlsScale, 60.dp * .88f), controlSize(64.dp * controlsScale, 96.dp), model::togglePlayback)
+                PlayerButton(R.drawable.ic_player_next, tr("next_track", "下一首"), Color.White, controlSize(32.dp * controlsScale, 48.dp), controlSize(52.dp * controlsScale, 76.dp), model::next)
             }
             Spacer(Modifier.weight(1f))
-            VolumeControl(Modifier.fillMaxWidth().height(44.dp))
-            Row(Modifier.fillMaxWidth().height(56.dp), horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(48.dp).semantics { selected = lyricsOpen }) {
-                    PlayerButton(if (lyricsOpen) R.drawable.ic_player_lyrics_on else R.drawable.ic_player_lyrics, tr("lyrics", "歌词"), Color.White.copy(alpha = .9f), 32.dp, 48.dp, onLyrics)
+            if (appearance.showVolume) VolumeControl(Modifier.fillMaxWidth().height(controlSize(32.dp * controlsScale, 44.dp)))
+            val bottomTouch = controlSize(40.dp * controlsScale, 48.dp)
+            val bottomIcon = controlSize(27.dp * controlsScale, 32.dp)
+            Row(Modifier.fillMaxWidth().height(controlSize(44.dp * controlsScale, 56.dp)), horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(bottomTouch).semantics { selected = lyricsOpen }) {
+                    PlayerButton(if (lyricsOpen) R.drawable.ic_player_lyrics_on else R.drawable.ic_player_lyrics, tr("lyrics", "歌词"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, onLyrics)
 
                 }
                 val modeDescription = when (model.playbackMode) { 1 -> tr("shuffle_mode", "随机播放"); 2 -> tr("repeat_one_mode", "单曲循环"); else -> tr("repeat_all_mode", "列表循环") }
-                PlayerButton(when (model.playbackMode) { 1 -> R.drawable.ic_player_shuffle; 2 -> R.drawable.ic_player_repeat_one; else -> R.drawable.ic_player_repeat }, modeDescription, Color.White.copy(alpha = .9f), 32.dp, 48.dp, model::cyclePlaybackMode)
+                PlayerButton(when (model.playbackMode) { 1 -> R.drawable.ic_player_shuffle; 2 -> R.drawable.ic_player_repeat_one; else -> R.drawable.ic_player_repeat }, modeDescription, Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, model::cyclePlaybackMode)
                 val revision = model.history.revision
-                val favorite = remember(song.key, revision) { song.key in model.history.favorites() }
+                val favorite = model.isFavorite(song)
                 PlayerButton(if (favorite) R.drawable.ic_player_favorite_on else R.drawable.ic_player_favorite,
-                    if (favorite) tr("unfavorite", "取消收藏") else tr("favorite", "收藏"), Color.White.copy(alpha = .9f), 32.dp, 48.dp) { model.history.toggle(song) }
+                    if (favorite) tr("unfavorite", "取消收藏") else tr("favorite", "收藏"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch) { model.toggleFavorite(song) }
                 Box(Modifier.semantics { selected = queueOpen }) {
-                    PlayerButton(if (queueOpen) R.drawable.ic_player_queue_on else R.drawable.ic_player_queue, tr("play_queue", "播放队列"), Color.White.copy(alpha = .9f), 32.dp, 48.dp, onQueue)
+                    PlayerButton(if (queueOpen) R.drawable.ic_player_queue_on else R.drawable.ic_player_queue, tr("play_queue", "播放队列"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, onQueue)
                 }
             }
         }
@@ -416,45 +508,70 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         Cover(song.artwork, Modifier.offset(sharedX, sharedY).size(coverSize).graphicsLayer {
             transformOrigin = TransformOrigin(0f, 0f); scaleX = sharedScale; scaleY = sharedScale
             translationX = miniShift
-            this.alpha = miniAlpha
-        }, sharedRadius / sharedScale, onClick = sharedClick)
+            this.alpha = miniAlpha * if (fullscreen) 1f - e * (1f - p) else 1f
+        }.playerTrackSwipe(appearance.swipeTracks && active && p < .01f && !fullscreen, model::next, model::previous),
+            sharedRadius / sharedScale, onClick = sharedClick,
+            animation = appearance.coverAnimation, animate = active && e > .99f, transitionKey = song.key)
         val compactTextX = smallX + small + 12.dp * PlayerPaddingScale
-        val fullTextX = coverX + (compactTextX - coverX) * p
-        val fullTextY = titleY + (smallY + 10.dp * PlayerPaddingScale - titleY) * p
+        val expandedTextX = if (fullscreen) fullCard.left + 16.dp else coverX
+        val fullTextX = expandedTextX + (compactTextX - expandedTextX) * p
+        var textHeight by remember { mutableIntStateOf(0) }
+        val measuredTextHeight = with(density) { if (textHeight > 0) textHeight.toDp() else 46.sp.toDp() }
+        val compactTextY = smallY + (small - measuredTextHeight * .78f) / 2
+        val fullTextY = titleY + (compactTextY - titleY) * p
         val textScale = .7f + ((1f - .22f * p) - .7f) * e
         val miniTextWidth = (w - PlayerNavigationGeometry.outerInset * 2 - 66.dp - 12.dp - 124.dp - 3.dp).coerceAtLeast(24.dp)
-        val fullTextWidth = coverSize + ((w - compactTextX - 68.dp).coerceAtLeast(24.dp) - coverSize) * p
+        val expandedTextWidth = if (fullscreen) (fullCard.width - 84.dp).coerceAtLeast(24.dp) else coverSize
+        val fullTextWidth = expandedTextWidth + ((w - compactTextX - 68.dp).coerceAtLeast(24.dp) - expandedTextWidth) * p
         val textWidth = (miniTextWidth + (fullTextWidth - miniTextWidth) * e) / textScale
         val textColor = lerp(miniColor, Color.White, e)
-        Column(Modifier.offset(66.dp + (fullTextX - 66.dp) * e, 14.dp + (fullTextY - 14.dp) * e)
-            .width(textWidth).graphicsLayer {
+        val miniTextY = (PlayerNavigationGeometry.miniHeight - measuredTextHeight * .7f) / 2
+        Column(Modifier.offset(66.dp + (fullTextX - 66.dp) * e, miniTextY + (fullTextY - miniTextY) * e)
+            .width(textWidth).onSizeChanged { textHeight = it.height }.graphicsLayer {
                 transformOrigin = TransformOrigin(0f, 0f); scaleX = textScale; scaleY = textScale
                 translationX = miniShift
                 this.alpha = miniAlpha
             }.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = sharedClick)) {
-            Text(song.title, color = textColor, fontSize = 20.sp, lineHeight = 25.sp,
+            Text(song.title, color = textColor, fontSize = 20.sp * .88f, lineHeight = 25.sp * .88f,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(song.artist, color = textColor.copy(alpha = .8f), fontSize = 16.sp, lineHeight = 21.sp,
+            Text(song.artist, color = textColor.copy(alpha = .8f), fontSize = 16.sp * .88f, lineHeight = 21.sp * .88f,
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
 
-        if (alpha > 0f && p > 0f && queueBlend < .01f) {
-            LyricOptionsMenu(model, backdrop, menuTint, coverX, seekY - 52.dp,
+        // One button moves and scales between both layouts, outside the content's blur layer.
+        if (alpha > 0f) {
+            val buttonSize = 46.dp
+            val bigX = if (fullscreen) fullCard.left + fullCard.width - 16.dp - buttonSize else coverX + coverSize - buttonSize
+            val bigY = if (fullscreen) titleY + (measuredTextHeight - buttonSize) / 2 else status + 8.dp
+            val compactX = w - 68.dp
+            val compactY = smallY + (small - buttonSize) / 2
+            Box(Modifier.offset(bigX + (compactX - bigX) * p, bigY + (compactY - bigY) * p)
+                .size(buttonSize).graphicsLayer { this.alpha = alpha; scaleX = 1f - .08f * p; scaleY = scaleX }
+                .clip(RoundedCornerShape(50)).clickable(onClick = onMore), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(46.dp * .85f * .92f).playerMenuMaterial(miuixBackdrop, menuTint, 50.dp)) {
+                    Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.align(Alignment.Center).size(24.dp * PlayerIconScale * .92f), colorFilter = ColorFilter.tint(Color.White))
+                }
+            }
+        }
+
+        if (alpha > 0f && p > 0f && queueBlend < .01f && controlsVisibility > .001f) {
+            LyricOptionsMenu(model, miuixBackdrop, menuTint, if (fullscreen) margin else coverX, seekY - 52.dp,
                 w, status + 8.dp,
-                Modifier.graphicsLayer { this.alpha = alpha * p }
-                    .blur(((1f - p) * 14f).dp), onLyricMenuExpanded)
+                Modifier.graphicsLayer { this.alpha = alpha * p * controlsVisibility }
+                    .blur(((1f - p + 1f - controlsVisibility) * 14f).dp), onLyricMenuExpanded)
         }
 
     }
 }
 
 @Composable
-private fun Cover(uri: String, modifier: Modifier, radius: Dp, onClick: (() -> Unit)? = null) {
+private fun Cover(uri: String, modifier: Modifier, radius: Dp, onClick: (() -> Unit)? = null,
+                  animation: CoverAnimation = CoverAnimation.DEFAULT, animate: Boolean = false, transitionKey: String = uri) {
     Box(modifier.clip(RoundedCornerShape(radius))
         .then(if (onClick == null) Modifier else Modifier.playerSurfaceClick(onClick))
         .background(Color.White.copy(alpha = .12f)), contentAlignment = Alignment.Center) {
         Image(painterResource(R.drawable.ic_player_queue), null, Modifier.fillMaxSize(.3f * PlayerIconScale), colorFilter = ColorFilter.tint(Color.White.copy(alpha = .3f)))
-        if (uri.isNotBlank()) AsyncImage(uri, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        if (uri.isNotBlank()) AnimatedPlayerArtwork(uri, transitionKey, animation, animate)
     }
 }
 

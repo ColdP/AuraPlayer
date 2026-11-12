@@ -11,6 +11,8 @@ import coil3.memory.MemoryCache
 import okio.Path.Companion.toOkioPath
 
 class AuraApplication : Application(), SingletonImageLoader.Factory {
+    lateinit var nowPlaying: btm.m.auraplayer.playback.NowPlayingSettings; private set
+    lateinit var effects: btm.m.auraplayer.audio.EffectsStore; private set
     lateinit var settings: AuraSettings; private set
     lateinit var history: LibraryHistory; private set
     lateinit var session: SecureSession; private set
@@ -20,12 +22,15 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         settings = AuraSettings(this)
+        nowPlaying = btm.m.auraplayer.playback.NowPlayingSettings(this)
+        effects = btm.m.auraplayer.audio.EffectsStore(this)
         history = LibraryHistory(this)
         session = SecureSession(this)
         cookie = session.read()
         endpoint = getSharedPreferences("aura.cloud", MODE_PRIVATE).getString("endpoint", "").orEmpty()
         api = NeteaseApi({ endpoint }, { cookie }, metadataCache = CloudMetadataCache(cacheDir.resolve("cloud-metadata")))
         I18n.initialize(this, settings.value.language)
+        btm.m.auraplayer.download.MusicDownloads.resume(this)
     }
     override fun newImageLoader(context: Context): ImageLoader = ImageLoader.Builder(context)
         .memoryCache { MemoryCache.Builder().maxSizePercent(context, .15).build() }

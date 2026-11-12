@@ -30,8 +30,33 @@ internal class OfficialNeteaseClient(
             "login/status" -> call("/api/w/nuser/account/get", JSONObject(), authenticated)
             "user/playlist" -> call("/api/user/playlist", JSONObject().put("uid", value("uid"))
                 .put("limit", value("limit", "100")).put("offset", value("offset", "0")).put("includeVideo", true), authenticated)
-            "cloudsearch" -> call("/api/cloudsearch/pc", JSONObject().put("s", value("keywords")).put("type", 1)
+            "cloudsearch" -> call("/api/cloudsearch/pc", JSONObject().put("s", value("keywords")).put("type", value("type", "1").toInt())
                 .put("limit", value("limit", "50")).put("offset", value("offset", "0")).put("total", true), authenticated)
+            "search" -> call("/api/search/voice/get", JSONObject().put("keyword", value("keywords")).put("scene", "normal")
+                .put("limit", value("limit", "50")).put("offset", value("offset", "0")), authenticated)
+            "user/record" -> call("/api/v1/play/record", JSONObject().put("uid", value("uid")).put("type", value("type", "0")), authenticated)
+            "likelist" -> call("/api/song/like/get", JSONObject().put("uid", value("uid")), authenticated)
+            "like" -> call("/api/radio/like", JSONObject().put("trackId", value("id")).put("like", value("like") == "true").put("alg", "itembased").put("time", "3"), authenticated)
+            "playlist/tracks" -> {
+                val tracks = value("tracks").split(',').filter(String::isNotBlank)
+                fun add(ids: List<String>) = call("/api/playlist/manipulate/tracks", JSONObject()
+                    .put("op", value("op", "add")).put("pid", value("pid"))
+                    .put("trackIds", JSONArray(ids).toString()).put("imme", "true"), authenticated)
+                try { add(tracks) } catch (e: CloudApiException) {
+                    if (e.status == 512) add(tracks + tracks) else throw e
+                }
+            }
+            "album/sublist" -> call("/api/album/sublist", JSONObject().put("limit", value("limit", "25")).put("offset", value("offset", "0")).put("total", true), authenticated)
+            "dj/program" -> call("/api/dj/program/byradio", JSONObject().put("radioId", value("rid")).put("limit", value("limit", "50")).put("offset", value("offset", "0")).put("asc", false), authenticated)
+            "dj/program/detail" -> call("/api/dj/program/detail", JSONObject().put("id", value("id")), authenticated)
+            "album" -> call("/api/v1/album/${value("id")}", JSONObject(), authenticated)
+            "artist/detail" -> call("/api/artist/head/info/get", JSONObject().put("id", value("id")), authenticated)
+            "artist/album" -> call("/api/artist/albums/${value("id")}", JSONObject().put("limit", value("limit", "12")).put("offset", value("offset", "0")), authenticated)
+            "artist/songs" -> call("/api/v1/artist/songs", JSONObject().put("id", value("id"))
+                .put("private_cloud", "true").put("work_type", 1)
+                .put("limit", value("limit", "50")).put("offset", value("offset", "0")).put("order", value("order", "hot")), authenticated)
+            "song/download/url/v1" -> call("/api/song/enhance/download/url/v1", JSONObject().put("id", value("id"))
+                .put("level", value("level", "standard")).put("immerseType", "c51"), authenticated, eapi = true, androidClient = value("level") == "vivid")
             "playlist/track/all" -> {
                 val key = playlistKey(value("id"))
                 val index = metadataCache?.read(key) ?: run {
@@ -56,6 +81,9 @@ internal class OfficialNeteaseClient(
                 val next = minOf(ids.length(), offset + requested.length())
                 result.put("nextOffset", next).put("total", ids.length()).put("more", next < ids.length())
             }
+            "song/detail" -> call("/api/v3/song/detail", JSONObject().put("c", JSONArray().apply {
+                value("ids").split(',').mapNotNull(String::toLongOrNull).forEach { put(JSONObject().put("id", it)) }
+            }.toString()), authenticated)
             "song/music/detail" -> call("/api/song/music/detail/get", JSONObject().put("songId", value("id")), authenticated)
             "song/url/v1" -> call("/api/song/enhance/player/url/v1", JSONObject().put("ids", "[${value("id")}]")
                 .put("level", value("level", "standard")).put("encodeType", if (value("level") == "vivid") "mp3" else "flac").apply { if (value("level") == "sky") put("immerseType", "c51") }, authenticated, eapi = true, androidClient = value("level") == "vivid")

@@ -151,7 +151,7 @@ fun LegalPage(page: String, padding: PaddingValues) {
     val text = when (page) {
         "license" -> remember { context.assets.open("licenses/AGPL-3.0-or-later.txt").bufferedReader().use { it.readText() } }
         "privacy" -> tr("privacy_body", "Aura Player 在本机读取音频媒体库，不上传本地音乐文件。默认通过网易云官方 HTTPS 页面登录，并直接连接网易云服务；选择自建 API 时，请求会发送到你配置的服务。登录 Cookie 使用 Android Keystore 加密保存。更改服务地址或退出登录会清除本地登录状态。歌曲封面与在线播放会请求相应的网络服务。在线歌词检索会向网易云、QQ、酷我、酷狗或 LrcLib 发送歌名、艺术家、专辑与时长，并使用在线歌曲 ID 检索 AMLL / TTML Hub。不会上传本地音频内容。请仅使用你信任的服务地址。")
-        "agreement" -> tr("agreement_body", "请仅播放你有权访问的音乐内容。网易云音乐服务由第三方提供，其账号、地区与会员权限仍然适用。本应用不提供付费内容解锁与音乐下载功能。")
+        "agreement" -> tr("agreement_body", "请仅播放与下载你有权访问的音乐内容。网易云音乐服务由第三方提供，其账号、地区与会员权限仍然适用。下载通过网易云返回的下载地址与系统下载器完成，本应用不提供付费内容解锁。")
         "disclaimer" -> tr("disclaimer_body", "本软件按现状提供，不对第三方 API 的持续可用性作保证。音乐版权归相应权利人所有。请勿将本软件用于侵犯他人权利的行为。")
         "contributors" -> tr("contributors_body", "Aura Player：btm_m\n\n界面与玻璃组件：HyperChanger / btm_m\n首页结构：Retro Music / Hemanth Savarala 与贡献者\nMIUIX：Yukonga 与贡献者\nBackdrop：Kyant 与贡献者\n网易云 API：NeteaseCloudMusicApiEnhanced 与贡献者\n锁屏歌词获取、解析与动画：HyperMusicCover / zyl6932、HyperChanger / btm_m\n歌词匹配与解密：HyperLyrics Enhanced / juren233\n歌词解析依赖：Accompanist Lyrics Core\n封面取色：MaterialKolor\n播放器图标：Apple Music / Apple Inc.（队列选中态与无底收藏图标已适配）")
         else -> remember { context.assets.open("NOTICE").bufferedReader().use { it.readText() } + "\n\n" +

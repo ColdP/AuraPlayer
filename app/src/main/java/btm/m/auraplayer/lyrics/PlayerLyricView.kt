@@ -29,6 +29,9 @@ class PlayerLyricView(context: Context) : View(context) {
     private var below = 3
     private var lyricScale = 1f
     private var generation = 0
+    private var builtWidth = 0
+    private var builtMode = -1
+    private var builtScale = 0f
     private val d = resources.displayMetrics.density
     private val sd = resources.displayMetrics.scaledDensity
     private var base = FloatArray(0); private var heights = FloatArray(0)
@@ -44,6 +47,7 @@ class PlayerLyricView(context: Context) : View(context) {
         override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
     }
     private val pending = mutableSetOf<String>()
+    private val maskBlend = LyricMaskBlend()
     private var focus = -1
     private var springK = 170f
     private var lastFrame = 0L
@@ -61,14 +65,18 @@ class PlayerLyricView(context: Context) : View(context) {
     private val timeGutter = max(44f * d, timestampPaint.measureText("000:00") + 12f * d)
     private var lastPosition = 0L
     private var jumped = false
+    private var primeAppearance = true
     var onSeek: (Long) -> Unit = {}
+    var hdrEnabled: Boolean = false
+    private val extended = ColorSpace.get(ColorSpace.Named.EXTENDED_SRGB)
     private val colors = object : LyricWordRenderer.Colors {
         override fun ink(alpha: Float, emphasis: Float, backing: Boolean) = Color.pack(1f, 1f, 1f, alpha.coerceIn(0f, 1f))
-        override fun white(alpha: Float, gain: Float) = Color.pack(1f, 1f, 1f, alpha.coerceIn(0f, 1f))
-        override fun glowGain(glow: Float) = 1f
+        override fun white(alpha: Float, gain: Float) = if (hdrEnabled) Color.pack(gain, gain, gain, alpha.coerceIn(0f, 1f), extended)
+            else Color.pack(1f, 1f, 1f, alpha.coerceIn(0f, 1f))
+        override fun glowGain(glow: Float) = if (hdrEnabled) 1f + 2f * glow else 1f
     }
 
-    override fun onAttachedToWindow() { super.onAttachedToWindow(); scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate); rebuild() }
+    override fun onAttachedToWindow() { super.onAttachedToWindow(); scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate); rebuild(); invalidate() }
     override fun onDetachedFromWindow() { scope?.cancel(); scope = null; pending.clear(); super.onDetachedFromWindow() }
     fun submit(lines: List<LyricLine>, translation: Boolean, pronunciation: Boolean, textScale: Float = 1f) {
         val mode = (if (translation) 1 else 0) or (if (pronunciation) 2 else 0)
@@ -82,6 +90,11 @@ class PlayerLyricView(context: Context) : View(context) {
         if (abs(ms - expected) > 800) jumped = true
         playhead = ms; sampledAt = now; playing = isPlaying
         invalidate()
+    }
+    fun hdrHighlightWanted(): Boolean {
+        if (!playing || source.isEmpty() || dragging || SystemClock.uptimeMillis() < manualUntil) return false
+        val ms = (playhead + SystemClock.uptimeMillis() - sampledAt).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        return source.any { line -> LyricGlow.arm(line, ms, LyricWordRenderer.GLOW_MIN_MS, 250, LyricWordRenderer.GLOW_TAIL_MS) }
     }
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -98,14 +111,21 @@ class PlayerLyricView(context: Context) : View(context) {
     private fun rebuild() {
         val owner = scope ?: return
         if (width <= 0) return
-        val gen = ++generation
         // Reserve a stable timestamp gutter; browsing never reflows or clips the lyric text.
         val lines = requestedSource; val mode = below; val scale = lyricScale
+        // HDR moves the same view between parents. Its rows and masks remain valid at the
+        // same width; rebuilding them would restart every row's appearance mid-transition.
+        if (source === lines && builtWidth == width && builtMode == mode && builtScale == scale) return
+        val gen = ++generation
+        val targetWidth = width
+        val viewportHeight = height.toFloat()
+        val positionMs = (playhead + if (playing) SystemClock.uptimeMillis() - sampledAt else 0L)
+            .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
         val textWidth = max(1, width - (52 * d + timeGutter).toInt())
         buildJob?.cancel()
         buildJob = owner.launch {
-            val built = withContext(Dispatchers.Default) {
-                lines.map { line ->
+            val (built, prepared) = withContext(Dispatchers.Default) {
+                val built = lines.map { line ->
                     ensureActive()
                     val p = paint(30f * scale, 700); val tp = paint(17f * scale, 500)
                     val main = layout(line.text, p, textWidth, line.opposite)
@@ -119,15 +139,25 @@ class PlayerLyricView(context: Context) : View(context) {
                     Row(line, main, under, p, tp, xs, glow, bg, bp, bgXs, bgGlow,
                         main.height + (if (bg == null) 0f else bg.height + 3 * d) + (if (under == null) 0f else under.height + 5 * d))
                 }
+                val prepared = linkedMapOf<String, Bitmap>()
+                for ((i, distance) in initialLyricMaskDepths(lines, FloatArray(built.size) { built[it].height },
+                    positionMs, viewportHeight, 22 * d, 40 * d)) {
+                    ensureActive()
+                    prepared["$i:$distance"] = buildDepthMask(built[i], distance, mode)
+                }
+                built to prepared
             }
             if (gen != generation) return@launch
             source = lines; rows = built; masks.evictAll(); pending.clear()
+            prepared.forEach { (key, bitmap) -> masks.put(key, bitmap) }
+            maskBlend.reset(prepared.keys)
+            builtWidth = targetWidth; builtMode = mode; builtScale = scale
             heights = FloatArray(rows.size) { rows[it].height }
             var y = 0f
             base = FloatArray(rows.size) { i -> y.also { y += heights[i] + 22 * d } }
             scroll = FloatArray(rows.size); aim = scroll.clone(); next = scroll.clone(); velocity = scroll.clone()
             emphasis = scroll.clone(); lit = scroll.clone(); blurs = scroll.clone(); scales = FloatArray(rows.size) { .97f }
-            aimAt = LongArray(rows.size); singing.reset(); transition.reset(base); focus = -1; lastFrame = 0
+            aimAt = LongArray(rows.size); singing.reset(); transition.reset(base); focus = -1; lastFrame = 0; primeAppearance = true
             manual = 0f; manualUntil = 0; browseAlpha = 0f; browseSelected = -1; invalidate()
         }
     }
@@ -170,18 +200,36 @@ class PlayerLyricView(context: Context) : View(context) {
         if (abs(manual) < .2f) manual = 0f
         val browseTarget = if (browsing) 1f else 0f
         browseAlpha = LyricMotion.approach(browseAlpha, browseTarget, dt, .10f)
-        if (browsing) browseSelected = rows.indices.minByOrNull {
-            abs(singing.position(it, base) - scroll[it] + manual)
-        } ?: -1
+        if (browsing) browseSelected = nearestLyricRow(rows.size, height * .5f) {
+            anchor + singing.position(it, base) - scroll[it] + manual + heights[it] / 2
+        }
         else if (browseAlpha < .005f) { browseAlpha = 0f; browseSelected = -1 }
-        transition.update(singing, base, -1, .6f, 1f, dt, false)
+        transition.update(singing, base, -1, .6f, 1f, dt, primeAppearance)
         var moving = abs(manual) > .2f || abs(browseAlpha - browseTarget) > .005f
         val c = sqrt(springK) * LyricMotion.DAMPING_MULT
+        // Browsing follows the row at the viewing anchor rather than the playback clock.
+        // The same center becomes the timestamp/selection target during manual scrolling.
+        val visualFocus = if (browsing && browseSelected >= 0) browseSelected else -1
+        // A newly attached/rebuilt lyric viewport already represents the current playhead.
+        // Start at that focus's appearance, rather than fading from an all-unselected frame.
+        // Subsequent row changes keep their normal animated transitions.
+        if (primeAppearance) {
+            for (i in rows.indices) {
+                val selected = if (visualFocus >= 0) i == visualFocus else singing.contains(i)
+                val distance = if (visualFocus >= 0) abs(i - visualFocus) else singing.distance(i)
+                emphasis[i] = if (selected) 1f else 0f
+                lit[i] = if (selected && (visualFocus >= 0 || ms >= rows[i].line.start)) 1f else 0f
+                scales[i] = if (selected) 1f else .97f
+                blurs[i] = LyricMotion.depthBlur(distance, d)
+            }
+            primeAppearance = false
+        }
         for ((i, row) in rows.withIndex()) {
             moving = LyricMotion.step(i, scroll, aim, next, velocity, aimAt, now, dt, false, springK, c, height * LyricMotion.SEEK_SPEED_BANDS) != 0 || moving
-            val focused = singing.contains(i)
-            moving = LyricMotion.appearance(i, emphasis, lit, scales, blurs, focused, false, ms, row.line.start,
-                now >= aimAt[i], dt, singing.count, heights[i], height.toFloat(), LyricMotion.depthBlur(singing.distance(i), d)) != 0 || moving
+            val focused = if (visualFocus >= 0) i == visualFocus else singing.contains(i)
+            val focusDistance = if (visualFocus >= 0) abs(i - visualFocus) else singing.distance(i)
+            moving = LyricMotion.appearance(i, emphasis, lit, scales, blurs, focused, visualFocus >= 0, ms, row.line.start,
+                now >= aimAt[i], dt, singing.count, heights[i], height.toFloat(), LyricMotion.depthBlur(focusDistance, d)) != 0 || moving
             val y = anchor + singing.position(i, base) - scroll[i] + manual
             if (y + row.height < -40 * d || y > height + 40 * d) continue
             if (i == browseSelected && browseAlpha > 0f) {
@@ -199,31 +247,37 @@ class PlayerLyricView(context: Context) : View(context) {
             val alpha = (.4f + .6f * lit[i]) * transition.alpha(i)
             val save = canvas.save()
             canvas.translate(26 * d, y); canvas.scale(scales[i], scales[i], 0f, row.height / 2)
-            val distance = singing.distance(i).coerceIn(1, 4)
-            val blurred = if (!focused && emphasis[i] < .02f && blurs[i] > .7f * d) blurred(i, distance) else null
+            val distance = focusDistance.coerceIn(1, 4)
+            // Blend the cached depth mask and the sharp glyphs; no abrupt bitmap swap.
+            val blurred = if (blurs[i] > .01f * d) blurred(i, distance) else null
+            val readiness = maskBlend.amount("$i:$distance", blurred != null, dt)
+            if (blurred != null && readiness < 1f) moving = true
+            val blurMix = (blurs[i] / LyricMotion.depthBlur(distance, d)).coerceIn(0f, 1f) * readiness
             if (blurred != null) {
-                imagePaint.alpha = (alpha * 255).toInt().coerceIn(0, 255)
+                imagePaint.alpha = (alpha * blurMix * 255).toInt().coerceIn(0, 255)
                 val pad = 16 * d
                 canvas.drawBitmap(blurred, null, RectF(-pad, -pad, row.main.width + pad, row.height + pad), imagePaint)
-            } else {
+            }
+            if (blurMix < .999f) {
+                val sharpAlpha = alpha * (1f - blurMix)
                 row.paint.alpha = 255
-                if (row.line.hasWords() && focused) words.draw(canvas, row.line, row.main, row.paint, row.xs,
-                    emphasis[i], alpha, alpha * .4f, 1.8f * d, true, 0, ms, row.glow, colors)
-                else { row.paint.color = Color.WHITE; row.paint.alpha = (alpha * 255).toInt(); row.main.draw(canvas) }
+                if (row.line.hasWords() && focused && visualFocus < 0) words.draw(canvas, row.line, row.main, row.paint, row.xs,
+                    emphasis[i], sharpAlpha, sharpAlpha * .4f, 1.8f * d, true, 0, ms, row.glow, colors)
+                else { row.paint.color = Color.WHITE; row.paint.alpha = (sharpAlpha * 255).toInt(); row.main.draw(canvas) }
                 var underY = row.main.height.toFloat()
                 row.bg?.let { bg ->
                     val saveBg = canvas.save()
                     canvas.translate(0f, underY + 3 * d)
                     val backing = row.line.bg
-                    if (backing.hasWords() && focused) words.draw(canvas, backing, bg, row.bgPaint, row.bgXs,
-                        emphasis[i], alpha * .8f, alpha * .32f, 1.08f * d, true, 1, ms, row.bgGlow, colors)
-                    else { row.bgPaint.color = Color.WHITE; row.bgPaint.alpha = (alpha * .8f * 255).toInt(); bg.draw(canvas) }
+                    if (backing.hasWords() && focused && visualFocus < 0) words.draw(canvas, backing, bg, row.bgPaint, row.bgXs,
+                        emphasis[i], sharpAlpha * .8f, sharpAlpha * .32f, 1.08f * d, true, 1, ms, row.bgGlow, colors)
+                    else { row.bgPaint.color = Color.WHITE; row.bgPaint.alpha = (sharpAlpha * .8f * 255).toInt(); bg.draw(canvas) }
                     canvas.restoreToCount(saveBg)
                     underY += bg.height + 3 * d
                 }
                 row.below?.let {
                     canvas.translate(0f, underY + 5 * d)
-                    row.underPaint.color = Color.WHITE; row.underPaint.alpha = (alpha * .62f * 255).toInt()
+                    row.underPaint.color = Color.WHITE; row.underPaint.alpha = (sharpAlpha * .62f * 255).toInt()
                     it.draw(canvas)
                 }
             }
@@ -259,29 +313,38 @@ class PlayerLyricView(context: Context) : View(context) {
         masks.get(key)?.let { return it }
         if (!pending.add(key)) return null
         val gen = generation; val row = rows[index]; val owner = scope ?: return null
+        // Clone on the UI thread. The live TextPaint alpha/shader is changed during onDraw;
+        // reading it from a worker can produce different mask brightness on adjacent frames.
+        val snapshot = row.copy(paint = TextPaint(row.paint), underPaint = TextPaint(row.underPaint), bgPaint = TextPaint(row.bgPaint))
+        val mode = builtMode
         owner.launch {
             val bitmap = withContext(Dispatchers.Default) {
-                val down = if (distance >= 3) 4 else 2
-                val pad = (16 * d).toInt(); val radius = LyricMotion.depthBlur(distance, d)
-                val w = row.main.width + pad * 2; val h = row.height.toInt() + pad * 2
-                val image = Bitmap.createBitmap(max(1, w / down), max(1, h / down), Bitmap.Config.ARGB_8888)
-                val out = Canvas(image); out.scale(1f / down, 1f / down); out.translate(pad.toFloat(), pad.toFloat())
-                val p = TextPaint(row.paint).apply { maskFilter = BlurMaskFilter(radius, BlurMaskFilter.Blur.NORMAL) }
-                val tp = TextPaint(row.underPaint).apply { alpha = 158; maskFilter = BlurMaskFilter(radius, BlurMaskFilter.Blur.NORMAL) }
-                layout(row.line.text, p, row.main.width, row.line.opposite).draw(out)
-                var underY = row.main.height.toFloat()
-                row.line.bg?.let { bg ->
-                    val saved = out.save(); out.translate(0f, underY + 3 * d)
-                    val bp = TextPaint(row.bgPaint).apply { alpha = 204; maskFilter = BlurMaskFilter(radius, BlurMaskFilter.Blur.NORMAL) }
-                    val bl = layout(bg.text, bp, row.main.width, row.line.opposite); bl.draw(out)
-                    out.restoreToCount(saved); underY += bl.height + 3 * d
-                }
-                row.line.under(below)?.let { out.translate(0f, underY + 5 * d); layout(it, tp, row.main.width, row.line.opposite).draw(out) }
-                image
+                buildDepthMask(snapshot, distance, mode)
             }
             if (gen == generation) { pending.remove(key); masks.put(key, bitmap); invalidate() }
         }
         return null
+    }
+
+    /** Worker-owned paints for both first-viewport preparation and later cache misses. */
+    private fun buildDepthMask(row: Row, distance: Int, mode: Int): Bitmap {
+        val down = if (distance >= 3) 4 else 2
+        val pad = (16 * d).toInt(); val radius = LyricMotion.depthBlur(distance, d)
+        val w = row.main.width + pad * 2; val h = row.height.toInt() + pad * 2
+        val image = Bitmap.createBitmap(max(1, w / down), max(1, h / down), Bitmap.Config.ARGB_8888)
+        val out = Canvas(image); out.scale(1f / down, 1f / down); out.translate(pad.toFloat(), pad.toFloat())
+        val p = TextPaint(row.paint).apply { color = Color.WHITE; alpha = 255; maskFilter = BlurMaskFilter(radius, BlurMaskFilter.Blur.NORMAL) }
+        val tp = TextPaint(row.underPaint).apply { alpha = 158; maskFilter = BlurMaskFilter(radius, BlurMaskFilter.Blur.NORMAL) }
+        layout(row.line.text, p, row.main.width, row.line.opposite).draw(out)
+        var underY = row.main.height.toFloat()
+        row.line.bg?.let { bg ->
+            val saved = out.save(); out.translate(0f, underY + 3 * d)
+            val bp = TextPaint(row.bgPaint).apply { alpha = 204; maskFilter = BlurMaskFilter(radius, BlurMaskFilter.Blur.NORMAL) }
+            val bl = layout(bg.text, bp, row.main.width, row.line.opposite); bl.draw(out)
+            out.restoreToCount(saved); underY += bl.height + 3 * d
+        }
+        row.line.under(mode)?.let { out.translate(0f, underY + 5 * d); layout(it, tp, row.main.width, row.line.opposite).draw(out) }
+        return image
     }
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {

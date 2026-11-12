@@ -32,7 +32,10 @@ The app ports official request mapping and WEAPI/EAPI encryption to Kotlin/JCA.
 Original MIT license: licenses/NeteaseCloudMusicApiEnhanced-MIT.txt.
 Custom API server code remains an optional separate deployment.
 Original server authors and contributors retain their copyrights.
-Aura requests song/url/v1 with unblock=false and does not implement downloads.
+Aura requests song/url/v1 with unblock=false. User-initiated downloads use
+song/download/url/v1 and Android DownloadManager. Downloaded NCM containers are
+decoded locally; FLAC Vorbis comments and MP3 ID3 tags are written without re-encoding audio.
+AndroidX WorkManager — Apache-2.0, https://developer.android.com/jetpack/androidx/releases/work
 
 MIUIX cascading menu source adapted in ui/cascade; popup host and surfaces changed
 to HyperChanger Backdrop glass. License: licenses/MIUIX-Apache-2.0.txt.
@@ -73,3 +76,11 @@ Copyright Apple Inc. and original rights holders; these proprietary resources
 are not relicensed under the application's AGPL license.
 Extraction hashes are recorded locally in the Git-ignored docs/ directory.
 The former NetEase player controls have been replaced.
+
+ZXing Core 3.5.3 — https://github.com/zxing/zxing
+Copyright ZXing authors, Apache-2.0; used unmodified for DSP preset QR encoding
+and gallery-image decoding. Full license and third-party notices are included in
+licenses/ZXing-Apache-2.0.txt. Preset DSP algorithms and sharing glue are Aura's
+independent implementations; research references: AUDIO_EFFECTS.md in the source distribution.
+
+Player appearance additions (2026-11-12): PlayerLyricHost adapts the bounded attached-panel HDR isolation approach from HyperChanger LyricWindow/LyricView (HyperMusicCover-derived, AGPL-3.0). Extended-sRGB highlights and the 3x requested headroom apply only to held-note lyrics; inline SDR fallback and Aura activity lifecycle replace lockscreen/Xposed ownership. PlayerLyricView adds visual-center focus while browsing and smooth sharp/depth-mask blending. Existing upstream notices and license texts remain applicable.

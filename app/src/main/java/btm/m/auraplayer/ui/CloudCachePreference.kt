@@ -41,6 +41,7 @@ internal fun CloudCachePreference(model: AuraViewModel) {
                 val label = when (category) {
                     CloudCacheCategory.ARTWORK -> tr("cache_artwork", "封面与图片")
                     CloudCacheCategory.METADATA -> tr("cache_metadata", "歌单与歌曲信息")
+                    CloudCacheCategory.PLAYBACK_AUDIO -> tr("cache_playback_audio", "播放音频缓存")
                 }
                 fun toggle() { selected = if (category in selected) selected - category else selected + category }
                 BasicComponent(title = label, summary = size(sizes?.get(category) ?: 0L),

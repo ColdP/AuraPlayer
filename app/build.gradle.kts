@@ -26,6 +26,8 @@ android {
     }
 }
 dependencies {
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("androidx.work:work-runtime-ktx:2.11.0")
     implementation("com.mocharealm.accompanist:lyrics-core:0.4.7")
     implementation("com.materialkolor:material-color-utilities:5.0.0")
     implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.4")

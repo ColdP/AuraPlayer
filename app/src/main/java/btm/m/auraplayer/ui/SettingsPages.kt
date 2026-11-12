@@ -67,6 +67,13 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
             }
         }
         item {
+            Group(tr("playback", "播放")) {
+                Preference(tr("audio_effects", "音效")) { open("audio_effects") }
+                Preference(tr("now_playing_page", "正在播放页面")) { open("now_playing_settings") }
+                Preference(tr("audio_settings", "音频")) { open("audio_settings") }
+            }
+        }
+        item {
             Group(tr("information", "信息")) {
                 Preference(tr("about", "关于")) { open("about") }
                 Preference(tr("donate", "捐赠")) { open("donate") }
@@ -179,7 +186,7 @@ fun ThemePage(model: AuraViewModel, padding: PaddingValues) {
 }
 
 @Composable
-fun LoginPage(model: AuraViewModel, padding: PaddingValues) {
+fun LoginPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Unit) {
     val context = LocalContext.current
     var endpoint by rememberSaveable { mutableStateOf(model.app.endpoint) }
     var country by rememberSaveable { mutableStateOf("86") }
@@ -232,7 +239,10 @@ fun LoginPage(model: AuraViewModel, padding: PaddingValues) {
         }
         item {
             SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
-                CloudCachePreference(model)
+                Column {
+                    Preference(tr("downloaded_music", "已下载的音乐"), onClick = { open("downloads") })
+                    CloudCachePreference(model)
+                }
             }
         }
         item {

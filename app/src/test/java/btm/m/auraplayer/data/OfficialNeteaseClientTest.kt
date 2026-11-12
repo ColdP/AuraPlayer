@@ -55,4 +55,12 @@ class OfficialNeteaseClientTest {
         client.request("captcha/sent", mapOf("phone" to "12345"), false)
         assertFalse(server.takeRequest().getHeader("Cookie")!!.contains("MUSIC_U"))
     }
+    @Test fun officialPlaylistAdditionRetriesTheDocumented512Response() = withServer { server, client ->
+        server.enqueue(MockResponse().setBody("""{"code":512}"""))
+        server.enqueue(MockResponse().setBody("""{"code":200}"""))
+        assertEquals(200, client.request("playlist/tracks", mapOf("pid" to "10", "tracks" to "42", "op" to "add"), true).getInt("code"))
+        assertEquals("/weapi/playlist/manipulate/tracks", server.takeRequest().path)
+        assertEquals("/weapi/playlist/manipulate/tracks", server.takeRequest().path)
+        assertEquals(2, server.requestCount)
+    }
 }

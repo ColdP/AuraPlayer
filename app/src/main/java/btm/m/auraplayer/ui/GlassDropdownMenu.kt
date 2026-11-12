@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -76,6 +77,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 private val GlassMenuCornerRadius = 25.dp
 private val GlassMenuShadowPadding = 28.dp
 private val GlassMenuHorizontalOffset = 18.dp
+
+/** Keep the measured popup inside the safe window; its list scrolls at full item size. */
+internal fun glassMenuPositionInWindow(preferred: Int, popupSize: Int, safeStart: Int, safeEnd: Int): Int =
+    preferred.coerceIn(safeStart, (safeEnd - popupSize).coerceAtLeast(safeStart))
 
 @Composable
 fun GlassDropdownPreference(
@@ -165,10 +170,13 @@ fun GlassIconDropdownMenu(
     backdrop: Backdrop?,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    onExpandedChange: (Boolean) -> Unit = {},
     trigger: (@Composable (onClick: () -> Unit, enabled: Boolean) -> Unit)? = null,
     content: @Composable () -> Unit = {},
 ) {
     val expanded = remember { mutableStateOf(false) }
+    LaunchedEffect(expanded.value) { onExpandedChange(expanded.value) }
+    DisposableEffect(Unit) { onDispose { onExpandedChange(false) } }
     val available = enabled && entry.items.isNotEmpty()
     Box(modifier) {
         val toggleExpanded = { if (available) expanded.value = !expanded.value }
@@ -301,8 +309,12 @@ private fun GlassDropdownPopup(
                     .pointerInput(Unit) { detectTapGestures(onTap = { currentDismiss() }) },
             ) { measurables, constraints ->
                 val measurable = measurables.single()
-                val maxPopupHeight = maxHeight?.roundToPx()
-                    ?: (layoutInfo.windowBounds.height - layoutInfo.popupMargin.top - layoutInfo.popupMargin.bottom)
+                val safeTop = layoutInfo.windowBounds.top + layoutInfo.popupMargin.top
+                val safeBottom = layoutInfo.windowBounds.bottom - layoutInfo.popupMargin.bottom
+                // ListPopupColumn already provides vertical scrolling. Bound its
+                // viewport to the safe window without shrinking any menu items.
+                val maxPopupHeight = minOf(maxHeight?.roundToPx() ?: constraints.maxHeight,
+                    constraints.maxHeight, (safeBottom - safeTop).coerceAtLeast(1))
                 val placeable = measurable.measure(
                     constraints.copy(minWidth = 0, minHeight = 0, maxHeight = maxPopupHeight.coerceAtLeast(1)),
                 )
@@ -314,8 +326,15 @@ private fun GlassDropdownPopup(
                     layoutInfo.popupMargin,
                     alignment,
                 )
-                val popupY = if (useAnchorVerticalPosition) {
-                    result.y
+                val preferredY = if (useAnchorVerticalPosition) {
+                    // GlassPopupSurface reserves shadow padding inside the popup. Align
+                    // the visible glass surface with the preference anchor instead of
+                    // leaving a full preference-height gap below it.
+                    if (result.y < parentBounds.top) {
+                        parentBounds.top - placeable.height + shadowPadding
+                    } else {
+                        parentBounds.bottom - shadowPadding
+                    }
                 } else {
                     val safeInset = (parentBounds.height * .10f).roundToInt()
                     val minY = layoutInfo.windowBounds.top + layoutInfo.popupMargin.top
@@ -323,9 +342,15 @@ private fun GlassDropdownPopup(
                         .coerceAtLeast(minY)
                     (parentBounds.top + safeInset - shadowPadding).coerceIn(minY, maxY)
                 }
+                // Anchor placement is a preference, never permission to bypass
+                // the provider's screen bounds (especially for long quality lists).
+                val popupY = glassMenuPositionInWindow(preferredY, placeable.height, safeTop, safeBottom)
+                val popupX = glassMenuPositionInWindow(result.x + horizontalOffsetPx, placeable.width,
+                    layoutInfo.windowBounds.left + layoutInfo.popupMargin.left,
+                    layoutInfo.windowBounds.right - layoutInfo.popupMargin.right)
                 layout(constraints.maxWidth, constraints.maxHeight) {
                     placeable.place(
-                        result.x + horizontalOffsetPx - hostPosition.x.toInt(),
+                        popupX - hostPosition.x.toInt(),
                         popupY - hostPosition.y.toInt(),
                     )
                 }
@@ -361,11 +386,13 @@ private fun GlassPopupSurface(
             )
         }
     }
-    Box(Modifier.padding(GlassMenuShadowPadding)) {
+    // Report the full popup bounds (including the shadow inset) to the position
+    // provider. Reporting only the inner glass surface makes Miuix position the
+    // popup as if it were shorter, leaving roughly one preference row of gap.
+    Box(Modifier.onGloballyPositioned { onSizeChanged(it.size) }.padding(GlassMenuShadowPadding)) {
         Box(
             Modifier
                 .sizeIn(minWidth = DropdownDefaults.MinWidth)
-                .onGloballyPositioned { onSizeChanged(it.size) }
                 .graphicsLayer {
                     val scale = .24f + .76f * fraction
                     scaleX = scale

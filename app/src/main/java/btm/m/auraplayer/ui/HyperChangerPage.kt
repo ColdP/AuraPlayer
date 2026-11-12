@@ -49,6 +49,8 @@ internal fun AppPage(
     showLargeTitle: Boolean = true,
     onLargeTitleClick: (() -> Unit)? = null,
     pageBackground: (@Composable BoxScope.() -> Unit)? = null,
+    useLegacyTopBarBackdrop: Boolean = pageBackground != null,
+    topBarTint: ComposeColor? = null,
     header: @Composable () -> Unit = {},
     overlay: @Composable BoxScope.() -> Unit = {},
     coveredBlur: Dp = 0.dp,
@@ -56,9 +58,10 @@ internal fun AppPage(
 ) {
     val scroll = MiuixScrollBehavior()
     val surface = MiuixTheme.colorScheme.surface
-    val backdrop = rememberLayerBackdrop { drawRect(surface); drawContent() }
+    val materialTint = topBarTint ?: surface
+    val backdrop = rememberLayerBackdrop { drawRect(materialTint); drawContent() }
     val progressiveBackdrop = rememberMiuixLayerBackdrop {
-        drawRect(surface)
+        drawRect(materialTint)
         drawContent()
     }
     val collapsedFraction = scroll.state.collapsedFraction.coerceIn(0f, 1f)
@@ -73,7 +76,7 @@ internal fun AppPage(
         LocalDialogBackdrop provides backdrop,
     ) {
     Box(Modifier.fillMaxSize().background(surface)) {
-    pageBackground?.let {
+    if (useLegacyTopBarBackdrop) pageBackground?.let {
         Box(Modifier.fillMaxSize().layerBackdrop(backdrop)) { it() }
     }
     Scaffold(
@@ -85,12 +88,14 @@ internal fun AppPage(
             ProgressiveTopBarMaterial(
                 backdrop = progressiveBackdrop,
                 collapsedFraction = topBarMaterialProgress,
-                legacyBackdrop = pageBackground?.let { backdrop },
+                tint = materialTint,
+                legacyBackdrop = if (useLegacyTopBarBackdrop) pageBackground?.let { backdrop } else null,
             ) {
                 Column(Modifier.fillMaxWidth()) {
                     if (compactTopBar) {
                         SmallTopAppBar(
                             title = title,
+                            scrollBehavior = scroll,
                             color = ComposeColor.Transparent,
                             navigationIcon = {
                                 navigationIcon?.invoke() ?: onBack?.let { GlassBackButton(backdrop, 1f, it) }
@@ -148,8 +153,9 @@ internal fun AppPage(
     ) { padding ->
         val contentModifier = Modifier.fillMaxSize().layerBackdrop(backdrop)
         Box(
-            if (pageBackground == null) contentModifier.miuixLayerBackdrop(progressiveBackdrop) else contentModifier
+            if (!useLegacyTopBarBackdrop) contentModifier.miuixLayerBackdrop(progressiveBackdrop) else contentModifier
         ) {
+            if (!useLegacyTopBarBackdrop) pageBackground?.invoke(this)
             CompositionLocalProvider(LocalPageScroll provides scroll) { content(padding, scroll) }
         }
     }
@@ -162,6 +168,7 @@ internal fun AppPage(
 private fun ProgressiveTopBarMaterial(
     backdrop: MiuixLayerBackdrop,
     collapsedFraction: Float,
+    tint: ComposeColor,
     legacyBackdrop: LayerBackdrop? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
@@ -193,6 +200,7 @@ private fun ProgressiveTopBarMaterial(
                 ProgressiveTopBarBackground(
                     backdrop = backdrop,
                     progress = collapsedFraction,
+                    tint = tint,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -235,10 +243,10 @@ private fun LegacyProgressiveTopBarBackground(
 private fun ProgressiveTopBarBackground(
     backdrop: MiuixLayerBackdrop,
     progress: Float,
+    tint: ComposeColor,
     modifier: Modifier = Modifier,
 ) {
     if (progress <= 0f) return
-    val surface = MiuixTheme.colorScheme.surface
     Box(modifier.graphicsLayer { alpha = progress }) {
         Box(
             Modifier.matchParentSize().progressiveTextureBlur(
@@ -251,7 +259,7 @@ private fun ProgressiveTopBarBackground(
         Box(
             Modifier.matchParentSize().background(
                 Brush.verticalGradient(
-                    0f to surface.copy(alpha = PROGRESSIVE_TOP_BAR_OVERLAY_ALPHA),
+                    0f to tint.copy(alpha = PROGRESSIVE_TOP_BAR_OVERLAY_ALPHA),
                     PROGRESSIVE_TOP_BAR_OVERLAY_END to ComposeColor.Transparent,
                     1f to ComposeColor.Transparent,
                 )
@@ -327,6 +335,7 @@ internal fun GlassToolbarIconButton(
     collapsedFraction: Float = LocalToolbarCollapsed.current,
     containerPadding: PaddingValues = PaddingValues(horizontal = 2.dp),
     iconTranslationX: Dp = 0.dp,
+    surfaceAlpha: Float = TOOLBAR_GLASS_SURFACE_ALPHA,
     onClick: () -> Unit,
 ) {
     val glassAlpha by animateFloatAsState(collapsedFraction, tween(180), label = "toolbarButtonGlassAlpha")
@@ -334,7 +343,7 @@ internal fun GlassToolbarIconButton(
     InteractiveToolbarGlass(
         modifier = Modifier.padding(containerPadding).size(46.dp),
         backdrop = backdrop,
-        tint = MiuixTheme.colorScheme.surface.copy(alpha = TOOLBAR_GLASS_SURFACE_ALPHA),
+        tint = MiuixTheme.colorScheme.surface.copy(alpha = surfaceAlpha.coerceIn(0f, 1f)),
         glassAlpha = glassAlpha,
         onClick = onClick,
     ) {

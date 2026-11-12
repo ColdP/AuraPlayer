@@ -3,6 +3,8 @@
 package btm.m.auraplayer.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
@@ -21,7 +23,7 @@ internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: 
     SoftGlassHeaderTabs(tabs, selected, 1f, onSelected = onSelected)
 
 @Composable
-internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, widthScale: Float, finalWidthScale: Float = 1f, onSelected: (Int) -> Unit) {
+internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, widthScale: Float, finalWidthScale: Float = 1f, scrollable: Boolean = false, onSelected: (Int) -> Unit) {
     val backdrop = LocalToolbarBackdrop.current
     val surface = MiuixTheme.colorScheme.surfaceContainer
     val shape = remember { Capsule() }
@@ -45,12 +47,12 @@ internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, widthScale: 
                 .then(glass),
         )
         Row(
-            Modifier.fillMaxWidth().height(53.dp * 0.93f * 0.97f * 0.92f).padding(4.dp),
+            Modifier.fillMaxWidth().height(53.dp * 0.93f * 0.97f * 0.92f).padding(4.dp).then(if (scrollable) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
             horizontalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             tabs.forEachIndexed { index, label ->
                 Box(
-                    Modifier.weight(1f)
+                    (if (scrollable) Modifier.width(80.dp) else Modifier.weight(1f))
                         .fillMaxHeight()
                         .clip(shape)
                         .then(

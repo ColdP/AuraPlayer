@@ -20,10 +20,7 @@ import btm.m.auraplayer.R
 import btm.m.auraplayer.lyrics.LyricSize
 import btm.m.auraplayer.ui.tr
 import top.yukonga.miuix.kmp.basic.Text
-import com.kyant.backdrop.Backdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.vibrancy
+import top.yukonga.miuix.kmp.blur.Backdrop
 
 internal fun lyricSizeLabel(size: LyricSize): String = when (size) {
     LyricSize.EXTRA_SMALL -> tr("lyrics_size_extra_small", "极小")
@@ -53,23 +50,20 @@ internal fun LyricOptionsMenu(
     BackHandler(expanded) { expanded = false }
     val p = progress.value.coerceIn(0f, 1f)
     val buttonSize = 44.dp
-    val menuWidth = minOf(260.dp, (screenWidth - anchorX - 16.dp).coerceAtLeast(buttonSize))
+    val menuWidth = (minOf(260.dp, (screenWidth - anchorX - 16.dp).coerceAtLeast(buttonSize)) * .9f).coerceAtLeast(buttonSize)
     // Seven 44dp rows plus the divider and size label fit in this compact surface. Keeping the
     // cap close to the measured content prevents a large empty tail below “极大”.
     val menuHeight = minOf(348.dp, (anchorY + buttonSize - topInset).coerceAtLeast(buttonSize))
     val width = buttonSize + (menuWidth - buttonSize) * p
     val height = buttonSize + (menuHeight - buttonSize) * p
     val shape = RoundedCornerShape(22.dp + 4.dp * p)
-    val surfaceTint = tint.copy(alpha = .62f)
     Box(Modifier.fillMaxSize().then(modifier)) {
         if (expanded || p > 0f) Box(Modifier.fillMaxSize()
             .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                 indication = null) { expanded = false })
         Box(
             Modifier.offset(anchorX, anchorY + buttonSize - height).size(width, height)
-                .drawBackdrop(backdrop = backdrop, shape = { shape }, effects = { vibrancy(); blur(5.dp.toPx()) },
-                    onDrawSurface = { drawRect(surfaceTint) })
-                .border(1.dp, Color.White.copy(alpha = .14f), shape)
+                .playerMenuMaterial(backdrop, tint, 22.dp + 4.dp * p)
                 .clip(shape)
                 .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                     indication = null, enabled = !expanded, onClick = { expanded = true }),

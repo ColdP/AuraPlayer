@@ -45,3 +45,7 @@ Copyright Apple Inc. and original rights holders; these proprietary resources
 are not relicensed under the application's AGPL license.
 Extraction hashes are recorded locally in the Git-ignored docs/ directory.
 The former NetEase player controls have been replaced.
+
+- ZXing Core 3.5.3 — ZXing authors; Apache-2.0. Used unmodified for DSP preset QR images. License and upstream third-party notices: `app/src/main/assets/licenses/ZXing-Apache-2.0.txt`. DSP is independently implemented from documented formulas; research and parameter audit: `AUDIO_EFFECTS.md`.
+
+Player appearance additions (2026-11-12): PlayerLyricHost adapts the bounded attached-panel HDR isolation approach from HyperChanger LyricWindow/LyricView (HyperMusicCover-derived, AGPL-3.0). Extended-sRGB highlights and the 3x requested headroom apply only to held-note lyrics; inline SDR fallback and Aura activity lifecycle replace lockscreen/Xposed ownership. PlayerLyricView adds visual-center focus while browsing and smooth sharp/depth-mask blending. Existing upstream notices and license texts remain applicable.

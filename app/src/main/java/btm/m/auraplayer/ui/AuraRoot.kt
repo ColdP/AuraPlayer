@@ -33,6 +33,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.ui.navigation.*
+import btm.m.auraplayer.ui.player.LocalSongActions
+import btm.m.auraplayer.ui.player.SongActionRequest
+import btm.m.auraplayer.ui.player.SongActionsSheet
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.delay
@@ -75,11 +78,6 @@ fun AuraRoot(model: AuraViewModel) {
             colorSpec = if (settings.colorSpec == 0) ThemeColorSpec.Spec2021 else ThemeColorSpec.Spec2025)
     }
     MiuixTheme(controller = controller, textStyles = remember { auraTextStyles() }) {
-        val activity = context as btm.m.auraplayer.MainActivity
-        val dark = MiuixTheme.colorScheme.surface.luminance() < .5f
-        SideEffect { WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
-            isAppearanceLightStatusBars = !dark; isAppearanceLightNavigationBars = !dark
-        } }
         AuraAdaptiveLayout { AuraShell(model) }
     }
 }
@@ -100,28 +98,42 @@ private fun AuraShell(model: AuraViewModel) {
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { model.refreshLibrary() }
     val selected = rememberSaveable { mutableIntStateOf(0) }
-    var playlistsTab by rememberSaveable { mutableIntStateOf(0) }
     val pages = remember { mutableStateListOf<String>() }
     val seamless = remember { SeamlessNavigationState() }
     val scope = rememberCoroutineScope()
     var closing by remember { mutableStateOf(false) }
     var closingIndex by remember { mutableIntStateOf(-1) }
     var playerOpen by rememberSaveable { mutableStateOf(false) }
+    val mainActivity = context as btm.m.auraplayer.MainActivity
+    val mediaPlayerRequest = mainActivity.mediaPlayerRequest
+    var handledMediaPlayerRequest by rememberSaveable { mutableIntStateOf(0) }
+    LaunchedEffect(mediaPlayerRequest, model.current) {
+        if (mediaPlayerRequest > handledMediaPlayerRequest && model.current != null) {
+            handledMediaPlayerRequest = mediaPlayerRequest
+            if (model.app.nowPlaying.state.value.openFromNotification) playerOpen = true
+        }
+    }
+    var songActions by remember { mutableStateOf<SongActionRequest?>(null) }
+    var songActionsOpen by remember { mutableStateOf(false) }
     LaunchedEffect(model.current) { if (model.current == null) playerOpen = false }
     val playerDark = MiuixTheme.colorScheme.surface.luminance() < .5f
+    val visibleCollection = pages.lastOrNull()?.takeIf { it.startsWith("collection:") }?.substringAfter(':')?.toLongOrNull()
+        ?.let(model::collectionDestination)?.collection
+    val catalogDark = visibleCollection?.key?.let { it.startsWith("artist:") || it.startsWith("cloud:artist:") } == true
     SideEffect {
         val activity = context as btm.m.auraplayer.MainActivity
         WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
-            isAppearanceLightStatusBars = !playerDark && !playerOpen
+            isAppearanceLightStatusBars = !playerDark && !playerOpen && !catalogDark
             isAppearanceLightNavigationBars = !playerDark && !playerOpen
         }
         activity.window.statusBarColor = android.graphics.Color.TRANSPARENT
         activity.window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        activity.window.isStatusBarContrastEnforced = false
     }
-    LaunchedEffect(playerOpen, playerDark) {
+    LaunchedEffect(playerOpen, playerDark, catalogDark) {
         val activity = context as btm.m.auraplayer.MainActivity
         val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
-        controller.isAppearanceLightStatusBars = !playerOpen && !playerDark
+        controller.isAppearanceLightStatusBars = !playerOpen && !playerDark && !catalogDark
         controller.isAppearanceLightNavigationBars = !playerOpen && !playerDark
     }
     var searchOpen by remember { mutableStateOf(false) }
@@ -135,8 +147,18 @@ private fun AuraShell(model: AuraViewModel) {
             pages += target
         }
     }
-    LaunchedEffect(model.collection) {
-        if (model.collection != null && "collection" !in pages) open("collection")
+    LaunchedEffect(model.activeCollectionId) {
+        val route = "collection:${model.activeCollectionId}"
+        if (model.collection != null && route !in pages) open(route)
+    }
+    val collectionIds = model.collectionDestinationIds
+    LaunchedEffect(collectionIds) {
+        for (index in pages.lastIndex downTo 0) {
+            val route = pages[index]
+            if (route.substringBefore(':') in setOf("collection", "albumInfo", "artistSongs", "artistAlbums") && route.substringAfter(':').toLongOrNull() !in collectionIds) {
+                pages.removeAt(index); seamless.entries.remove(index)
+            }
+        }
     }
     LaunchedEffect(model.directory) {
         if (model.directory != null && "directory" !in pages) open("directory")
@@ -155,7 +177,7 @@ private fun AuraShell(model: AuraViewModel) {
                     else delay(207)
                     seamless.entries.remove(index)
                     if (pages.lastIndex == index) pages.removeAt(index)
-                    if (leaving == "collection") model.closeCollection()
+                    if (leaving.startsWith("collection:")) leaving.substringAfter(':').toLongOrNull()?.let(model::closeCollection)
                     if (leaving == "directory") model.closeDirectory()
                 } finally { closingIndex = -1; closing = false }
             }
@@ -181,9 +203,10 @@ private fun AuraShell(model: AuraViewModel) {
         (backState.isSwiping || topEntry != null) && pages.size == 1 -> gestureBlur
         else -> 12f
     }, animationSpec = if (!revealingBase && (backState.isSwiping || topEntry != null) && pages.size == 1) snap() else tween(252, easing = FastOutSlowInEasing))
-    val rootLabels = listOf(tr("home", "首页"), tr("playlists", "歌单"), tr("songs", "歌曲"))
+    val rootLabels = listOf(tr("home", "首页"), tr("cloud", "云端"), tr("local", "本地"))
     val saveableTabs = rememberSaveableStateHolder()
-    CompositionLocalProvider(LocalSeamlessNavigation provides seamless, LocalDialogBackdrop provides backdrop) {
+    CompositionLocalProvider(LocalSeamlessNavigation provides seamless, LocalDialogBackdrop provides backdrop,
+        LocalSongActions provides { request -> songActions = request; songActionsOpen = true }) {
         // MIUIX PopupLayout(renderInRootScaffold=true) must be hosted outside recorded pages.
         Scaffold(containerColor = Color.Transparent) {
             Box(Modifier.fillMaxSize().background(surface)) {
@@ -202,17 +225,15 @@ private fun AuraShell(model: AuraViewModel) {
                                     if (tab == 0) GlassToolbarIconButton(MiuixIcons.Regular.Settings, tr("settings", "设置")) { open("settings") }
                                     else if (tab == 2) SongsToolbarMenu(model)
                                     else GlassToolbarIconButton(MiuixIcons.Regular.Refresh, tr("refresh", "刷新")) {
-                                        model.refreshLibrary(); if (tab == 1 && playlistsTab == 1) model.refreshCloud()
+                                        model.refreshLibrary(); if (tab == 1) model.refreshCloud()
                                     }
-                                }, header = {
-                                    if (tab == 1) SoftGlassHeaderTabs(listOf(tr("local", "本地"), tr("netease", "网易云音乐")), playlistsTab) { playlistsTab = it }
                                 }) { padding, _ ->
                                     val contentPadding = auraContentPadding(padding, if (model.current != null) 184 else 112)
                                     when (tab) {
                                         0 -> HomePage(model, contentPadding, requestPermission)
-                                        1 -> PlaylistsPage(model, contentPadding, playlistsTab) { open("login") }
+                                        1 -> CloudHubPage(model, contentPadding) { open("login") }
                                         2 -> SongsPage(model, contentPadding, requestPermission) { secondary ->
-                                            open(if (secondary == 0) "albums" else "artists")
+                                            open(when (secondary) { 0 -> "albums"; 1 -> "artists"; else -> "localPlaylists" })
                                         }
                                     }
                                 }
@@ -224,7 +245,7 @@ private fun AuraShell(model: AuraViewModel) {
                     searchVisible, searchProgress, { if (searchAnchor.width > 0f) { searchVisible = true; searchOpen = true } },
                     { if (!searchVisible) searchAnchor = it })
                 btm.m.auraplayer.ui.player.PlayerHost(model, backdrop, miniVisible = !searchVisible,
-                    open = playerOpen, onOpenChange = { playerOpen = it })
+                    open = playerOpen, onOpenChange = { playerOpen = it }, openPage = open)
                 pages.forEachIndexed { index, stackPage ->
                     key(index, stackPage) {
                         val entry = remember { seamless.entries[index] }
@@ -247,7 +268,7 @@ private fun AuraShell(model: AuraViewModel) {
                             Box(Modifier.fillMaxSize().blur((coveredBlur + transitionBlur).dp).then(
                                 if (isTop && entry == null && momentumOwner == (index to stackPage)) Modifier.momentumBackTransform(backState) else Modifier)) {
                                 SeamlessPageFrame(entry) {
-                                    DetailPage(stackPage, model, if (isTop) dismissPage else ({}), open)
+                                    DetailPage(stackPage, model, if (isTop) dismissPage else ({}), open, isActive = isTop && closingIndex != index)
                                 }
                             }
                         }
@@ -255,18 +276,29 @@ private fun AuraShell(model: AuraViewModel) {
                 }
                 if (searchVisible) {
                     CompositionLocalProvider(LocalToolbarBackdrop provides backdrop) {
-                        val results = model.searchResults.mapIndexed { index, song -> HomeSearchResult(song.key, song.title,
-                            "${song.artist} · ${song.album}", if (song.cloud) tr("netease", "网易云音乐") else tr("local", "本地"),
-                            requiresService = false, onClick = { model.play(model.searchResults, index) }) }.toMutableList()
+                        val results = model.searchHits.map { hit -> HomeSearchResult(hit.key, hit.title,
+                            hit.subtitle, searchCategoryLabel(hit.kind), artwork = hit.artwork,
+                            requiresService = false, onClick = {
+                                model.openSearchHit(hit)
+                                if (hit.kind in listOf(btm.m.auraplayer.data.SearchCategory.ALBUM, btm.m.auraplayer.data.SearchCategory.ARTIST, btm.m.auraplayer.data.SearchCategory.BLOG)) searchOpen = false
+                            }) }.toMutableList()
                         if (model.searchHasMore) results += HomeSearchResult("more", tr("load_more", "加载更多"), "", "", requiresService = false, onClick = model::loadMoreSearch)
                         HomeSearchOverlay(searchOpen, navigationStyle = settings.navigation, anchorInWindow = searchAnchor,
                             query = model.searchQuery, onQueryChange = model::search, results = results, searching = model.searching,
+                            filterContent = { SearchFilters(model) },
                             enabled = true, onDismiss = { searchOpen = false }, onClosed = { searchVisible = false; searchProgress = 0f }, onProgress = { searchProgress = it })
                     }
                 }
+                PresetChangeGuard(model.app.effects)
                 WindowDialog(model.error != null, title = tr("notice", "提示"), summary = model.error, onDismissRequest = model::dismissError) {
                     GlassDialogButton(model::dismissError, Modifier.fillMaxWidth()) { Text(tr("ok", "确定")) }
                 }
+                songActions?.let { request -> key(request.song.key) {
+                    CompositionLocalProvider(LocalDialogBackdrop provides (request.backdrop ?: backdrop)) {
+                        SongActionsSheet(model, request, songActionsOpen, dismiss = { songActionsOpen = false },
+                            onDismissFinished = { if (!songActionsOpen) songActions = null })
+                    }
+                } }
             }
         }
     }
@@ -277,30 +309,78 @@ private fun auraContentPadding(padding: PaddingValues, bottom: Int) = PaddingVal
     padding.calculateTopPadding() + 4.dp, LocalAuraLayout.current.pageMargin, padding.calculateBottomPadding() + bottom.dp)
 
 @Composable
-private fun DetailPage(page: String, model: AuraViewModel, back: () -> Unit, open: (String) -> Unit) {
+private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, open: (String) -> Unit, isActive: Boolean) {
+    var presetTab by rememberSaveable { mutableIntStateOf(0) }
+    val destination = route.takeIf { it.startsWith("collection:") }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)
+    val albumInfoDestination = route.takeIf { it.substringBefore(':') in setOf("albumInfo", "artistSongs", "artistAlbums") }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)
+    val page = when {
+        route.startsWith("collection:") -> "collection"
+        route.substringBefore(':') in setOf("albumInfo", "artistSongs", "artistAlbums") -> route.substringBefore(':')
+        else -> route
+    }
+    val collection = destination?.collection ?: albumInfoDestination?.collection
+    val catalog = collection?.isCatalog() == true
+    val catalogTopBarTint = if (collection != null && (page == "albumInfo" || (page == "collection" && collection.isArtist()))) {
+        val palette = btm.m.auraplayer.ui.player.rememberPlayerMonetPalette(collection.artwork)
+        Color(palette.a2.tone(if (MiuixTheme.colorScheme.surface.luminance() < .5f) 16 else 90))
+    } else null
     val title = when (page) {
         "settings" -> tr("settings", "设置")
         "theme" -> tr("theme_color", "主题与颜色")
         "login" -> tr("netease", "网易云音乐")
+        "downloads" -> tr("downloaded_music", "已下载的音乐")
+        "audio_effects" -> tr("audio_effects", "音效")
+        "effect_library" -> tr("preset_library", "预设库")
+        "effect_custom" -> tr("custom", "自定义")
+        "effect_online" -> tr("online_presets", "在线预设库")
+        "audio_settings" -> tr("audio_settings", "音频")
+        "now_playing_settings" -> tr("now_playing_page", "正在播放页面")
         "about" -> tr("about", "关于")
         "donate" -> tr("donate", "捐赠")
+        "localPlaylists" -> tr("playback_lists", "播放列表")
         "albums" -> tr("albums", "专辑")
         "artists" -> tr("artists", "艺术家")
-        "collection" -> model.collection?.title.orEmpty()
+        "collection" -> collection?.title.orEmpty()
+        "albumInfo" -> collection?.title.orEmpty()
+        "artistSongs" -> tr("top_songs", "热门歌曲")
+        "artistAlbums" -> tr("albums", "专辑")
         "directory" -> model.directory?.title.orEmpty()
         else -> legalTitle(page)
     }
-    AppPage(title, back, showLargeTitle = page != "about", pageBackground = if (page == "about") ({ AboutMaterialBackground(Modifier.matchParentSize(), model.settings.value.monet) }) else null) { padding, _ ->
+    AppPage(title, back, showLargeTitle = page != "about" && (!catalog || page in setOf("artistSongs", "artistAlbums")),
+        header = { if (page == "effect_library") SoftGlassHeaderTabs(listOf(tr("builtin_presets", "内置预设"), tr("user_presets", "用户预设")), presetTab) { presetTab = it } },
+        useLegacyTopBarBackdrop = page == "about",
+        topBarTint = catalogTopBarTint,
+        pageBackground = when {
+            page == "albumInfo" && collection != null -> ({ AlbumInfoBackground(collection, Modifier.matchParentSize()) })
+            catalog && page !in setOf("artistSongs", "artistAlbums") -> ({ CatalogBackground(collection, Modifier.matchParentSize()) })
+            page == "about" -> ({ AboutMaterialBackground(Modifier.matchParentSize(), model.settings.value.monet) })
+            else -> null
+        }) { padding, _ ->
         val contentPadding = auraContentPadding(padding, 28)
         when (page) {
             "settings" -> SettingsPage(model, contentPadding, open)
             "theme" -> ThemePage(model, contentPadding)
-            "login" -> LoginPage(model, contentPadding)
+            "login" -> LoginPage(model, contentPadding, open)
+            "downloads" -> DownloadedMusicPage(model, contentPadding)
+            "audio_effects" -> AudioEffectsPage(contentPadding, isActive, open)
+            "effect_library" -> PresetLibraryPage(contentPadding, presetTab, open)
+            "effect_custom" -> CustomEffectsPage(contentPadding)
+            "audio_settings" -> AudioPreferencesPage(contentPadding)
+            "effect_online" -> Box(Modifier.fillMaxSize().padding(contentPadding))
+            "now_playing_settings" -> NowPlayingSettingsPage(contentPadding)
             "about" -> AboutPage(model, contentPadding, open)
             "donate" -> DonatePage(contentPadding)
+            "localPlaylists" -> LocalPlaylistsPage(model, contentPadding)
             "albums" -> AlbumsArtistsPage(model, contentPadding, 0)
             "artists" -> AlbumsArtistsPage(model, contentPadding, 1)
-            "collection" -> CollectionPage(model, contentPadding)
+            "collection" -> if (collection != null && destination != null) {
+                if (catalog) CatalogDetailPage(model, contentPadding, collection, destination.cloud, destination.id, open)
+                else CollectionPage(model, contentPadding, collection, destination.cloud)
+            }
+            "artistSongs", "artistAlbums" -> if (collection != null && albumInfoDestination != null)
+                ArtistContentsPage(model, contentPadding, collection, albumInfoDestination.cloud, page == "artistAlbums")
+            "albumInfo" -> if (collection != null && albumInfoDestination != null) AlbumInfoPage(model, contentPadding, collection, albumInfoDestination.cloud)
             "directory" -> DirectoryPage(model, contentPadding)
             else -> LegalPage(page, contentPadding)
         }
@@ -317,7 +397,7 @@ private fun AuraBottomBar(selected: MutableIntState, model: AuraViewModel, backd
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val barHeight = btm.m.auraplayer.ui.player.PlayerNavigationGeometry.barHeight
     val navExit = searchPhase(searchProgress, 0f, .65f)
-    val labels = listOf(tr("home", "首页"), tr("playlists", "歌单"), tr("songs", "歌曲"))
+    val labels = listOf(tr("home", "首页"), tr("cloud", "云端"), tr("local", "本地"))
     BoxWithConstraints(modifier.fillMaxWidth().height(100.dp + navInset)) {
         val buttonSize = barHeight
         val gap = 8.dp
