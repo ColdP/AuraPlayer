@@ -107,6 +107,8 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
     val lyricProgress = remember { Animatable(if (compactOpen) 1f else 0f) }
     val queueBlend = remember { Animatable(if (queueOpen) 1f else 0f) }
     var gesturing by remember { mutableStateOf(false) }
+    var playerSwipeGesturing by remember { mutableStateOf(false) }
+    var backExiting by remember { mutableStateOf(false) }
     var swipeDistance by remember { mutableFloatStateOf(0f) }
     var settlingSwipe by remember { mutableStateOf(false) }
     var lyricMenuOpen by remember { mutableStateOf(false) }
@@ -141,13 +143,14 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
         val target = if (secondary) lyricProgress else expansion
         val start = target.value
         gesturing = true
+        if (!secondary) backExiting = true
         try {
             events.collect { event -> target.snapTo(start * (1f - event.progress.coerceIn(0f, model.settings.value.maxBackProgress))) }
             target.animateTo(0f, tween(220, easing = FastOutSlowInEasing))
             if (secondary) { lyricsOpen = false; queueOpen = false } else onOpenChange(false)
         } catch (cancel: CancellationException) {
             scope.launch { target.animateTo(1f, spring(.88f, 320f)) }
-        } finally { gesturing = false }
+        } finally { gesturing = false; backExiting = false }
     }
     val dark = MiuixTheme.colorScheme.surface.luminance() < .5f
     val miniColor = if (dark) Color.White else Color.Black
@@ -205,10 +208,12 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                     swipeDistance = 0f
                     expansion.animateTo(if (dismiss) 0f else 1f, spring(.88f, 320f, visibilityThreshold = .0005f))
                     if (dismiss) onOpenChange(false)
-                } finally { settlingSwipe = false; gesturing = false }
+                } finally { settlingSwipe = false; gesturing = false; playerSwipeGesturing = false }
             }
         }
-        val shape = RoundedCornerShape((miniHeight / 2) * (1f - e) + screenCorner * e)
+        val settledFullScreen = open && !playerSwipeGesturing && !backExiting && !settlingSwipe &&
+            !expansion.isRunning && miniDrag.axis != MiniPlayerDragAxis.EXPAND && e >= .999f
+        val shape = RoundedCornerShape(if (settledFullScreen) 0.dp else (miniHeight / 2) * (1f - e) + screenCorner * e)
         Box(Modifier.offset(metrics.outerInset * (1f - e), miniY * (1f - e))
             .size(lerp(miniWidth, screenWidth, e), lerp(miniHeight, screenHeight, e))
             .then(if (shareActive && e > .995f) Modifier else Modifier.miniPlayerMaterial(backdrop, style, shape, e))
@@ -270,7 +275,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                         shareTransition = lyricShareTransition,
                         onExpand = { onOpenChange(true) }, onClose = { onOpenChange(false) },
                         swipeEnabled = open && !settlingSwipe && !lyricMenuOpen && !actionsBusy && !shareOpening,
-                        onSwipeStart = { gesturing = true; scope.launch { expansion.stop() } },
+                        onSwipeStart = { gesturing = true; playerSwipeGesturing = true; scope.launch { expansion.stop() } },
                         onSwipeDelta = { swipeDistance = (swipeDistance + it).coerceIn(0f, swipeRange) },
                         onSwipeRelease = { settleSwipe(it, false) }, onSwipeCancel = { settleSwipe(0f, true) },
                         onLyrics = { lyricsOpen = !lyricsOpen; queueOpen = false }, queueOpen = queueOpen,

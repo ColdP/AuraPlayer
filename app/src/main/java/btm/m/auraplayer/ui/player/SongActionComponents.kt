@@ -33,6 +33,7 @@ import com.kyant.backdrop.highlight.Highlight
 import kotlinx.coroutines.CancellationException
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.icon.extended.Download
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -123,7 +124,17 @@ internal fun SheetActionRow(
                     )
                 }
             }
-            DropdownArrowEndAction(expressive.onSurfaceVariant.copy(alpha = if (enabled) .8f else .35f))
+            val arrowTint = expressive.onSurfaceVariant.copy(alpha = if (enabled) .75f else .35f)
+            if (isDropdown) {
+                DropdownArrowEndAction(arrowTint)
+            } else {
+                Image(
+                    imageVector = MiuixIcons.Basic.ArrowRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(DropdownDefaults.ArrowSize),
+                    colorFilter = ColorFilter.tint(arrowTint),
+                )
+            }
         }
         return
     }
