@@ -95,6 +95,11 @@ public final class LyricLine {
         return sylStart != null;
     }
 
+    public String getText() { return text; }
+    public String getTranslation() { return translation; }
+    public String getRoma() { return roma; }
+    public int getStart() { return start; }
+
     /**
      * The text drawn under the line for the switches in mode (LockLyrics.below()): the
      * romanisation over the translation, either alone, or null for nothing.

@@ -49,6 +49,15 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var cloudPlaylistsLoading by mutableStateOf(false); private set
     var cloudPlaylistsFailed by mutableStateOf(false); private set
     var cloudPlaylistsHasMore by mutableStateOf(false); private set
+    var cloudHomeItems by mutableStateOf<List<CloudHomeItem>>(emptyList()); private set
+    var cloudRecommendedPlaylists by mutableStateOf<List<CloudHomeItem>>(emptyList()); private set
+    var cloudFollowedAlbums by mutableStateOf<List<CloudHomeItem>>(emptyList()); private set
+    var cloudHomeLoading by mutableStateOf(false); private set
+    var cloudHomeFailed by mutableStateOf(false); private set
+    var cloudRecentSongs by mutableStateOf<List<Song>>(emptyList()); private set
+    var cloudPublicBanners by mutableStateOf<List<CloudHomeItem>>(emptyList()); private set
+    var listeningRankWeek by mutableStateOf(false); private set
+    private var cloudHomeJob: Job? = null
     private var cloudPlaylistOffset = 0
     private var cloudPlaylistRetryReset = false
     private var cloudPlaylistRetryRefresh = false
@@ -93,6 +102,8 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private var audioJob: Job? = null
     var audioFormat by mutableStateOf<androidx.media3.common.Format?>(null); private set
     var lyrics by mutableStateOf<List<btm.m.auraplayer.lyrics.LyricLine>>(emptyList()); private set
+    var lyricShareInitialIndex by mutableIntStateOf(-1); private set
+    fun prepareLyricShare(index: Int) { lyricShareInitialIndex = index }
     var lyricsLoading by mutableStateOf(false); private set
     private val lyricRepository = btm.m.auraplayer.lyrics.LyricsRepository(application)
     private var lyricJob: Job? = null
@@ -508,6 +519,14 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         pushCollection(MusicCollection("cloud:${playlist.id}", playlist.name, "", content.songs, playlist.artwork), content)
         if (content.songs.isEmpty() && !content.failed) loadCloudSongs(content)
     }
+
+    fun openCloudHomeItem(item: CloudHomeItem) {
+        when (item.actionType.ifBlank { item.kind }) {
+            "playlist" -> openCloudPlaylist(CloudPlaylist(item.actionId, item.title, 0, item.artwork))
+            "album" -> openSongAlbum(Song(item.actionId, "", "", item.title, albumId = item.actionId, uri = "", artwork = item.artwork, cloud = true))
+            "song" -> viewModelScope.launch { runCatching { app.api.songDetail(item.actionId) }.getOrNull()?.let { play(listOf(it)) } }
+        }
+    }
     fun loadMoreCloudSongs() { cloudCollection?.let { loadCloudSongs(it) } }
     fun loadMoreCloudSongsFor(content: CloudPlaylistContent) { loadCloudSongs(content) }
     fun refreshCloudSongs() {
@@ -531,7 +550,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                     else -> null
                 }
                 val page = catalog?.page ?: when (content.source) {
-                    "rank" -> app.api.listeningRank(content.playlist.id).let { CloudPage(it, it.size, false, it.size) }
+                    "rank" -> app.api.listeningRank(content.playlist.id, if (listeningRankWeek) 1 else 0).let { CloudPage(it, it.size, false, it.size) }
                     "radio" -> app.api.radioPrograms(content.playlist.id, content.offset)
                     else -> app.api.playlistSongs(content.playlist.id, content.offset, refresh = refresh)
                 }
@@ -674,9 +693,17 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun openListeningRank() {
         val user = account ?: return
+        listeningRankWeek = false
         val content = CloudPlaylistContent(CloudPlaylist(user.userId, tr("listening_rank", "听歌排行"), 0, current?.artwork.orEmpty()), "rank")
         pushCollection(MusicCollection("cloud:rank:${user.userId}", content.playlist.name, "", emptyList(), content.playlist.artwork), content)
         loadCloudSongs(content)
+    }
+    fun changeListeningRankPeriod(week: Boolean) {
+        if (listeningRankWeek == week) return
+        listeningRankWeek = week
+        val content = cloudCollection?.takeIf { it.source == "rank" } ?: return
+        content.songs = emptyList(); content.offset = 0; content.hasMore = true; content.loading = false; content.failed = false
+        loadCloudSongs(content, refresh = true)
     }
     fun openCatalogAlbum(album: CatalogAlbum) = openSongAlbum(Song(0, "", album.artist, album.title, album.id, album.artistId, uri = "", artwork = album.artwork, cloud = true))
     fun loadMoreSubscribedAlbums(reset: Boolean = false) {
@@ -744,7 +771,9 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     private fun resetCloudPaging() {
         likesJob?.cancel(); subscribedAlbumJob?.cancel()
+        cloudHomeJob?.cancel()
         cloudLikedIds = emptySet(); cloudLikesReady = false; liking.clear()
+        cloudHomeItems = emptyList(); cloudRecommendedPlaylists = emptyList(); cloudFollowedAlbums = emptyList(); cloudRecentSongs = emptyList(); cloudPublicBanners = emptyList(); cloudHomeFailed = false
         subscribedAlbums = emptyList(); subscribedAlbumOffset = 0; subscribedAlbumsLoading = false
         subscribedAlbumsHasMore = false; subscribedAlbumsFailed = false
         collectionDestinations.values.forEach { it.cloud?.albumsJob?.cancel() }
@@ -768,6 +797,32 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun refreshCloud() { loadCloudPlaylists(reset = true, refresh = true) }
+    fun refreshCloudHome() {
+        val user = account ?: return
+        if (cloudHomeLoading) return
+        cloudHomeLoading = true; cloudHomeFailed = false
+        val generation = cloudGeneration
+        cloudHomeJob?.cancel()
+        cloudHomeJob = viewModelScope.launch {
+            try {
+                val home = async { runCatching { app.api.homeItems() }.getOrDefault(emptyList()) }
+                val recommended = async { runCatching { app.api.recommendedPlaylists() }.getOrDefault(emptyList()) }
+                val followed = async { runCatching { app.api.followedArtistAlbums() }.getOrDefault(emptyList()) }
+                val recent = async { runCatching { app.api.listeningRank(user.userId) }.getOrDefault(emptyList()) }
+                val banners = async { runCatching { app.api.publicBanners() }.getOrDefault(emptyList()) }
+                ensureActive()
+                if (generation == cloudGeneration && account?.userId == user.userId) {
+                    cloudHomeItems = home.await()
+                    cloudRecommendedPlaylists = recommended.await()
+                    cloudFollowedAlbums = followed.await()
+                    cloudRecentSongs = recent.await()
+                    cloudPublicBanners = banners.await()
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { if (generation == cloudGeneration) cloudHomeFailed = true }
+            finally { if (generation == cloudGeneration) cloudHomeLoading = false }
+        }
+    }
     private fun refreshCloudExtras() {
         val user = account ?: return
         val generation = cloudGeneration

@@ -38,6 +38,7 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
                     listOf(tr("nav_hyper", "HyperOS 悬浮导航栏"), tr("nav_harmony", "HarmonyOS 悬浮导航栏"), tr("nav_liquid", "液态玻璃导航栏")),
                     listOf("hyper_os_floating", "harmony_os_floating", "liquid_glass").indexOf(value.navigation).coerceAtLeast(0),
                     backdrop = LocalToolbarBackdrop.current) { index -> model.updateSettings { it.copy(navigation = listOf("hyper_os_floating", "harmony_os_floating", "liquid_glass")[index]) } }
+                Preference(tr("nav_material_title", "底部导航栏材质参数调整")) { open("navigation_material") }
                 GlassDropdownPreference(tr("navigation_labels", "底部导航栏标签显示方式"),
                     listOf(tr("icons_and_text", "图标和文本"), tr("icons_only", "仅图标"), tr("text_only", "仅文本")),
                     listOf("icon_and_text", "icon_only", "text_only").indexOf(value.labels).coerceAtLeast(0), backdrop = LocalToolbarBackdrop.current) { index ->
@@ -49,8 +50,13 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
             }
         }
         item {
-            Group(tr("settings", "设置")) {
+            Group(tr("features", "功能")) {
                 Preference(tr("netease", "网易云音乐"), model.account?.nickname ?: tr("login_summary", "通过网易云官方页面登录")) { open("login") }
+                GlassDropdownPreference(tr("home_content", "首页内容"),
+                    listOf(tr("home_content_local", "本地"), tr("home_content_cloud", "云端")),
+                    if (value.homeContent == "cloud") 1 else 0, backdrop = LocalToolbarBackdrop.current) { index ->
+                    model.updateSettings { it.copy(homeContent = if (index == 1) "cloud" else "local") }
+                }
                 Preference(tr("blacklist", "黑名单"), if (value.whitelist) tr("blacklist_disabled", "白名单已开启，黑名单暂不生效") else
                     "${value.blacklist.size} ${tr("folder_count", "个文件夹")}", enabled = !value.whitelist) { blacklist = true }
                 SwitchPreference(tr("whitelist", "白名单"), tr("whitelist_summary", "仅显示 Music 目录下的音乐"), value.whitelist) { checked -> model.updateSettings { it.copy(whitelist = checked) } }

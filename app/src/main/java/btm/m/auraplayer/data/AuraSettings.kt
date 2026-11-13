@@ -19,6 +19,7 @@ data class Appearance(
     val palette: Int = 0,
     val colorSpec: Int = 0,
     val language: String = "zh",
+    val homeContent: String = "local",
     val whitelist: Boolean = false,
     val durationFilter: Boolean = false,
     val minimumSeconds: Int = 0,
@@ -39,6 +40,7 @@ class AuraSettings(context: Context) {
         customColor = prefs.getInt("customColor", 0xFF7962D9.toInt()),
         palette = prefs.getInt("palette", 0), colorSpec = prefs.getInt("colorSpec", 0),
         language = prefs.getString("language", "zh")!!,
+        homeContent = prefs.getString("homeContent", "local")!!,
         whitelist = prefs.getBoolean("whitelist", false),
         durationFilter = prefs.getBoolean("durationFilter", false),
         minimumSeconds = prefs.getInt("minimumSeconds", 0).coerceIn(0, 60),
@@ -51,6 +53,7 @@ class AuraSettings(context: Context) {
             .putString("theme", v.theme).putBoolean("monet", v.monet).putString("color", v.color)
             .putInt("customColor", v.customColor).putInt("palette", v.palette).putInt("colorSpec", v.colorSpec)
             .putString("language", v.language).putBoolean("whitelist", v.whitelist)
+            .putString("homeContent", v.homeContent)
             .putBoolean("durationFilter", v.durationFilter).putInt("minimumSeconds", v.minimumSeconds)
             .putStringSet("blacklist", v.blacklist).apply()
         value = v

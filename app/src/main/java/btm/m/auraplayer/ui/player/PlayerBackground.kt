@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Monet extraction and 22-second ambient orbit copied from HyperChanger ContributorsGallery.kt.
+// Monet extraction and ambient orbit adapted from HyperChanger ContributorsGallery.kt.
 package btm.m.auraplayer.ui.player
 
 import android.graphics.Bitmap
@@ -62,21 +62,21 @@ internal fun PlayerAmbientBackground(palette: CorePalette, modifier: Modifier = 
         var last = withFrameNanos { it }
         while (true) {
             val now = withFrameNanos { it }
-            phase = (phase + ((now - last) / 1e9f).coerceAtMost(.05f) * (2 * PI / 22).toFloat()) % (2 * PI).toFloat()
+            phase = (phase + ((now - last) / 1e9f).coerceAtMost(.05f) * (2 * PI / 12).toFloat()) % (2 * PI).toFloat()
             last = now
         }
     }
     Canvas(modifier) {
         drawRect(base)
         val centers = listOf(
-            Offset(size.width * (.22f + .18f * sin(phase)), size.height * (.25f + .12f * cos(phase))),
-            Offset(size.width * (.82f + .13f * cos(phase)), size.height * (.5f + .23f * sin(phase))),
-            Offset(size.width * (.35f + .22f * cos(phase)), size.height * (.94f + .12f * sin(phase))),
+            Offset(size.width * (.22f + .25f * sin(phase)), size.height * (.25f + .18f * cos(phase))),
+            Offset(size.width * (.78f + .20f * cos(phase)), size.height * (.5f + .30f * sin(phase))),
+            Offset(size.width * (.38f + .28f * cos(phase)), size.height * (.85f + .18f * sin(phase))),
         )
         val orbs = listOf(primary, secondary, tertiary)
         centers.forEachIndexed { index, center ->
-            drawCircle(Brush.radialGradient(listOf(orbs[index].copy(alpha = .56f), Color.Transparent),
-                center = center, radius = size.width * .95f), radius = size.width * .95f, center = center)
+            drawCircle(Brush.radialGradient(listOf(orbs[index].copy(alpha = .72f), Color.Transparent),
+                center = center, radius = size.width * .85f), radius = size.width * .85f, center = center)
         }
     }
 }

@@ -27,6 +27,12 @@ internal class OfficialNeteaseClient(
     fun request(path: String, values: Map<String, String>, authenticated: Boolean): JSONObject {
         fun value(key: String, fallback: String = "") = values[key] ?: fallback
         return when (path.trim('/')) {
+            "banner/get" -> call("/api/v2/banner/get", JSONObject().put("clientType", "pc"), authenticated = false)
+            "homepage/block/page" -> call("/api/homepage/block/page", JSONObject()
+                .put("refresh", false).put("cursor", "-1").put("refreshType", 1), authenticated)
+            "recommend/resource" -> call("/api/discovery/recommend/resource", JSONObject()
+                .put("limit", value("limit", "30")).put("offset", value("offset", "0")), authenticated)
+            "personalized/playlist" -> call("/api/personalized/playlist", JSONObject().put("limit", value("limit", "30")).put("offset", value("offset", "0")), authenticated = false)
             "login/status" -> call("/api/w/nuser/account/get", JSONObject(), authenticated)
             "user/playlist" -> call("/api/user/playlist", JSONObject().put("uid", value("uid"))
                 .put("limit", value("limit", "100")).put("offset", value("offset", "0")).put("includeVideo", true), authenticated)
@@ -52,6 +58,7 @@ internal class OfficialNeteaseClient(
             "album" -> call("/api/v1/album/${value("id")}", JSONObject(), authenticated)
             "artist/detail" -> call("/api/artist/head/info/get", JSONObject().put("id", value("id")), authenticated)
             "artist/album" -> call("/api/artist/albums/${value("id")}", JSONObject().put("limit", value("limit", "12")).put("offset", value("offset", "0")), authenticated)
+            "artist/sublist" -> call("/api/artist/sublist", JSONObject().put("limit", value("limit", "100")).put("offset", value("offset", "0")), authenticated)
             "artist/songs" -> call("/api/v1/artist/songs", JSONObject().put("id", value("id"))
                 .put("private_cloud", "true").put("work_type", 1)
                 .put("limit", value("limit", "50")).put("offset", value("offset", "0")).put("order", value("order", "hot")), authenticated)

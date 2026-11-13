@@ -3,6 +3,7 @@ package btm.m.auraplayer.ui.player
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
@@ -11,12 +12,23 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import btm.m.auraplayer.playback.*
 import coil3.compose.AsyncImage
+import coil3.SingletonImageLoader
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
+import coil3.request.allowHardware
+import coil3.toBitmap
 import com.materialkolor.palettes.CorePalette
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.*
 import kotlin.random.Random
 
@@ -34,6 +46,36 @@ internal fun PlayerThemeBackground(artwork: String, palette: CorePalette, config
         }
     }
     val blur by animateFloatAsState(config.blurRadius, tween(220), label = "playerBackgroundBlur")
+    // Keep decoded pixels outside the theme Crossfade and outside Coil's loading state. A new
+    // model must never clear the last successful background while its artwork is being decoded.
+    val context = LocalContext.current
+    var background by remember { mutableStateOf<ImageBitmap?>(null) }
+    var previousBackground by remember { mutableStateOf<ImageBitmap?>(null) }
+    val artworkBlend = remember { Animatable(1f) }
+    val usesArtwork = config.theme in setOf(PlayerTheme.AURORA_BLUR, PlayerTheme.BLUR, PlayerTheme.FULLSCREEN)
+    LaunchedEffect(artwork, usesArtwork, context) {
+        artworkBlend.snapTo(1f)
+        previousBackground = null
+        if (!usesArtwork || artwork.isBlank()) return@LaunchedEffect
+        val decoded = try {
+            withContext(Dispatchers.IO) {
+                (SingletonImageLoader.get(context).execute(
+                    ImageRequest.Builder(context).data(artwork).size(1024).allowHardware(false).build()
+                ) as? SuccessResult)?.image?.toBitmap()?.asImageBitmap()
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        } ?: return@LaunchedEffect
+        previousBackground = background
+        background = decoded
+        if (previousBackground != null) {
+            artworkBlend.snapTo(0f)
+            artworkBlend.animateTo(1f, tween(400))
+        }
+        previousBackground = null
+    }
     Box(modifier.clipToBounds()) {
         Crossfade(config.theme, animationSpec = tween(380), label = "playerTheme") { theme ->
             Box(Modifier.fillMaxSize().background(Color(palette.a2.tone(14)))) {
@@ -43,17 +85,32 @@ internal fun PlayerThemeBackground(artwork: String, palette: CorePalette, config
                     val flowing = theme == PlayerTheme.AURORA_BLUR
                     val full = theme == PlayerTheme.FULLSCREEN
                     val radius = if (full) 40f * compactProgress else blur
-                    AsyncImage(artwork, null, Modifier.fillMaxSize().graphicsLayer {
+                    Box(Modifier.fillMaxSize().graphicsLayer {
                         scaleX = if (full) 1.04f else 1.22f; scaleY = scaleX
                         if (flowing) {
-                            translationX = sin(phase * .24f) * size.width * .055f
-                            translationY = cos(phase * .19f) * size.height * .045f
-                            rotationZ = sin(phase * .12f) * 4f
-                            alpha = .58f
+                            translationX = sin(phase * .42f) * size.width * .07f
+                            translationY = cos(phase * .34f) * size.height * .055f
+                            rotationZ = sin(phase * .22f) * 4f
+                            // Let the moving Monet colors show through the blurred artwork.
+                            alpha = .38f
                         }
-                    }.blur(radius.dp), contentScale = ContentScale.Crop)
+                    }.blur(radius.dp)) {
+                        // The outgoing image stays fully opaque beneath the incoming image;
+                        // fading both layers out would darken the background during the blend.
+                        previousBackground?.let {
+                            Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        }
+                        background?.let {
+                            Image(it, null, Modifier.fillMaxSize().graphicsLayer { alpha = artworkBlend.value },
+                                contentScale = ContentScale.Crop)
+                        }
+                    }
                     // Keep controls readable without turning clear negative-blur settings opaque.
-                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (full) .22f + .16f * compactProgress else .28f)))
+                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = when {
+                        full -> .22f + .16f * compactProgress
+                        flowing -> .20f
+                        else -> .28f
+                    })))
                 }
             }
         }

@@ -161,7 +161,9 @@ internal fun TagEditorPage(model: AuraViewModel, song: Song, back: () -> Unit, i
     AppPage(tr("tag_editor", "标签编辑器"), onBack = back,
         floatingToolbarPosition = ToolbarPosition.BottomCenter,
         floatingToolbar = {
-            Box(Modifier.fillMaxWidth().padding(end = 20.dp), contentAlignment = Alignment.CenterEnd) {
+            val playerClearance = if (model.current != null)
+                btm.m.auraplayer.ui.player.PlayerNavigationGeometry.barHeight + 22.dp else 0.dp
+            Box(Modifier.fillMaxWidth().padding(end = 20.dp, bottom = playerClearance), contentAlignment = Alignment.CenterEnd) {
                 AnimatedVisibility(dirty, enter = fadeIn() + scaleIn(), exit = fadeOut() + scaleOut()) {
                     InteractiveToolbarGlass(Modifier.size(60.dp).semantics { if (busy) disabled() },
                         LocalToolbarBackdrop.current, MiuixTheme.colorScheme.primary.copy(alpha = .80f),

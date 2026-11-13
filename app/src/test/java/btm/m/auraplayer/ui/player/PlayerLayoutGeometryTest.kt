@@ -5,6 +5,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PlayerLayoutGeometryTest {
+    @Test fun transitionBlurStaysBelowUnchangedMiniMaterialForAllNavigationStyles() {
+        for ((style, radius) in listOf("liquid_glass" to 3f, "harmony_os_floating" to 5.22f,
+                "hyper_os_floating" to 4.32f)) {
+            for (percent in listOf(0, 25, 100, 160, 244, 300)) {
+                val mini = playerMiniBlurRadius(style, percent)
+                assertEquals(radius * percent / 100f, mini.value, .0001f)
+                for (expansion in listOf(-.1f, 0f, .1f, .34f, .8f, 1f, 1.1f)) {
+                    val transition = playerTransitionBlurRadius(mini, expansion)
+                    assertTrue(transition >= 0.dp)
+                    if (percent == 0) assertEquals(0.dp, transition)
+                    else assertTrue(transition < mini)
+                }
+                assertEquals(0.dp, playerTransitionBlurRadius(mini, 0f))
+            }
+        }
+    }
+
     @Test fun fullscreenCardStaysFourByThreeCenteredAndInsideSystemInsets() {
         for ((width, height) in listOf(320 to 640, 360 to 800, 412 to 915, 800 to 360, 1024 to 1366)) {
             val card = fullscreenPlayerCard(width.dp, height.dp, 24.dp, 24.dp)

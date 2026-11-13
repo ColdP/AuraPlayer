@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import btm.m.auraplayer.ui.navigation.NavigationMaterialSettings
@@ -36,8 +37,11 @@ enum class AppInterfaceStyle { MIUIX, COLOR }
 val LocalAppInterfaceStyle = staticCompositionLocalOf { AppInterfaceStyle.MIUIX }
 
 @Composable
-internal fun rememberModuleNavigationMaterial(style: String) = remember(style) {
-    NavigationMaterialSettings.defaults(NavigationStyle.fromPreference(style))
+internal fun rememberModuleNavigationMaterial(style: String): btm.m.auraplayer.ui.navigation.NavigationMaterial {
+    val store = (LocalContext.current.applicationContext as btm.m.auraplayer.AuraApplication).navigationMaterial
+    val materials by store.state.collectAsState()
+    val selected = NavigationStyle.fromPreference(style)
+    return materials[selected] ?: NavigationMaterialSettings.defaults(selected)
 }
 
 @Composable

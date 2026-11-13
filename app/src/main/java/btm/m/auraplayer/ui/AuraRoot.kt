@@ -20,6 +20,8 @@ import androidx.compose.ui.*
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.graphicsLayer
@@ -37,6 +39,10 @@ import btm.m.auraplayer.ui.player.LocalSongActions
 import btm.m.auraplayer.ui.player.LocalOpenTagEditor
 import btm.m.auraplayer.ui.player.SongActionRequest
 import btm.m.auraplayer.ui.player.SongActionsSheet
+import btm.m.auraplayer.ui.player.LyricSharePage
+import btm.m.auraplayer.ui.player.LyricShareRoute
+import btm.m.auraplayer.ui.player.playerMiniBlurRadius
+import btm.m.auraplayer.ui.player.playerTransitionBlurRadius
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.delay
@@ -88,6 +94,8 @@ fun AuraRoot(model: AuraViewModel) {
 private fun AuraShell(model: AuraViewModel) {
     val context = LocalContext.current
     val settings = model.settings.value
+    val miniBlurRadius = playerMiniBlurRadius(settings.navigation,
+        rememberModuleNavigationMaterial(settings.navigation).blur)
     var permissionDenied by rememberSaveable { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         permissionDenied = !granted
@@ -106,6 +114,7 @@ private fun AuraShell(model: AuraViewModel) {
     var closing by remember { mutableStateOf(false) }
     var closingIndex by remember { mutableIntStateOf(-1) }
     var playerOpen by rememberSaveable { mutableStateOf(false) }
+    var playerExpansion by remember { mutableFloatStateOf(0f) }
     val mainActivity = context as btm.m.auraplayer.MainActivity
     val mediaPlayerRequest = mainActivity.mediaPlayerRequest
     var handledMediaPlayerRequest by rememberSaveable { mutableIntStateOf(0) }
@@ -200,11 +209,28 @@ private fun AuraShell(model: AuraViewModel) {
     val gestureBlur = if (topEntry != null) 12f * topEntry.progress.value
         else 12f - 8f * (backState.gestureProgress / settings.maxBackProgress).coerceIn(0f, 1f)
     val revealingBase = page == null || closingIndex == 0
+    // A completed nested back gesture can outlive the page that owned it until the
+    // stack-size effect resets backState. Never apply that gesture to the revealed page.
+    val rootBackGesture = pages.size == 1 && backState.isSwiping && !closing &&
+        momentumOwner == (pages.lastIndex to page)
+    val secondaryProgress by animateFloatAsState(
+        targetValue = when {
+            revealingBase -> 0f
+            rootBackGesture ->
+                1f - (backState.gestureProgress / settings.maxBackProgress).coerceIn(0f, 1f)
+            else -> 1f
+        },
+        animationSpec = if (rootBackGesture) snap()
+            else tween(280, easing = FastOutSlowInEasing), label = "secondaryPlayerDock")
+    val materialPageIndex = pages.indexOf("navigation_material")
+    val materialChromeExit by animateFloatAsState(
+        if (materialPageIndex >= 0 && closingIndex != materialPageIndex) 1f else 0f,
+        tween(280, easing = FastOutSlowInEasing), label = "materialPreviewChromeExit")
     val baseBlur by animateFloatAsState(when {
         revealingBase -> 0f
-        (backState.isSwiping || topEntry != null) && pages.size == 1 -> gestureBlur
+        rootBackGesture || (topEntry != null && pages.size == 1) -> gestureBlur
         else -> 12f
-    }, animationSpec = if (!revealingBase && (backState.isSwiping || topEntry != null) && pages.size == 1) snap() else tween(252, easing = FastOutSlowInEasing))
+    }, animationSpec = if (!revealingBase && (rootBackGesture || (topEntry != null && pages.size == 1))) snap() else tween(252, easing = FastOutSlowInEasing))
     val rootLabels = listOf(tr("home", "首页"), tr("cloud", "云端"), tr("local", "本地"))
     val saveableTabs = rememberSaveableStateHolder()
     CompositionLocalProvider(LocalSeamlessNavigation provides seamless, LocalDialogBackdrop provides backdrop,
@@ -214,7 +240,15 @@ private fun AuraShell(model: AuraViewModel) {
         // MIUIX PopupLayout(renderInRootScaffold=true) must be hosted outside recorded pages.
         Scaffold(containerColor = Color.Transparent) {
             Box(Modifier.fillMaxSize().background(surface)) {
-                Box(Modifier.fillMaxSize().blur((baseBlur + searchProgress * 14f).dp).layerBackdrop(backdrop)) {
+                // Record page content only; floating controls sample the currently visible page
+                // without recording themselves back into their own glass backgrounds.
+                Box(Modifier.fillMaxSize().graphicsLayer {
+                    // Read progress in the draw layer, without recomposing the whole page stack
+                    // for each spring/gesture frame. Clamp keeps the screen edges filled.
+                    val radius = ((searchProgress * 14f).dp + playerTransitionBlurRadius(miniBlurRadius, playerExpansion)).toPx()
+                    renderEffect = if (radius > .01f) BlurEffect(radius, radius, TileMode.Clamp) else null
+                }.layerBackdrop(backdrop)) {
+                Box(Modifier.fillMaxSize().blur(baseBlur.dp)) {
                     AnimatedContent(targetState = selected.intValue, transitionSpec = {
                         val direction = if (targetState >= initialState) 1 else -1
                         (slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { direction * it / 7 } + fadeIn(tween(210)) + scaleIn(tween(280), initialScale = .985f)) togetherWith
@@ -234,7 +268,9 @@ private fun AuraShell(model: AuraViewModel) {
                                 }) { padding, _ ->
                                     val contentPadding = auraContentPadding(padding, if (model.current != null) 184 else 112)
                                     when (tab) {
-                                        0 -> HomePage(model, contentPadding, requestPermission)
+                                        0 -> if (settings.homeContent == "cloud") CloudHomePage(model, contentPadding,
+                                            login = { open("login") }, onRecommended = { open("cloud_recommended") })
+                                            else HomePage(model, contentPadding, requestPermission)
                                         1 -> CloudHubPage(model, contentPadding) { open("login") }
                                         2 -> SongsPage(model, contentPadding, requestPermission) { secondary ->
                                             open(when (secondary) { 0 -> "albums"; 1 -> "artists"; else -> "localPlaylists" })
@@ -245,11 +281,6 @@ private fun AuraShell(model: AuraViewModel) {
                         }
                     }
                 }
-                AuraBottomBar(selected, model, backdrop, Modifier.align(Alignment.BottomCenter).blur((baseBlur + searchProgress * 14f).dp),
-                    searchVisible, searchProgress, { if (searchAnchor.width > 0f) { searchVisible = true; searchOpen = true } },
-                    { if (!searchVisible) searchAnchor = it })
-                btm.m.auraplayer.ui.player.PlayerHost(model, backdrop, miniVisible = !searchVisible,
-                    open = playerOpen, onOpenChange = { playerOpen = it }, openPage = open)
                 pages.forEachIndexed { index, stackPage ->
                     key(index, stackPage) {
                         val entry = remember { seamless.entries[index] }
@@ -278,6 +309,20 @@ private fun AuraShell(model: AuraViewModel) {
                         }
                     }
                 }
+                }
+                AuraBottomBar(selected, model, backdrop, Modifier.align(Alignment.BottomCenter).graphicsLayer {
+                    val radius = ((searchProgress * 14f).dp + playerTransitionBlurRadius(miniBlurRadius, playerExpansion)).toPx()
+                    renderEffect = if (radius > .01f) BlurEffect(radius, radius, TileMode.Clamp) else null
+                },
+                    searchVisible, searchProgress, secondaryProgress,
+                    { if (searchAnchor.width > 0f) { searchVisible = true; searchOpen = true } },
+                    { if (!searchVisible && materialChromeExit < .01f) searchAnchor = it },
+                    searchExitProgress = materialChromeExit)
+                btm.m.auraplayer.ui.player.PlayerHost(model, backdrop, miniVisible = !searchVisible,
+                    secondaryProgress = secondaryProgress,
+                    chromeExitProgress = materialChromeExit,
+                    onExpansionProgress = { playerExpansion = it },
+                    open = playerOpen, onOpenChange = { playerOpen = it }, openPage = open)
                 if (searchVisible) {
                     CompositionLocalProvider(LocalToolbarBackdrop provides backdrop) {
                         val results = model.searchHits.map { hit -> HomeSearchResult(hit.key, hit.title,
@@ -315,6 +360,9 @@ private fun auraContentPadding(padding: PaddingValues, bottom: Int) = PaddingVal
 @Composable
 private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, open: (String) -> Unit, isActive: Boolean) {
     var presetTab by rememberSaveable { mutableIntStateOf(0) }
+    var materialTab by rememberSaveable {
+        mutableIntStateOf(NavigationMaterialSettings.styles.indexOf(NavigationStyle.fromPreference(model.settings.value.navigation)).coerceAtLeast(0))
+    }
     val tagEditorExitGuard = LocalTagEditorExitGuard.current
     val destination = route.takeIf { it.startsWith("collection:") }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)
     val albumInfoDestination = route.takeIf { it.substringBefore(':') in setOf("albumInfo", "artistSongs", "artistAlbums") }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)
@@ -334,7 +382,9 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "tagEditor" -> tr("tag_editor", "标签编辑器")
         "settings" -> tr("settings", "设置")
         "theme" -> tr("theme_color", "主题与颜色")
+        "navigation_material" -> tr("nav_material_title", "底部导航栏材质参数调整")
         "login" -> tr("netease", "网易云音乐")
+        "cloud_recommended" -> tr("recommended_playlists", "推荐歌单")
         "downloads" -> tr("downloaded_music", "已下载的音乐")
         "audio_effects" -> tr("audio_effects", "音效")
         "effect_library" -> tr("preset_library", "预设库")
@@ -352,6 +402,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "artistSongs" -> tr("top_songs", "热门歌曲")
         "artistAlbums" -> tr("albums", "专辑")
         "directory" -> model.directory?.title.orEmpty()
+        "lyricShare" -> tr("share_lyrics", "分享歌词")
         else -> legalTitle(page)
     }
     if (page == "tagEditor") {
@@ -360,7 +411,16 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         return
     }
     AppPage(title, back, showLargeTitle = page != "about" && (!catalog || page in setOf("artistSongs", "artistAlbums")),
-        header = { if (page == "effect_library") SoftGlassHeaderTabs(listOf(tr("builtin_presets", "内置预设"), tr("user_presets", "用户预设")), presetTab) { presetTab = it } },
+        header = {
+            when (page) {
+                "effect_library" -> SoftGlassHeaderTabs(listOf(tr("builtin_presets", "内置预设"), tr("user_presets", "用户预设")), presetTab) { presetTab = it }
+                "navigation_material" -> SoftGlassHeaderTabs(listOf(tr("nav_material_hyper", "HyperOS"), tr("nav_material_harmony", "HarmonyOS"), tr("nav_material_liquid", "液态玻璃")), materialTab) { materialTab = it }
+                "collection" -> if (destination?.cloud?.source == "rank") SoftGlassHeaderTabs(
+                    listOf(tr("rank_week", "最近一周"), tr("rank_all", "所有时间")),
+                    if (model.listeningRankWeek) 0 else 1,
+                    onSelected = { model.changeListeningRankPeriod(it == 0) })
+            }
+        },
         useLegacyTopBarBackdrop = page == "about",
         topBarTint = catalogTopBarTint,
         pageBackground = when {
@@ -369,11 +429,13 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             page == "about" -> ({ AboutMaterialBackground(Modifier.matchParentSize(), model.settings.value.monet) })
             else -> null
         }) { padding, _ ->
-        val contentPadding = auraContentPadding(padding, 28)
+        val contentPadding = auraContentPadding(padding, if (model.current != null && page != "navigation_material") 104 else 28)
         when (page) {
             "settings" -> SettingsPage(model, contentPadding, open)
             "theme" -> ThemePage(model, contentPadding)
+            "navigation_material" -> NavigationMaterialPage(model, contentPadding, NavigationMaterialSettings.styles[materialTab])
             "login" -> LoginPage(model, contentPadding, open)
+            "cloud_recommended" -> CloudRecommendedPage(model, contentPadding)
             "downloads" -> DownloadedMusicPage(model, contentPadding)
             "audio_effects" -> AudioEffectsPage(contentPadding, isActive, open)
             "effect_library" -> PresetLibraryPage(contentPadding, presetTab, open)
@@ -394,6 +456,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
                 ArtistContentsPage(model, contentPadding, collection, albumInfoDestination.cloud, page == "artistAlbums")
             "albumInfo" -> if (collection != null && albumInfoDestination != null) AlbumInfoPage(model, contentPadding, collection, albumInfoDestination.cloud)
             "directory" -> DirectoryPage(model, contentPadding)
+            "lyricShare" -> LyricShareRoute(model, contentPadding, LocalToolbarBackdrop.current, back)
             else -> LegalPage(page, contentPadding)
         }
     }
@@ -401,21 +464,23 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
 
 /** Original HyperChanger BottomBar geometry and search-exit animation. */
 @Composable
-private fun AuraBottomBar(selected: MutableIntState, model: AuraViewModel, backdrop: com.kyant.backdrop.Backdrop,
-    modifier: Modifier, searchMounted: Boolean, searchProgress: Float, onSearch: () -> Unit, onPositioned: (Rect) -> Unit) {
+internal fun AuraBottomBar(selected: MutableIntState, model: AuraViewModel, backdrop: com.kyant.backdrop.Backdrop,
+    modifier: Modifier, searchMounted: Boolean, searchProgress: Float, secondaryProgress: Float,
+    onSearch: () -> Unit, onPositioned: (Rect) -> Unit,
+    navigationStyle: String = model.settings.value.navigation, searchExitProgress: Float = 0f) {
     val settings = model.settings.value
-    val liquid = settings.navigation == "liquid_glass"
+    val liquid = navigationStyle == "liquid_glass"
     val view = LocalView.current
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val barHeight = btm.m.auraplayer.ui.player.PlayerNavigationGeometry.barHeight
-    val navExit = searchPhase(searchProgress, 0f, .65f)
+    val navExit = maxOf(searchPhase(searchProgress, 0f, .65f), secondaryProgress)
     val labels = listOf(tr("home", "首页"), tr("cloud", "云端"), tr("local", "本地"))
     BoxWithConstraints(modifier.fillMaxWidth().height(100.dp + navInset)) {
         val buttonSize = barHeight
-        val gap = 8.dp
+        val gap = btm.m.auraplayer.ui.player.PlayerNavigationGeometry.searchGap
         // Reserve the same outer insets and gap as the original; measure the real pill width.
         val externalButtons = buttonSize + gap
-        val barWidth = maxWidth - btm.m.auraplayer.ui.player.PlayerNavigationGeometry.outerInset * 2 - externalButtons
+        val barWidth = btm.m.auraplayer.ui.player.PlayerNavigationGeometry.bodyWidth(maxWidth)
         val shift = -externalButtons / 2
         val right = maxWidth / 2 + barWidth / 2 + shift
         val centerY = maxHeight - navInset - (8f * .82f).dp - barHeight / 2
@@ -431,16 +496,22 @@ private fun AuraBottomBar(selected: MutableIntState, model: AuraViewModel, backd
             alpha = 1f - navExit
         }.blur((navExit * 10f).dp)) {
             CustomNavigation(view, tabs = labels.mapIndexed { index, label -> HostTab(label, "aura.$index") {
-                if (!searchMounted) selected.intValue = index
+                if (!searchMounted && secondaryProgress < .01f) selected.intValue = index
             } }, selectedIndex = selected, blurRadius = if (liquid) 3 else 18, labelMode = settings.labels,
-                navigationStyle = settings.navigation, advancedMaterial = true, colorMode = settings.theme,
-                accentColorOverride = accent, material = rememberModuleNavigationMaterial(settings.navigation),
+                navigationStyle = navigationStyle, advancedMaterial = true, colorMode = settings.theme,
+                accentColorOverride = accent, material = rememberModuleNavigationMaterial(navigationStyle),
                 dimensionScale = dimensions, liquidBottomSpacingDp = 7, onHostPreDraw = {}, backdropOverride = backdrop,
                 tabIconContent = { index, color -> AuraTabIcon(index, color) })
         }
-        if (!searchMounted) SearchRoundButton(backdrop, buttonSize, false, 0f, settings.navigation,
+        if (!searchMounted) SearchRoundButton(backdrop, buttonSize, false, 0f, navigationStyle,
             icon = appleMusicTabIcon(4),
-            modifier = Modifier.offset(right + gap, centerY - buttonSize / 2).onGloballyPositioned { onPositioned(it.boundsInWindow()) },
-            enabled = true, onClick = onSearch)
+            // The button's padded motion layer leaves room for glass deformation and
+            // shadows. A blur on this fixed-size anchor clips them even at radius zero.
+            motionAlpha = 1f - searchExitProgress,
+            motionBlur = (searchExitProgress * 10f).dp,
+            modifier = Modifier.offset(right + gap, centerY - buttonSize / 2).graphicsLayer {
+                translationY = searchExitProgress * (barHeight + navInset + 24.dp).toPx()
+            }.onGloballyPositioned { onPositioned(it.boundsInWindow()) },
+            enabled = searchExitProgress < .01f, onClick = onSearch)
     }
 }

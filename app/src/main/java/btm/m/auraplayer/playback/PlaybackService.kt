@@ -16,6 +16,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import btm.m.auraplayer.AuraApplication
 import btm.m.auraplayer.MainActivity
+import btm.m.auraplayer.auramix.AuraMixManager
 import okhttp3.OkHttpClient
 import org.json.JSONObject
 import kotlinx.coroutines.launch
@@ -26,6 +27,7 @@ class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private val serviceScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
     private val state by lazy { getSharedPreferences("aura.playback.queue", MODE_PRIVATE) }
+    private var auraMix: AuraMixManager? = null
     override fun onCreate() {
         super.onCreate()
         val app = application as AuraApplication
@@ -41,7 +43,8 @@ class PlaybackService : MediaSessionService() {
             .setCacheKeyFactory { spec -> spec.key ?: spec.uri.toString() }
             .setUpstreamDataSourceFactory(resolving)
             .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-        val player = ExoPlayer.Builder(this, btm.m.auraplayer.audio.EffectsRenderersFactory(this, app.effects)).setMediaSourceFactory(DefaultMediaSourceFactory(source)).build().apply {
+        val mediaSourceFactory = DefaultMediaSourceFactory(source)
+        val player = ExoPlayer.Builder(this, btm.m.auraplayer.audio.EffectsRenderersFactory(this, app.effects)).setMediaSourceFactory(mediaSourceFactory).build().apply {
             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), !app.effects.state.value.alwaysPlay)
             setHandleAudioBecomingNoisy(true)
             repeatMode = androidx.media3.common.Player.REPEAT_MODE_ALL
@@ -56,6 +59,7 @@ class PlaybackService : MediaSessionService() {
         player.repeatMode = state.getInt("repeatMode", androidx.media3.common.Player.REPEAT_MODE_ALL)
             .coerceIn(androidx.media3.common.Player.REPEAT_MODE_OFF, androidx.media3.common.Player.REPEAT_MODE_ALL)
         player.shuffleModeEnabled = state.getBoolean("shuffle", false)
+        auraMix = AuraMixManager(this, player, mediaSourceFactory, app.effects, app.auraMix, serviceScope)
         player.addListener(object : androidx.media3.common.Player.Listener {
             override fun onEvents(player: androidx.media3.common.Player, events: androidx.media3.common.Player.Events) {
                 // Volume ramps must not serialize the entire queue on every animation frame.
@@ -105,6 +109,7 @@ class PlaybackService : MediaSessionService() {
     }
     override fun onDestroy() {
         serviceScope.cancel()
+        auraMix?.close(); auraMix = null
         (application as AuraApplication).effects.audioSessionId = 0
         session?.run { saveState(player); player.release(); release() }
         session = null

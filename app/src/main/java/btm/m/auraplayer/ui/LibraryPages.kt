@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.data.*
@@ -182,6 +183,7 @@ fun CollectionPage(model: AuraViewModel, padding: PaddingValues, collection: Mus
     val visible = remember(model.songs) { model.songs.map { it.key }.toSet() }
     val tracks = if (localPlaylist != null) model.songs.filter { it.key in localPlaylist.songKeys }
         else cloud?.songs ?: collection.songs.filter { it.cloud || it.key in visible }
+    val listeningRank = cloud?.source == "rank"
     val columns = LocalAuraLayout.current.listColumns
     LazyColumn(pageContentModifier(), contentPadding = padding) {
         item {
@@ -198,7 +200,11 @@ fun CollectionPage(model: AuraViewModel, padding: PaddingValues, collection: Mus
             }
         }
         if (tracks.isEmpty() && (cloud == null || !cloud.loading && !cloud.failed && !cloud.hasMore)) item { EmptyState(tr("no_songs", "没有找到歌曲")) }
-        songRows(tracks, model, columns, onRemove = localPlaylist?.let { playlist -> { song ->
+        if (listeningRank) {
+            itemsIndexed(tracks, key = { _, song -> "rank-${song.key}" }) { index, song ->
+                RankSongRow(index + 1, song, model) { model.playCollection(tracks, index, cloud) }
+            }
+        } else songRows(tracks, model, columns, onRemove = localPlaylist?.let { playlist -> { song ->
                 model.history.savePlaylists(model.history.playlists().map { if (it.id == playlist.id) it.copy(songKeys = it.songKeys - song.key) else it })
         } }, onPlay = { model.playCollection(tracks, it, cloud) })
         if (cloud != null && (cloud.hasMore || cloud.loading || cloud.failed)) item("cloud_song_paging") {
@@ -206,6 +212,26 @@ fun CollectionPage(model: AuraViewModel, padding: PaddingValues, collection: Mus
         }
     }
     if (addToPlaylist && localPlaylist != null) PlaylistSongPicker(model, localPlaylist) { addToPlaylist = false }
+}
+
+@Composable
+private fun RankSongRow(rank: Int, song: Song, model: AuraViewModel, onClick: () -> Unit) {
+    val openActions = LocalSongActions.current
+    val backdrop = LocalToolbarBackdrop.current
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(vertical = 7.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(rank.toString(), Modifier.width(30.dp), color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontWeight = FontWeight.Bold)
+        Artwork(song.artwork, Modifier.size(44.dp), cornerRadius = ListArtworkCornerRadius)
+        Column(Modifier.weight(1f).padding(horizontal = 11.dp)) {
+            Text(song.title.ifBlank { tr("unknown_title", "未命名歌曲") }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 15.sp,
+                fontWeight = if (model.current?.key == song.key) FontWeight.Bold else FontWeight.Medium)
+            Text("${song.artist} · ${song.album}", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+        }
+        Text("${song.playCount} ${tr("play_count", "次")}", style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        IconButton(onClick = { openActions(SongActionRequest(song, backdrop)) }, modifier = Modifier.size(44.dp)) {
+            Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary))
+        }
+    }
 }
 
 @Composable

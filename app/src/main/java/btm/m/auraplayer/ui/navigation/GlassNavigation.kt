@@ -652,7 +652,7 @@ private fun HyperNavigation(
                     floatingShadow = floatingShadow,
                     softBackdropShadow = softBackdropShadow,
                     dimensionScale = dimensionScale,
-                    enableDrag = style != NavigationStyle.HARMONY_OS_FLOATING,
+                    enableDrag = enableDrag,
                     tabImageVector = tabImageVector,
                     tabIconContent = tabIconContent,
                     onTabSelected = { index ->
@@ -687,7 +687,7 @@ private fun HyperNavigation(
                         floatingShadow = floatingShadow,
                         softBackdropShadow = softBackdropShadow,
                         dimensionScale = dimensionScale,
-                        enableDrag = style != NavigationStyle.HARMONY_OS_FLOATING,
+                        enableDrag = enableDrag,
                         tabImageVector = tabImageVector,
                         tabIconContent = tabIconContent,
                         modifier = Modifier.weight(1f),
@@ -910,7 +910,7 @@ private fun HyperFloatingNavigationBar(
         animationSpec = spring(stiffness = 700f, dampingRatio = 0.82f),
         label = "harmonyFloatingTouchProgress",
     )
-    val visualPressProgress = if (harmonyFloating) touchProgress else dragAnimation.pressProgress
+    val visualPressProgress = if (harmonyFloating) maxOf(touchProgress, dragAnimation.pressProgress) else dragAnimation.pressProgress
     val interactiveHighlight = remember(animationScope, tabCount) {
         InteractiveHighlight(animationScope) { size, offset ->
             Offset(

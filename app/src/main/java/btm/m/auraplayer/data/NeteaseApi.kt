@@ -3,6 +3,7 @@ package btm.m.auraplayer.data
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -87,6 +88,113 @@ class NeteaseApi(
         val profile = data.optJSONObject("profile") ?: throw CloudApiException(301, "SESSION_EXPIRED")
         return parseAccount(profile)
     }
+
+    /** Parses the server's block model. We deliberately do not walk arbitrary JSON: that
+     * used to turn account playlists and unrelated nested objects into fake recommendations. */
+    suspend fun homeItems(): List<CloudHomeItem> = withContext(Dispatchers.IO) {
+        val response = requestBlocking("homepage/block/page")
+        val blocks = response.optJSONObject("data")?.optJSONArray("blocks")
+            ?: response.optJSONArray("blocks") ?: JSONArray()
+        val result = mutableListOf<CloudHomeItem>()
+        fun text(o: JSONObject?, key: String): String = o?.optJSONObject(key)?.optString("title").orEmpty()
+        fun parseResource(resource: JSONObject, blockCode: String, creativeType: String): CloudHomeItem? {
+            val ui = resource.optJSONObject("uiElement") ?: JSONObject()
+            val ext = resource.optJSONObject("resourceExtInfo") ?: JSONObject()
+            val imageUi = ui.optJSONObject("image")
+            val image = imageUi?.optString("imageUrl").orEmpty().ifBlank { ext.optString("picUrl") }
+                .ifBlank { ext.optString("coverImgUrl") }.replaceFirst("http://", "https://")
+            val title = text(ui, "mainTitle").ifBlank { ext.optString("name") }
+            val subtitle = text(ui, "subTitle").ifBlank { ui.optJSONArray("labelTexts")?.optString(0).orEmpty() }
+            val id = resource.optLong("resourceId", ext.optLong("id", 0L))
+            if (id <= 0 || title.isBlank() || image.isBlank()) return null
+            val lower = (blockCode + " " + creativeType + " " + title).lowercase()
+            val kind = when {
+                lower.contains("album") -> "album"
+                lower.contains("song") || lower.contains("music") -> "song"
+                else -> "playlist"
+            }
+            val section = when {
+                lower.contains("radar") -> "radar"
+                lower.contains("daily") -> "daily"
+                lower.contains("playlist") -> "recommended"
+                else -> ""
+            }
+            val actionType = when (kind) { "song" -> "song"; "album" -> "album"; else -> "playlist" }
+            return CloudHomeItem(id, title, subtitle, image, kind, id, section, actionType, id)
+        }
+        for (i in 0 until blocks.length()) {
+            val block = blocks.optJSONObject(i) ?: continue
+            val code = block.optString("blockCode")
+            val showType = block.optString("showType")
+            val creatives = block.optJSONArray("creatives") ?: continue
+            for (j in 0 until creatives.length()) {
+                val creative = creatives.optJSONObject(j) ?: continue
+                val resources = creative.optJSONArray("resources") ?: JSONArray()
+                for (k in 0 until resources.length()) parseResource(resources.optJSONObject(k) ?: continue, code, creative.optString("creativeType"))?.let(result::add)
+            }
+        }
+        result.distinctBy { "${it.section}:${it.kind}:${it.id}" }.take(100)
+    }
+
+    /** Personalized playlist recommendations. This is separate from /user/playlist. */
+    suspend fun recommendedPlaylists(limit: Int = 30): List<CloudHomeItem> = withContext(Dispatchers.IO) {
+        val response = try { requestBlocking("recommend/resource", mapOf("limit" to "$limit") ) }
+            catch (_: IOException) { requestBlocking("personalized/playlist", mapOf("limit" to "$limit"), authenticated = false) }
+        val rows = response.optJSONArray("recommend")
+            ?: response.optJSONObject("result")?.optJSONArray("recommend")
+            ?: response.optJSONObject("data")?.optJSONArray("recommend")
+            ?: response.optJSONArray("data")
+            ?: response.optJSONArray("playlists")
+            ?: response.optJSONArray("result")
+            ?: response.optJSONObject("result")?.optJSONArray("playlists") ?: JSONArray()
+        List(rows.length()) { i ->
+            val o = rows.optJSONObject(i) ?: JSONObject()
+            val id = o.optLong("id", o.optLong("resourceId", 0L))
+            val title = o.optString("name")
+            val lower = title.lowercase()
+            val section = when {
+                title.contains("每日推荐") || lower.contains("daily") -> "daily"
+                title.contains("私人雷达") || title.contains("宝藏雷达") || lower.contains("radar") -> "radar"
+                title.contains("红心") || title.contains("喜欢") -> "feature"
+                else -> "recommended"
+            }
+            val artwork = o.optString("picUrl").ifBlank { o.optString("coverImgUrl") }.replaceFirst("http://", "https://")
+            CloudHomeItem(id, title, o.optString("copywriter"), artwork, "playlist", id, section, "playlist", id)
+        }.filter { it.id > 0 && it.title.isNotBlank() && it.artwork.isNotBlank() }
+    }
+
+    /** Albums belonging to artists the account actually follows. */
+    suspend fun followedArtistAlbums(): List<CloudHomeItem> = withContext(Dispatchers.IO) {
+        val artists = requestBlocking("artist/sublist", mapOf("limit" to "100", "offset" to "0"))
+            .optJSONArray("data") ?: JSONArray()
+        val artistsToLoad = (0 until minOf(artists.length(), 20)).mapNotNull { artists.optJSONObject(it)?.optLong("id")?.takeIf { id -> id > 0 } }
+        kotlinx.coroutines.coroutineScope {
+            artistsToLoad.map { artistId -> async(Dispatchers.IO) {
+                try { artistAlbums(artistId, 0).items.take(3) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: IOException) { emptyList() }
+            } }.awaitAll().flatten().map { album ->
+                CloudHomeItem(album.id, album.title, album.artist, album.artwork.replaceFirst("http://", "https://"), "album", album.id, "followed", "album", album.id)
+            }.distinctBy { it.id }.sortedByDescending { it.id }.take(8)
+        }
+    }
+
+    /** Public, non-personalized desktop discovery banners (the red-tab NetEase home carousel). */
+    suspend fun publicBanners(): List<CloudHomeItem> = withContext(Dispatchers.IO) {
+        val response = requestBlocking("banner/get", authenticated = false)
+        val banners = response.optJSONArray("banners") ?: JSONArray()
+        List(banners.length()) { index ->
+            val item = banners.getJSONObject(index)
+            val actionType = when (item.optInt("targetType")) { 10 -> "playlist"; 1 -> "song"; 100 -> "album"; else -> "" }
+            CloudHomeItem(
+                id = item.optLong("targetId", index.toLong()),
+                title = item.optString("typeTitle", "网易云音乐"),
+                subtitle = item.optString("url"),
+                artwork = item.optString("pic").replaceFirst("http://", "https://"),
+                kind = "banner",
+                actionType = actionType,
+                actionId = item.optLong("targetId", index.toLong()),
+            )
+        }.filter { it.artwork.isNotBlank() }
+    }
     suspend fun logout() { request("logout") }
     suspend fun playlists(uid: Long, offset: Int = 0, limit: Int = 30, refresh: Boolean = false): CloudPage<CloudPlaylist> {
         require(offset >= 0 && limit in 1..100)
@@ -118,6 +226,7 @@ class NeteaseApi(
         val response = request("cloudsearch", mapOf("keywords" to query, "type" to "1", "limit" to "50", "offset" to "$offset"))
         return parseSongs(response.optJSONObject("result")?.optJSONArray("songs") ?: JSONArray())
     }
+    suspend fun songDetail(id: Long): Song? = parseSongs(request("song/detail", mapOf("ids" to "$id")).optJSONArray("songs") ?: JSONArray()).firstOrNull()
     fun invalidatePlaylist(id: Long) {
         metadataCache?.removePrefix(cacheScope() + "/playlist/track/all/$id/")
         official.invalidatePlaylist(id)
@@ -131,12 +240,15 @@ class NeteaseApi(
         request("playlist/tracks", mapOf("op" to "add", "pid" to "$playlistId", "tracks" to "$songId"))
         invalidatePlaylist(playlistId)
     }
-    suspend fun listeningRank(uid: Long): List<Song> {
-        val response = request("user/record", mapOf("uid" to "$uid", "type" to "0"))
+    suspend fun listeningRank(uid: Long, type: Int = 0): List<Song> {
+        val response = request("user/record", mapOf("uid" to "$uid", "type" to "$type"))
         val rows = response.optJSONArray("allData") ?: JSONArray()
         val songs = JSONArray()
-        for (i in 0 until rows.length()) rows.getJSONObject(i).optJSONObject("song")?.let(songs::put)
-        return parseSongs(songs)
+        val counts = mutableMapOf<Long, Int>()
+        for (i in 0 until rows.length()) rows.getJSONObject(i).let { row ->
+            row.optJSONObject("song")?.let { song -> songs.put(song); counts[song.optLong("id")] = row.optInt("playCount", row.optInt("playedCount")) }
+        }
+        return parseSongs(songs).map { it.copy(playCount = counts[it.id] ?: 0) }.distinctBy { it.id }
     }
     private fun parseAlbums(items: JSONArray): List<CatalogAlbum> = List(items.length()) { i ->
         val album = items.getJSONObject(i)

@@ -6,6 +6,8 @@ import android.content.Context
 import android.graphics.*
 import android.graphics.text.LineBreaker
 import android.os.SystemClock
+import android.os.Handler
+import android.os.Looper
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -67,6 +69,11 @@ class PlayerLyricView(context: Context) : View(context) {
     private var jumped = false
     private var primeAppearance = true
     var onSeek: (Long) -> Unit = {}
+    var onLongPress: (Int) -> Unit = {}
+    private val longPressHandler = Handler(Looper.getMainLooper())
+    private var longPressTriggered = false
+    private var longPressRow = -1
+    private val longPressAction = Runnable { if (longPressRow >= 0 && !dragging) { longPressTriggered = true; onLongPress(longPressRow); invalidate() } }
     private val colors = object : LyricWordRenderer.Colors {
         override fun ink(alpha: Float, emphasis: Float, backing: Boolean) = Color.pack(1f, 1f, 1f, alpha.coerceIn(0f, 1f))
         override fun white(alpha: Float, gain: Float) = Color.pack(1f, 1f, 1f, alpha.coerceIn(0f, 1f))
@@ -74,7 +81,7 @@ class PlayerLyricView(context: Context) : View(context) {
     }
 
     override fun onAttachedToWindow() { super.onAttachedToWindow(); scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate); rebuild(); invalidate() }
-    override fun onDetachedFromWindow() { keepScreenOn = false; scope?.cancel(); scope = null; pending.clear(); super.onDetachedFromWindow() }
+    override fun onDetachedFromWindow() { longPressHandler.removeCallbacks(longPressAction); keepScreenOn = false; scope?.cancel(); scope = null; pending.clear(); super.onDetachedFromWindow() }
     fun submit(lines: List<LyricLine>, translation: Boolean, pronunciation: Boolean, textScale: Float = 1f) {
         val mode = (if (translation) 1 else 0) or (if (pronunciation) 2 else 0)
         val scale = textScale.coerceIn(.5f, 1.5f)
@@ -103,7 +110,8 @@ class PlayerLyricView(context: Context) : View(context) {
     private fun rebuild() {
         val owner = scope ?: return
         if (width <= 0) return
-        // Reserve a stable timestamp gutter; browsing never reflows or clips the lyric text.
+        // Keep the lyric body symmetric for normal and opposite (choral) alignment. The browse
+        // timestamp is an overlay and must not permanently make right-aligned rows narrower.
         val lines = requestedSource; val mode = below; val scale = lyricScale
         // Retain the layout and appearance when the same content is attached again unchanged.
         if (source === lines && builtWidth == width && builtMode == mode && builtScale == scale) return
@@ -112,7 +120,7 @@ class PlayerLyricView(context: Context) : View(context) {
         val viewportHeight = height.toFloat()
         val positionMs = (playhead + if (playing) SystemClock.uptimeMillis() - sampledAt else 0L)
             .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
-        val textWidth = max(1, width - (52 * d + timeGutter).toInt())
+        val textWidth = max(1, width - (52 * d).toInt())
         buildJob?.cancel()
         buildJob = owner.launch {
             val (built, prepared) = withContext(Dispatchers.Default) {
@@ -341,25 +349,32 @@ class PlayerLyricView(context: Context) : View(context) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downY = event.y; lastY = event.y; dragging = false
+                longPressTriggered = false
+                longPressRow = rows.indices.firstOrNull { i -> val y = height * .15f + singing.position(i, base) - (scroll.getOrNull(i) ?: 0f) + manual; event.y in y..(y + rows[i].height) } ?: -1
+                longPressHandler.postDelayed(longPressAction, 520L)
                 if (manualUntil > SystemClock.uptimeMillis()) manualUntil = SystemClock.uptimeMillis() + 3000
                 parent?.requestDisallowInterceptTouchEvent(true); return true
             }
             MotionEvent.ACTION_MOVE -> {
                 if (abs(event.y - downY) > 8 * d) dragging = true
+                if (dragging) longPressHandler.removeCallbacks(longPressAction)
                 if (dragging) { manual += event.y - lastY; manual = manual.coerceIn(-max(0f, (base.lastOrNull() ?: 0f) - (base.getOrNull(focus) ?: 0f)), base.getOrNull(focus) ?: 0f); manualUntil = SystemClock.uptimeMillis() + 3000; invalidate() }
                 lastY = event.y; return true
             }
             MotionEvent.ACTION_UP -> {
+                longPressHandler.removeCallbacks(longPressAction)
                 if (dragging) manualUntil = SystemClock.uptimeMillis() + 3000
-                else {
+                else if (!longPressTriggered) {
                     rows.indices.firstOrNull { i -> val y = height * .15f + singing.position(i, base) - scroll[i] + manual; event.y in y..(y + rows[i].height) }
                         ?.let { onSeek(source[it].start.toLong()); manual = 0f; manualUntil = 0L }
                     performClick()
                 }
+                longPressTriggered = false; longPressRow = -1
                 dragging = false; invalidate()
                 parent?.requestDisallowInterceptTouchEvent(false); return true
             }
             MotionEvent.ACTION_CANCEL -> {
+                longPressHandler.removeCallbacks(longPressAction); longPressTriggered = false; longPressRow = -1
                 if (dragging) manualUntil = SystemClock.uptimeMillis() + 3000
                 dragging = false; invalidate(); parent?.requestDisallowInterceptTouchEvent(false); return true
             }

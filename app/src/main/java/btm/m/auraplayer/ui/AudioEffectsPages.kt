@@ -383,15 +383,35 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
 }
 
 @Composable fun AudioPreferencesPage(padding: PaddingValues) {
-    val store = (LocalContext.current.applicationContext as AuraApplication).effects
+    val app = LocalContext.current.applicationContext as AuraApplication
+    val store = app.effects
+    val auraMix by app.auraMix.state.collectAsState()
     val state by store.state.collectAsState()
+    LaunchedEffect(state.fade) {
+        app.auraMix.update { current -> current.copy(enabled = state.fade, mode = if (current.autoCalculate) btm.m.auraplayer.auramix.AuraMixMode.SMART else btm.m.auraplayer.auramix.AuraMixMode.TRADITIONAL) }
+    }
     val transition = updateTransition(state.fade, label = "audio-fade-setting")
     val blur by transition.animateFloat(transitionSpec = { tween(220) }, label = "blur") { if (it) 0f else 8f }
     LazyColumn(pageContentModifier(), contentPadding = padding) {
         item { EffectsCard {
-            SwitchPreference(tr("audio_fade", "音频淡入淡出"), tr("audio_fade_summary", "播放与暂停时平滑调整音量"), state.fade) { store.audio(fade = it) }
+            SwitchPreference(tr("audio_fade", "音频淡入淡出"), tr("audio_fade_summary", "播放与暂停时平滑调整音量"), state.fade) {
+                store.audio(fade = it)
+                app.auraMix.update { current -> current.copy(enabled = it, mode = if (current.autoCalculate) btm.m.auraplayer.auramix.AuraMixMode.SMART else btm.m.auraplayer.auramix.AuraMixMode.TRADITIONAL) }
+            }
             transition.AnimatedVisibility(visible = { it }, enter = fadeIn(tween(220)) + expandVertically(tween(220)), exit = fadeOut(tween(220)) + shrinkVertically(tween(220))) {
-                Box(Modifier.blur(blur.dp)) { SliderPreference(tr("audio_fade_duration", "音频淡入淡出时长"), state.fadeMs.toFloat(), 100f..3000f, "${state.fadeMs} ms", steps = 28, defaultValue = 600f) { store.audio(ms = it.roundToInt()) } }
+                Column {
+                    SwitchPreference(tr("aura_mix_auto", "自动计算衔接时长"), tr("aura_mix_auto_summary", "根据歌曲开头、结尾和音量包络自动决定淡化方式"), auraMix.autoCalculate) {
+                        app.auraMix.update { current -> current.copy(enabled = state.fade, autoCalculate = it, mode = if (it) btm.m.auraplayer.auramix.AuraMixMode.SMART else btm.m.auraplayer.auramix.AuraMixMode.TRADITIONAL) }
+                    }
+                    AnimatedVisibility(visible = !auraMix.autoCalculate, enter = fadeIn(tween(220)) + expandVertically(tween(220)), exit = fadeOut(tween(220)) + shrinkVertically(tween(220))) {
+                        Box(Modifier.blur(blur.dp)) {
+                            SliderPreference(tr("audio_fade_duration", "音频淡入淡出时长"), state.fadeMs.toFloat(), 100f..3000f, "${state.fadeMs} ms", steps = 28, defaultValue = 600f) { value ->
+                                store.audio(ms = value.roundToInt())
+                                app.auraMix.update { current -> current.copy(durationMs = value.toLong(), enabled = state.fade) }
+                            }
+                        }
+                    }
+                }
             }
             SwitchPreference(tr("audio_always_play", "始终播放"), tr("audio_always_play_summary", "当有其他内容播放时，在后台保持播放"), state.alwaysPlay) { store.audio(always = it) }
         } }

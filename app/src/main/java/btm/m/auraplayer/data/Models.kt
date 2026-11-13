@@ -20,6 +20,7 @@ data class Song(
     val composer: String = "",
     val albumArtist: String = "",
     val artists: List<SongArtist> = emptyList(),
+    val playCount: Int = 0,
 ) { val key: String get() = if (cloud) "cloud:$id" else "local:$uri" }
 
 data class MusicCollection(val key: String, val title: String, val subtitle: String, val songs: List<Song>, val artwork: String = "")
@@ -28,6 +29,19 @@ data class MusicDirectory(val title: String, val collections: List<MusicCollecti
 
 data class CloudPlaylist(val id: Long, val name: String, val count: Int, val artwork: String, val specialType: Int = 0, val creatorId: Long = 0)
 data class CloudAccount(val userId: Long, val nickname: String, val avatar: String)
+
+/** Server supplied NetEase home recommendation item; never backed by the user's playlists. */
+data class CloudHomeItem(
+    val id: Long,
+    val title: String,
+    val subtitle: String = "",
+    val artwork: String = "",
+    val kind: String = "playlist",
+    val sourceId: Long = id,
+    val section: String = "",
+    val actionType: String = "",
+    val actionId: Long = id,
+)
 
 /** Paths are MediaStore RELATIVE_PATH values, including a final slash. */
 object LibraryFilter {

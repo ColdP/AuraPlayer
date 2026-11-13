@@ -13,7 +13,9 @@ import okio.Path.Companion.toOkioPath
 class AuraApplication : Application(), SingletonImageLoader.Factory {
     lateinit var nowPlaying: btm.m.auraplayer.playback.NowPlayingSettings; private set
     lateinit var effects: btm.m.auraplayer.audio.EffectsStore; private set
+    lateinit var auraMix: btm.m.auraplayer.auramix.AuraMixSettings; private set
     lateinit var settings: AuraSettings; private set
+    internal lateinit var navigationMaterial: btm.m.auraplayer.ui.navigation.NavigationMaterialStore; private set
     lateinit var history: LibraryHistory; private set
     lateinit var session: SecureSession; private set
     lateinit var api: NeteaseApi; private set
@@ -22,8 +24,10 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         settings = AuraSettings(this)
+        navigationMaterial = btm.m.auraplayer.ui.navigation.NavigationMaterialStore(this)
         nowPlaying = btm.m.auraplayer.playback.NowPlayingSettings(this)
         effects = btm.m.auraplayer.audio.EffectsStore(this)
+        auraMix = btm.m.auraplayer.auramix.AuraMixSettings(this)
         history = LibraryHistory(this)
         session = SecureSession(this)
         cookie = session.read()
