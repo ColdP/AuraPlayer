@@ -51,6 +51,7 @@ class PlaybackService : MediaSessionService() {
             setPlaybackSpeed(PlaybackPreferences(this@PlaybackService).speed)
         }
         restoreState(player)
+        app.effects.notifyTrackChanged(trackKey(player.currentMediaItem))
         player.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
             override fun onAudioSessionIdChanged(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, audioSessionId: Int) {
                 app.effects.audioSessionId = audioSessionId
@@ -62,6 +63,9 @@ class PlaybackService : MediaSessionService() {
         auraMix = AuraMixManager(this, player, mediaSourceFactory, app.effects, app.auraMix, serviceScope)
         player.addListener(object : androidx.media3.common.Player.Listener {
             override fun onEvents(player: androidx.media3.common.Player, events: androidx.media3.common.Player.Events) {
+                if (events.contains(androidx.media3.common.Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+                    app.effects.notifyTrackChanged(trackKey(player.currentMediaItem))
+                }
                 // Volume ramps must not serialize the entire queue on every animation frame.
                 if (events.containsAny(
                         androidx.media3.common.Player.EVENT_TIMELINE_CHANGED,
@@ -115,6 +119,9 @@ class PlaybackService : MediaSessionService() {
         session = null
         super.onDestroy()
     }
+
+    private fun trackKey(item: MediaItem?): String =
+        item?.let { it.mediaId.ifBlank { it.localConfiguration?.uri?.toString().orEmpty() } }.orEmpty()
 
     private fun restoreState(player: androidx.media3.exoplayer.ExoPlayer) {
         val count = state.getInt("count", 0)

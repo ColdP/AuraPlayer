@@ -8,10 +8,17 @@ import androidx.media3.exoplayer.audio.*
 import java.nio.ByteBuffer
 
 @UnstableApi
-internal class ProcessingAudioSink(sink: AudioSink, private val waveform: OutputWaveform? = null, config: () -> DspConfig) : ForwardingAudioSink(sink) {
+internal class ProcessingAudioSink(
+    sink: AudioSink,
+    private val waveform: OutputWaveform? = null,
+    smartStyle: () -> SoundStyle? = { null },
+    trackGeneration: () -> Long = { 0L },
+    onSmartConfig: (DspConfig) -> Unit = {},
+    config: () -> DspConfig,
+) : ForwardingAudioSink(sink) {
     // Process before DefaultAudioSink's format conversion, so 24/32-bit sources are not
     // needlessly reduced to 16-bit to enter Media3's integer-only processor chain.
-    private val processor = AuraAudioProcessor(config)
+    private val processor = AuraAudioProcessor(config, smartStyle, trackGeneration, onSmartConfig)
     private var pendingInput: ByteBuffer? = null
     private var pendingOutput: ByteBuffer? = null
     private var readPosition = 0

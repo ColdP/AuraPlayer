@@ -10,7 +10,12 @@ import kotlin.math.roundToInt
 
 /** Kept active even in bypass, so presets can change without re-preparing a track. */
 @UnstableApi
-class AuraAudioProcessor(private val config: () -> DspConfig) : BaseAudioProcessor() {
+class AuraAudioProcessor(
+    private val config: () -> DspConfig,
+    private val smartStyle: () -> SoundStyle? = { null },
+    private val trackGeneration: () -> Long = { 0L },
+    private val onSmartConfig: (DspConfig) -> Unit = {},
+) : BaseAudioProcessor() {
     companion object {
         val encodings = setOf(C.ENCODING_PCM_8BIT, C.ENCODING_PCM_16BIT, C.ENCODING_PCM_24BIT, C.ENCODING_PCM_32BIT, C.ENCODING_PCM_FLOAT,
             C.ENCODING_PCM_16BIT_BIG_ENDIAN, C.ENCODING_PCM_24BIT_BIG_ENDIAN, C.ENCODING_PCM_32BIT_BIG_ENDIAN)
@@ -18,6 +23,9 @@ class AuraAudioProcessor(private val config: () -> DspConfig) : BaseAudioProcess
     private var engine: DspEngine? = null
     private var previous: DspEngine? = null
     private var applied: DspConfig? = null
+    private var analyzer: SmartTuningAnalyzer? = null
+    private var lastTrackGen = -1L
+    private var wasSmart = false
     private var input = DoubleArray(0)
     private var output = DoubleArray(0)
     private var oldOutput = DoubleArray(0)
@@ -34,15 +42,35 @@ class AuraAudioProcessor(private val config: () -> DspConfig) : BaseAudioProcess
         input = DoubleArray(inputAudioFormat.channelCount.coerceAtLeast(0))
         output = DoubleArray(input.size); oldOutput = DoubleArray(input.size)
         transitionFrames = (inputAudioFormat.sampleRate * .03).toInt().coerceAtLeast(1)
+        if (input.isNotEmpty() && inputAudioFormat.sampleRate in 8000..384000) {
+            val gen = trackGeneration()
+            if (analyzer == null || gen != lastTrackGen) {
+                lastTrackGen = gen
+                analyzer = SmartTuningAnalyzer(inputAudioFormat.sampleRate, input.size)
+            }
+        }
     }
     override fun queueInput(inputBuffer: ByteBuffer) {
         if (!inputBuffer.hasRemaining()) return
-        val desired = config()
+        val activeStyle = smartStyle()
+        val gen = trackGeneration()
+        if (gen != lastTrackGen || (!wasSmart && activeStyle != null)) {
+            lastTrackGen = gen
+            analyzer?.reset()
+        }
+        wasSmart = activeStyle != null
+        val desired = if (activeStyle != null) {
+            val smartBase = analyzer?.currentConfig ?: SmartTuningAnalyzer.neutralConfig()
+            BuiltInPresets.styled(smartBase, activeStyle)
+        } else {
+            config()
+        }
         if (desired != applied) {
             previous = engine
             engine = DspEngine(desired, inputAudioFormat.sampleRate, input.size)
             applied = desired
             remaining = if (previous == null) 0 else transitionFrames
+            if (activeStyle != null) onSmartConfig(desired)
         }
         val bytes = inputBuffer.remaining()
         val encoding = inputAudioFormat.encoding
@@ -51,7 +79,7 @@ class AuraAudioProcessor(private val config: () -> DspConfig) : BaseAudioProcess
         val sampleBytes = when (encoding) { C.ENCODING_PCM_8BIT -> 1; C.ENCODING_PCM_16BIT, C.ENCODING_PCM_16BIT_BIG_ENDIAN -> 2; C.ENCODING_PCM_24BIT, C.ENCODING_PCM_24BIT_BIG_ENDIAN -> 3; else -> 4 }
         require(bytes % (input.size * sampleBytes) == 0) { "PCM_FRAME_ALIGNMENT" }
         val buffer = replaceOutputBuffer(bytes).order(order)
-        if (desired.bypass && remaining == 0) {
+        if (desired.bypass && remaining == 0 && activeStyle == null) {
             // Preserve every PCM byte, including -32768. No float conversion, gain or limiter.
             buffer.put(inputBuffer)
         } else {
@@ -68,6 +96,16 @@ class AuraAudioProcessor(private val config: () -> DspConfig) : BaseAudioProcess
                     }
                     C.ENCODING_PCM_32BIT, C.ENCODING_PCM_32BIT_BIG_ENDIAN -> inputBuffer.int.toDouble() / 2147483648.0
                     else -> inputBuffer.float.toDouble().let { if (it.isFinite()) it.coerceIn(-1.0, 1.0) else 0.0 }
+                }
+                if (activeStyle != null && analyzer?.offerFrame(input) == true) {
+                    val updated = BuiltInPresets.styled(analyzer!!.currentConfig, activeStyle)
+                    if (updated != applied) {
+                        previous = engine
+                        engine = DspEngine(updated, inputAudioFormat.sampleRate, input.size)
+                        applied = updated
+                        remaining = if (previous == null) 0 else transitionFrames
+                        onSmartConfig(updated)
+                    }
                 }
                 engine!!.processFrame(input, output)
                 if (remaining > 0) {
@@ -92,5 +130,5 @@ class AuraAudioProcessor(private val config: () -> DspConfig) : BaseAudioProcess
         }
         buffer.flip()
     }
-    override fun onReset() { engine = null; previous = null; applied = null; input = DoubleArray(0); output = input; oldOutput = input }
+    override fun onReset() { engine = null; previous = null; applied = null; analyzer = null; lastTrackGen = -1L; wasSmart = false; input = DoubleArray(0); output = input; oldOutput = input }
 }

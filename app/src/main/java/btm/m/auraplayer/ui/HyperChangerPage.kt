@@ -18,6 +18,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.*
 import btm.m.auraplayer.ui.navigation.*
+import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.BackdropEffectScope
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -331,7 +332,7 @@ private fun GlassBackButton(backdrop: LayerBackdrop, collapsedFraction: Float, o
 internal fun GlassToolbarIconButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     description: String,
-    backdrop: LayerBackdrop? = LocalToolbarBackdrop.current,
+    backdrop: Backdrop? = LocalToolbarBackdrop.current,
     collapsedFraction: Float = LocalToolbarCollapsed.current,
     containerPadding: PaddingValues = PaddingValues(horizontal = 2.dp),
     iconTranslationX: Dp = 0.dp,

@@ -29,6 +29,7 @@ class MiuiBlendImageView @JvmOverloads constructor(
     }
 
     fun setBlendDrawable(resource: Int) {
+        if (drawableResource == resource) return
         drawableResource = resource
         setBackgroundResource(resource)
         applyBlend()

@@ -23,4 +23,15 @@ class AuraAdaptiveLayoutTest {
         assertTrue(AuraLayoutInfo(360f, 800f).homeTileWidth.value in 112f..156f)
         assertEquals(156f, AuraLayoutInfo(1600f, 900f).homeTileWidth.value, .001f)
     }
+
+    @Test fun bottomChromeHidesOnAboutAndReappearsOnDismissOrLegalSubpage() {
+        assertFalse(shouldHideBottomChrome(emptyList(), -1))
+        assertFalse(shouldHideBottomChrome(listOf("settings"), -1))
+        assertTrue(shouldHideBottomChrome(listOf("settings", "about"), -1))
+        // Starts animating back in as soon as About begins closing.
+        assertFalse(shouldHideBottomChrome(listOf("settings", "about"), 1))
+        // Legal pages opened from About restore chrome, and closing them returns cleanly to hidden state.
+        assertFalse(shouldHideBottomChrome(listOf("settings", "about", "license"), -1))
+        assertTrue(shouldHideBottomChrome(listOf("settings", "about", "license"), 2))
+    }
 }

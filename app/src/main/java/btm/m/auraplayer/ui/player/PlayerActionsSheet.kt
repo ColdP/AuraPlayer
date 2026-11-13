@@ -36,9 +36,10 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
     // Both menus include the actual stream when the catalogue has not arrived yet.
     val levels = model.qualityDetails.ifEmpty { streamQuality(model.streamInfo)?.let(::listOf).orEmpty() }
     var artists by remember(song.key) { mutableStateOf(song.creditedArtists()) }
+    var audioInfoOpen by remember(song.key) { mutableStateOf(false) }
     LaunchedEffect(show, song.key) { if (show) artists = model.resolveSongArtists(song) }
     LaunchedEffect(show, song.key) { if (show && song.cloud) model.refreshQualities() }
-    LaunchedEffect(show) { onBusy(show) }
+    LaunchedEffect(show) { onBusy(show); if (!show) audioInfoOpen = false }
     DisposableEffect(Unit) { onDispose { onBusy(false) } }
     val foreground = sheetForeground()
     val titleColors = BasicComponentColors(foreground, foreground.copy(alpha = .35f))
@@ -102,8 +103,13 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
             } else action(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, !song.cloud || song.artistId > 0) {
                 openCollectionFromSheet { model.openSongArtist(song) }
             }
-            if (!song.cloud) action(MiuixIcons.Regular.File, tr("tag_editor", "标签编辑器")) {
-                dismiss(); closePlayer(); openPage(tagEditorRoute(song))
+            if (!song.cloud) {
+                action(MiuixIcons.Regular.File, tr("tag_editor", "标签编辑器")) {
+                    dismiss(); closePlayer(); openPage(tagEditorRoute(song))
+                }
+                action(MiuixIcons.Regular.Info, tr("audio_info", "音频信息")) {
+                    audioInfoOpen = true
+                }
             }
             divider()
             SheetDropdown(MiuixIcons.Regular.Timer, tr("sleep_timer", "定时关闭"),
@@ -118,6 +124,14 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
             SheetDropdown(MiuixIcons.Regular.SearchDevice, tr("playback_speed", "倍速播放"), speedText(model.playbackSpeed), menuBackdrop,
                 DropdownEntry(speeds.map { speed -> DropdownItem(speedText(speed), selected = speed == model.playbackSpeed, onClick = { model.changePlaybackSpeed(speed) }) }))
         }
+    }
+    if (!song.cloud) {
+        AudioInfoDialog(
+            song = song,
+            show = audioInfoOpen,
+            playingFormat = model.audioFormat.takeIf { model.current?.key == song.key },
+            onDismissRequest = { audioInfoOpen = false },
+        )
     }
 
 }

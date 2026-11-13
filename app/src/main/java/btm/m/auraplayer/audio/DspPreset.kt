@@ -32,9 +32,11 @@ enum class SoundStyle { CLASSIC, BALANCED, ORIGINAL }
 
 /** Names are localized at the UI boundary; DSP data never depends on the current language. */
 object BuiltInPresets {
+    const val SMART_ID = "smart"
     private fun peak(hz: Double, db: Double, q: Double = .8) = EqBand(hz, db, q)
     private fun low(hz: Double, db: Double) = EqBand(hz, db, type = FilterType.LOW_SHELF)
     private fun high(hz: Double, db: Double) = EqBand(hz, db, type = FilterType.HIGH_SHELF)
+    val smart = DspPreset(SMART_ID, "Smart Tuning", "", SmartTuningAnalyzer.neutralConfig())
     val all = listOf(
         DspPreset("reference", "Reference", "", DspConfig(bypass = true, preampDb = 0.0), true),
         // Deliberately different tonal/dynamic profiles; boosts stay within +5 dB per band.
@@ -52,6 +54,10 @@ object BuiltInPresets {
         DspPreset("jazz", "Jazz Lounge", "", DspConfig(bands = listOf(low(180.0, 2.2), peak(1000.0, 2.4), peak(3200.0, -1.0), high(6000.0, -2.8)), preampDb = -1.0, width = .90, crossfeed = .20, saturation = .10)),
         DspPreset("piano", "Piano Solo", "", DspConfig(bands = listOf(low(90.0, -1.2), peak(320.0, -1.5), peak(1000.0, 1.6), peak(3000.0, -1.0), high(9000.0, 1.4)), preampDb = -1.0, width = 1.04, crossfeed = .08)),
         DspPreset("live", "Live Recording", "", DspConfig(bands = listOf(low(90.0, 1.4), peak(350.0, -2.4), peak(2200.0, 2.1), high(8000.0, -2.4)), preampDb = -1.0, width = 1.36, crossfeed = .02)),
+        DspPreset("drums", "Drums", "", DspConfig(bands = listOf(low(70.0, 3.4), peak(260.0, -2.8), peak(1100.0, -1.4), peak(3200.0, 2.6, 1.0), high(9500.0, 1.4)), preampDb = -1.5, width = 1.12, saturation = .08, thresholdDb = -16.0, ratio = 1.7, attackMs = 35.0, releaseMs = 110.0)),
+        DspPreset("bass", "Bass Guitar", "", DspConfig(bands = listOf(low(65.0, 2.0), peak(140.0, 2.6, .9), peak(420.0, -2.2), peak(900.0, 2.4, 1.0), high(7500.0, -2.2)), preampDb = -1.5, width = .92, crossfeed = .06, saturation = .12, thresholdDb = -18.0, ratio = 1.8, attackMs = 22.0, releaseMs = 150.0)),
+        DspPreset("acoustic_guitar", "Acoustic Guitar", "", DspConfig(bands = listOf(low(80.0, -1.8), peak(210.0, -2.0, 1.1), peak(1200.0, 1.2, .9), peak(4200.0, 2.8, .9), high(11000.0, 2.0)), preampDb = -1.0, width = 1.08, crossfeed = .08)),
+        DspPreset("electric_guitar", "Electric Guitar", "", DspConfig(bands = listOf(low(95.0, -2.2), peak(280.0, 2.2, .9), peak(1400.0, 3.2, .85), peak(3200.0, 1.4, 1.0), high(6000.0, -3.4)), preampDb = -1.0, width = 1.02, crossfeed = .05, saturation = .20, thresholdDb = -17.0, ratio = 1.55, attackMs = 14.0, releaseMs = 120.0)),
     ).also { list -> list.forEach { it.config.validate() } }
 
     fun styled(config: DspConfig, style: SoundStyle): DspConfig {

@@ -241,8 +241,7 @@ private fun AuraShell(model: AuraViewModel) {
         },
         animationSpec = if (rootBackGesture) snap()
             else tween(280, easing = FastOutSlowInEasing), label = "secondaryPlayerDock")
-    val chromeHiddenIndex = pages.indexOfLast { it == "navigation_material" || it == "lyricShare" }
-    val chromeHidden = chromeHiddenIndex >= 0 && closingIndex != chromeHiddenIndex
+    val chromeHidden = shouldHideBottomChrome(pages, closingIndex)
     val materialChromeExit by animateFloatAsState(
         if (chromeHidden) 1f else 0f,
         if (lyricShareTransition.active && chromeHidden) snap() else tween(280, easing = FastOutSlowInEasing),
@@ -262,15 +261,24 @@ private fun AuraShell(model: AuraViewModel) {
         LocalSongActions provides { request -> songActions = request; songActionsOpen = true }) {
         // MIUIX PopupLayout(renderInRootScaffold=true) must be hosted outside recorded pages.
         Scaffold(containerColor = Color.Transparent) {
+            val activeShellBlur = searchProgress > .001f || playerExpansion > .001f
+            val bypassShellBackdropLayer = chromeHidden && !activeShellBlur
             Box(Modifier.fillMaxSize().background(surface)) {
                 // Record page content only; floating controls sample the currently visible page
                 // without recording themselves back into their own glass backgrounds.
-                Box(Modifier.fillMaxSize().graphicsLayer {
-                    // Read progress in the draw layer, without recomposing the whole page stack
-                    // for each spring/gesture frame. Clamp keeps the screen edges filled.
-                    val radius = ((searchProgress * 14f).dp + playerTransitionBlurRadius(miniBlurRadius, playerExpansion)).toPx()
-                    renderEffect = if (radius > .01f) BlurEffect(radius, radius, TileMode.Clamp) else null
-                }.layerBackdrop(backdrop)) {
+                // Pages that hide bottom chrome without active search/player blur bypass the extra
+                // RenderNodeLayer so HWUI platform blur/blend views (e.g. About) sample behind directly.
+                val pageHostModifier = if (bypassShellBackdropLayer) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier.fillMaxSize().graphicsLayer {
+                        // Read progress in the draw layer, without recomposing the whole page stack
+                        // for each spring/gesture frame. Clamp keeps the screen edges filled.
+                        val radius = ((searchProgress * 14f).dp + playerTransitionBlurRadius(miniBlurRadius, playerExpansion)).toPx()
+                        renderEffect = if (radius > .01f) BlurEffect(radius, radius, TileMode.Clamp) else null
+                    }.layerBackdrop(backdrop)
+                }
+                Box(pageHostModifier) {
                 Box(Modifier.fillMaxSize().blur(baseBlur.dp)) {
                     AnimatedContent(targetState = selected.intValue, transitionSpec = {
                         val direction = if (targetState >= initialState) 1 else -1
@@ -457,7 +465,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             page == "about" -> ({ AboutMaterialBackground(Modifier.matchParentSize(), model.settings.value.monet) })
             else -> null
         }) { padding, _ ->
-        val contentPadding = auraContentPadding(padding, if (model.current != null && page != "navigation_material") 104 else 28)
+        val contentPadding = auraContentPadding(padding, if (model.current != null && page !in CHROME_HIDDEN_ROUTES) 104 else 28)
         when (page) {
             "settings" -> SettingsPage(model, contentPadding, open)
             "theme" -> ThemePage(model, contentPadding)
@@ -487,6 +495,16 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             else -> LegalPage(page, contentPadding)
         }
     }
+}
+
+private val CHROME_HIDDEN_ROUTES = setOf("navigation_material", "lyricShare", "about")
+
+internal fun shouldHideBottomChrome(pages: List<String>, closingIndex: Int): Boolean {
+    val topIndex = pages.lastIndex
+    if (topIndex < 0) return false
+    val topHidesChrome = pages[topIndex] in CHROME_HIDDEN_ROUTES && closingIndex != topIndex
+    val revealingHiddenUnderlay = topIndex >= 1 && closingIndex == topIndex && pages[topIndex - 1] in CHROME_HIDDEN_ROUTES
+    return topHidesChrome || revealingHiddenUnderlay
 }
 
 /** Original HyperChanger BottomBar geometry and search-exit animation. */

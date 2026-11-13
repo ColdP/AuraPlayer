@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import btm.m.auraplayer.ui.navigation.InteractiveHighlight
 import btm.m.auraplayer.ui.navigation.DampedDragAnimation
+import btm.m.auraplayer.ui.navigation.NavigationMaterial
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -122,7 +123,10 @@ internal fun HomeSearchOverlay(
     val progress = motion.value
     SideEffect { onProgress(progress) }
     val contentAlpha = searchPhase(progress, .08f, .95f)
-    val tint = MiuixTheme.colorScheme.surfaceContainer.copy(alpha = .30f)
+    val material = rememberModuleNavigationMaterial(navigationStyle)
+    val dark = MiuixTheme.colorScheme.surface.luminance() < .5f
+    val colorStyle = LocalAppInterfaceStyle.current == AppInterfaceStyle.COLOR
+    val surface = MiuixTheme.colorScheme.surfaceContainer
     val deviceCorner = rememberBottomScreenCornerRadius(0.dp, android.view.RoundedCorner.POSITION_BOTTOM_RIGHT)
     BoxWithConstraints(
         Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInWindow() }
@@ -193,13 +197,13 @@ internal fun HomeSearchOverlay(
                 ) {
                     if (snapshot.searching && snapshot.query.isNotBlank()) {
                         item("searching") {
-                            SearchGlassCard(base, false) {
+                            SearchGlassCard(base, navigationStyle, material, dark, colorStyle) {
                                 Text(tr("searching", "正在搜索…"), modifier = Modifier.padding(20.dp), style = MiuixTheme.textStyles.body2)
                             }
                         }
                     } else if (snapshot.query.isBlank() || (!snapshot.searching && snapshot.results.isEmpty())) {
                         item("message") {
-                            SearchGlassCard(base, LocalAppInterfaceStyle.current == AppInterfaceStyle.COLOR) {
+                            SearchGlassCard(base, navigationStyle, material, dark, colorStyle) {
                                 Text(
                                     when {
                                         snapshot.query.isBlank() -> tr("category_search_start", "搜索本地与网易云歌曲、歌手或专辑")
@@ -211,7 +215,7 @@ internal fun HomeSearchOverlay(
                             }
                         }
                     } else if (!snapshot.searching) items(snapshot.results, key = { it.key }) { result ->
-                        SearchGlassCard(base, LocalAppInterfaceStyle.current == AppInterfaceStyle.COLOR) {
+                        SearchGlassCard(base, navigationStyle, material, dark, colorStyle) {
                             SearchResultPreference(
                                 result = result,
                                 enabled = interactionEnabled && (enabled || !result.requiresService) && expanded && contentAlpha > .98f && snapshot.query == query,
@@ -244,14 +248,13 @@ internal fun HomeSearchOverlay(
             query = query, onQueryChange = onQueryChange,
             modifier = Modifier.offset(fieldLeft, fieldTop).width(fieldWidth)
                 .searchContentMotion(contentAlpha)
-                .searchGlass(foregroundBackdrop, RoundedCornerShape(50), tint,
-                    LocalAppInterfaceStyle.current == AppInterfaceStyle.COLOR),
+                .searchGlass(foregroundBackdrop, RoundedCornerShape(50), surface, navigationStyle, material, dark, colorStyle),
             hint = tr("category_search_placeholder", "搜索歌曲、艺术家或专辑"),
             floating = false, drawSurface = false,
             requestFocus = interactionEnabled && expanded && progress > .96f, enabled = interactionEnabled && expanded && progress > .96f,
         )
         if (filterContent != null) Box(Modifier.offset(y = fieldTop + 64.dp).fillMaxWidth().searchContentMotion(contentAlpha)) {
-            CompositionLocalProvider(LocalToolbarBackdrop provides resultsBackdrop) { filterContent() }
+            CompositionLocalProvider(LocalToolbarBackdrop provides foregroundBackdrop) { filterContent() }
         }
         // One fixed circle moves between the two anchors; it never stretches or fuses.
         // Render it last so both its background and icon stay above every card.
@@ -444,25 +447,51 @@ internal fun SearchRoundButton(
     }
 }
 
-private fun Modifier.searchGlass(backdrop: Backdrop, shape: Shape, tint: Color, colorStyle: Boolean, highlightAlpha: Float = if (colorStyle) .78f else .25f): Modifier =
-    if (isRuntimeShaderSupported()) drawBackdrop(
+private fun Modifier.searchGlass(
+    backdrop: Backdrop,
+    shape: Shape,
+    surfaceColor: Color,
+    navigationStyle: String,
+    material: NavigationMaterial,
+    dark: Boolean,
+    colorStyle: Boolean,
+): Modifier {
+    val spec = resolveFloatingGlassMaterialSpec(navigationStyle, material, dark, colorStyle)
+    val tint = surfaceColor.copy(alpha = spec.surfaceAlpha)
+    return if (isRuntimeShaderSupported()) drawBackdrop(
         backdrop = backdrop, shape = { shape },
-        effects = { vibrancy(); blur((if (colorStyle) 14.dp else SEARCH_GLASS_BLUR).toPx()); lens(18.dp.toPx(), if (colorStyle) 0f else SEARCH_GLASS_REFRACTION.toPx(),
-            depthEffect = true, chromaticAberration = false) },
-        highlight = { Highlight.Default.copy(alpha = highlightAlpha) },
+        effects = {
+            vibrancy()
+            blur(spec.blurRadius.toPx())
+            lens(
+                spec.refractionHeight.toPx(),
+                spec.refractionAmount.toPx(),
+                depthEffect = spec.depthEffect,
+                chromaticAberration = spec.chromaticAberration,
+            )
+        },
+        highlight = { Highlight.Default.copy(alpha = spec.highlightAlpha) },
         shadow = { Shadow.Default.copy(radius = 8.dp, alpha = .12f) }, innerShadow = null,
         onDrawSurface = { drawRect(tint) },
     ) else background(tint, shape)
+}
 
 @Composable
-private fun SearchGlassCard(backdrop: Backdrop, colorStyle: Boolean, content: @Composable ColumnScope.() -> Unit) {
+private fun SearchGlassCard(
+    backdrop: Backdrop,
+    navigationStyle: String,
+    material: NavigationMaterial,
+    dark: Boolean,
+    colorStyle: Boolean,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     val shape = RoundedCornerShape(22.5.dp)
     val scope = rememberCoroutineScope()
     val highlight = remember(scope) { InteractiveHighlight(scope) { size, offset ->
         Offset(offset.x.coerceIn(0f, size.width), offset.y.coerceIn(0f, size.height))
     } }
-    val tint = MiuixTheme.colorScheme.surfaceContainer.copy(alpha = if (colorStyle) .58f else .34f)
-    Card(modifier = Modifier.fillMaxWidth().searchGlass(backdrop, shape, tint, colorStyle)
+    val surface = MiuixTheme.colorScheme.surfaceContainer
+    Card(modifier = Modifier.fillMaxWidth().searchGlass(backdrop, shape, surface, navigationStyle, material, dark, colorStyle)
         .clip(shape).then(highlight.gestureModifier).then(highlight.modifier),
         cornerRadius = 22.5.dp, colors = CardDefaults.defaultColors(color = Color.Transparent), content = content)
 }

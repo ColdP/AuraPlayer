@@ -46,6 +46,49 @@ internal fun MusicCollection.isCatalog() = key.startsWith("album:") || key.start
 internal fun MusicCollection.isArtist() = key.startsWith("artist:") || key.startsWith("cloud:artist:")
 private const val ArtistHeroHeightScale = 1.25f * .90f
 private const val ArtistHeroTransitionScale = .35f * .85f / ArtistHeroHeightScale
+internal val AlbumTrackRowHeight = 74.dp * .88f * .92f * .93f
+internal val AlbumTrackRowVerticalPadding = (AlbumTrackRowHeight - 44.dp) / 2
+
+internal fun resolveAlbumArtist(
+    catalogArtist: String?,
+    collectionSubtitle: String,
+    tracks: List<Song>,
+): String = catalogArtist?.trim()?.takeIf(String::isNotEmpty)
+    ?: tracks.firstNotNullOfOrNull { it.albumArtist.trim().takeIf(String::isNotEmpty) }
+    ?: collectionSubtitle.trim().takeIf(String::isNotEmpty)
+    ?: tracks.firstOrNull()?.artist?.trim().orEmpty()
+
+internal fun shouldShowAlbumTrackArtist(song: Song, resolvedAlbumArtist: String): Boolean {
+    val trackArtist = song.artist.trim()
+    if (trackArtist.isEmpty()) return false
+    val albumArtist = song.albumArtist.trim().ifEmpty { resolvedAlbumArtist.trim() }
+    if (albumArtist.isEmpty()) return false
+    return !trackArtist.equals(albumArtist, ignoreCase = true)
+}
+
+internal fun formatAlbumTotalDuration(
+    tracks: List<Song>,
+    language: String = I18n.language,
+    hourUnit: String = tr("hours", "小时"),
+    minuteUnit: String = tr("minutes", "分钟"),
+): String? {
+    val totalMs = tracks.sumOf { it.duration.coerceAtLeast(0L) }
+    if (totalMs <= 0L) return null
+    val totalMinutes = ((totalMs + 30_000L) / 60_000L).coerceAtLeast(1L)
+    val hours = totalMinutes / 60L
+    val minutes = totalMinutes % 60L
+    val joiner = if (language == "en") " " else ""
+    return when {
+        hours > 0L && minutes > 0L -> "$hours$joiner$hourUnit$joiner$minutes$joiner$minuteUnit"
+        hours > 0L -> "$hours$joiner$hourUnit"
+        else -> "$minutes$joiner$minuteUnit"
+    }
+}
+
+internal fun formatAlbumReleaseSummary(dateLabel: String?, durationLabel: String?): String? =
+    listOfNotNull(dateLabel?.takeIf(String::isNotBlank), durationLabel?.takeIf(String::isNotBlank))
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString(", ")
 
 @Composable
 internal fun CatalogBackground(collection: MusicCollection?, modifier: Modifier = Modifier) {
@@ -80,6 +123,9 @@ internal fun CatalogDetailPage(model: AuraViewModel, padding: PaddingValues, col
     val songActionsBackdrop = LocalToolbarBackdrop.current
     val tracks = cloud?.songs ?: collection.songs
     val info = cloud?.catalog
+    val albumArtist = remember(info?.artist, collection.subtitle, tracks) {
+        resolveAlbumArtist(info?.artist, collection.subtitle, tracks)
+    }
     val palette = rememberPlayerMonetPalette(collection.artwork)
     val dark = artist || MiuixTheme.colorScheme.surface.luminance() < .5f
     val foreground = if (dark) Color.White else Color(palette.a1.tone(10))
@@ -154,7 +200,7 @@ internal fun CatalogDetailPage(model: AuraViewModel, padding: PaddingValues, col
                 Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).padding(end = 12.dp)) {
                         Text(collection.title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold, color = foreground, maxLines = 2)
-                        Text(info?.artist?.ifBlank { collection.subtitle } ?: tracks.firstOrNull()?.artist.orEmpty(), color = muted,
+                        Text(albumArtist, color = muted,
                             modifier = Modifier.padding(top = 4.dp).clickable { tracks.firstOrNull()?.let(model::openSongArtist) }, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Box(Modifier.size(42.dp).clip(CircleShape).clickable { if (destinationId > 0) open("albumInfo:$destinationId") }
@@ -218,7 +264,8 @@ internal fun CatalogDetailPage(model: AuraViewModel, padding: PaddingValues, col
             Column(Modifier.padding(horizontal = margin)) {
                 HorizontalDivider(color = foreground.copy(alpha = .12f))
                 // Keep the 44 dp action; apply the successive height reductions to the whole row.
-                val trackPadding = if (artist) 8.dp else (74.dp * .88f * .92f - 44.dp) / 2
+                val trackPadding = if (artist) 8.dp else AlbumTrackRowVerticalPadding
+                val showTrackArtist = !artist && shouldShowAlbumTrackArtist(song, albumArtist)
                 Row(Modifier.fillMaxWidth().clickable { model.playCollection(tracks, index, cloud) }.padding(vertical = trackPadding), verticalAlignment = Alignment.CenterVertically) {
                     if (artist) Artwork(song.artwork, Modifier.size(42.dp), cornerRadius = ListArtworkCornerRadius)
                     else Text("${index + 1}", color = muted, fontSize = 13.sp, modifier = Modifier.width(28.dp))
@@ -227,6 +274,8 @@ internal fun CatalogDetailPage(model: AuraViewModel, padding: PaddingValues, col
                             fontSize = 15.sp, fontWeight = FontWeight.Medium)
                         if (artist) Text(listOf(song.album, song.year.takeIf { it > 0 }?.toString().orEmpty()).filter { it.isNotBlank() }.joinToString(" · "),
                             color = muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        else if (showTrackArtist) Text(song.artist.trim(), color = foreground.copy(alpha = .56f), fontSize = 11.sp,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 1.dp))
                     }
                     IconButton(onClick = { openSongActions(SongActionRequest(song, songActionsBackdrop)) }, modifier = Modifier.size(44.dp)) {
                         Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.size(20.dp), colorFilter = ColorFilter.tint(muted))
@@ -238,10 +287,16 @@ internal fun CatalogDetailPage(model: AuraViewModel, padding: PaddingValues, col
             CloudPagingFooter(cloud.loading, cloud.failed) { model.loadMoreCloudSongsFor(cloud) }
         }
         if (!artist) item("release_info") {
-            Column(Modifier.padding(horizontal = margin, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (info != null && info.published > 0) Text(dateText(info.published), color = muted, fontSize = 13.sp)
-                else tracks.firstOrNull()?.year?.takeIf { it > 0 }?.let { Text("$it", color = muted, fontSize = 13.sp) }
-                info?.company?.takeIf { it.isNotBlank() }?.let { Text(tr("record_label", "发行公司") + ": $it", color = muted, fontSize = 13.sp) }
+            val dateLabel = when {
+                info != null && info.published > 0 -> dateText(info.published)
+                else -> tracks.firstOrNull()?.year?.takeIf { it > 0 }?.toString()
+            }
+            val summaryText = formatAlbumReleaseSummary(dateLabel, formatAlbumTotalDuration(tracks))
+            if (summaryText != null || !info?.company.isNullOrBlank()) {
+                Column(Modifier.padding(horizontal = margin, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    summaryText?.let { Text(it, color = muted, fontSize = 13.sp) }
+                    info?.company?.takeIf { it.isNotBlank() }?.let { Text(tr("record_label", "发行公司") + ": $it", color = muted, fontSize = 13.sp) }
+                }
             }
         }
         if (artist) item("artist_albums") {
@@ -279,6 +334,9 @@ internal fun CatalogDetailPage(model: AuraViewModel, padding: PaddingValues, col
 internal fun AlbumInfoPage(model: AuraViewModel, padding: PaddingValues, collection: MusicCollection, cloud: CloudPlaylistContent?) {
     val tracks = cloud?.songs ?: collection.songs
     val info = cloud?.catalog
+    val albumArtist = remember(info?.artist, collection.subtitle, tracks) {
+        resolveAlbumArtist(info?.artist, collection.subtitle, tracks)
+    }
     val foreground = Color.White
     val muted = foreground.copy(alpha = .72f)
     var confirmDownload by remember(collection.key) { mutableStateOf(false) }

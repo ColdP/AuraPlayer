@@ -35,6 +35,8 @@ internal fun SongActionsSheet(model: AuraViewModel, request: SongActionRequest, 
     var artists by remember(song.key) { mutableStateOf(song.creditedArtists()) }
     var playlistOpen by remember(song.key) { mutableStateOf(false) }
     var playlistMounted by remember(song.key) { mutableStateOf(false) }
+    var audioInfoOpen by remember(song.key) { mutableStateOf(false) }
+    LaunchedEffect(show) { if (!show) audioInfoOpen = false }
     LaunchedEffect(song.key) { artists = model.resolveSongArtists(song) }
     val historyRevision = model.history.revision
     val favorite = model.isFavorite(song)
@@ -76,11 +78,22 @@ internal fun SongActionsSheet(model: AuraViewModel, request: SongActionRequest, 
                     icon = { Artwork(artist.artwork, it.size(30.dp), circular = true) },
                     onClick = { model.openSongArtist(song, artist); dismiss() }) }))
             else action(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, song.artistId > 0 || !song.cloud) { model.openSongArtist(song); dismiss() }
-            if (!song.cloud) action(MiuixIcons.Regular.File, tr("tag_editor", "标签编辑器")) { dismiss(); editTags(song) }
+            if (!song.cloud) {
+                action(MiuixIcons.Regular.File, tr("tag_editor", "标签编辑器")) { dismiss(); editTags(song) }
+                action(MiuixIcons.Regular.Info, tr("audio_info", "音频信息")) { audioInfoOpen = true }
+            }
         }
     }
     if (playlistMounted) SongPlaylistPicker(model, song, playlistOpen, request.backdrop,
         dismiss = { playlistOpen = false }, onDismissFinished = { playlistMounted = false })
+    if (!song.cloud) {
+        AudioInfoDialog(
+            song = song,
+            show = audioInfoOpen,
+            playingFormat = model.audioFormat.takeIf { model.current?.key == song.key },
+            onDismissRequest = { audioInfoOpen = false },
+        )
+    }
 }
 
 @Composable

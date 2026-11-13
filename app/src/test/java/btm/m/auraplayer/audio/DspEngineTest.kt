@@ -133,8 +133,8 @@ class DspEngineTest {
     }
 
     @Test fun everyPresetHasDistinctRealParameters() {
-        assertEquals(15, BuiltInPresets.all.size)
-        assertEquals(15, BuiltInPresets.all.map { it.config }.toSet().size)
+        assertEquals(19, BuiltInPresets.all.size)
+        assertEquals(19, BuiltInPresets.all.map { it.config }.toSet().size)
         assertEquals(5, BuiltInPresets.all.count { it.core })
         assertTrue(BuiltInPresets.all.drop(1).none { it.config.bypass })
         val eight = DspConfig(bands = List(8) { EqBand(1000.0, 0.0) })

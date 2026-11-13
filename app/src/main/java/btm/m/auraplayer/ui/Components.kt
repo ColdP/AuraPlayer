@@ -11,8 +11,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.graphics.luminance
+import btm.m.auraplayer.ui.navigation.NavigationMaterial
 import btm.m.auraplayer.ui.navigation.NavigationMaterialSettings
 import btm.m.auraplayer.ui.navigation.NavigationStyle
+import btm.m.auraplayer.ui.player.playerMiniBlurRadius
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -22,7 +25,7 @@ import com.kyant.backdrop.highlight.Highlight
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-val LocalToolbarBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
+val LocalToolbarBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 val LocalDialogBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 internal val LocalToolbarCollapsed = compositionLocalOf { 0f }
 internal val LocalPageScroll = compositionLocalOf<ScrollBehavior?> { null }
@@ -44,6 +47,47 @@ internal fun rememberModuleNavigationMaterial(style: String): btm.m.auraplayer.u
     return materials[selected] ?: NavigationMaterialSettings.defaults(selected)
 }
 
+internal data class FloatingGlassMaterialSpec(
+    val blurRadius: Dp,
+    val refractionHeight: Dp,
+    val refractionAmount: Dp,
+    val depthEffect: Boolean,
+    val chromaticAberration: Boolean,
+    val highlightAlpha: Float,
+    val surfaceAlpha: Float,
+)
+
+internal fun resolveFloatingGlassMaterialSpec(
+    navigationStyle: String,
+    material: NavigationMaterial,
+    dark: Boolean,
+    colorStyle: Boolean = false,
+): FloatingGlassMaterialSpec {
+    val liquid = navigationStyle == "liquid_glass"
+    val harmony = navigationStyle == "harmony_os_floating"
+    val baseBlur = playerMiniBlurRadius(navigationStyle, material.blur)
+    val baseSurfaceAlpha = when {
+        colorStyle -> .58f
+        liquid -> .40f
+        harmony -> if (dark) .36f else .48f
+        else -> if (dark) .30f else .42f
+    }
+    val baseHighlightAlpha = when {
+        colorStyle -> .78f
+        liquid -> Highlight.Default.alpha
+        else -> (if (dark) .78f else .96f) * (if (harmony) .72f else 1f)
+    }
+    return FloatingGlassMaterialSpec(
+        blurRadius = if (colorStyle) 14.dp else baseBlur,
+        refractionHeight = (if (liquid) 24.dp else 16.dp) * material.thickness / 100f,
+        refractionAmount = if (colorStyle) 0.dp else (if (liquid) 24.dp else 32.dp) * material.refraction / 100f,
+        depthEffect = !liquid,
+        chromaticAberration = material.dispersion ?: liquid,
+        highlightAlpha = if (colorStyle) baseHighlightAlpha else material.light(baseHighlightAlpha),
+        surfaceAlpha = material.alpha(baseSurfaceAlpha),
+    )
+}
+
 @Composable
 fun Group(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxWidth()) {
@@ -58,8 +102,8 @@ fun Preference(title: String, summary: String? = null, enabled: Boolean = true, 
 }
 
 @Composable
-fun SwitchPreference(title: String, summary: String? = null, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    top.yukonga.miuix.kmp.preference.SwitchPreference(checked = checked, onCheckedChange = onCheckedChange, title = title, summary = summary, insideMargin = CompactPreferencePadding)
+fun SwitchPreference(title: String, summary: String? = null, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
+    top.yukonga.miuix.kmp.preference.SwitchPreference(checked = checked, onCheckedChange = onCheckedChange, title = title, summary = summary, enabled = enabled, insideMargin = CompactPreferencePadding)
 }
 
 @Composable

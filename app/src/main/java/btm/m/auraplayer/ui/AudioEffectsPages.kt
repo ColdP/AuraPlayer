@@ -70,6 +70,11 @@ internal fun presetName(p: DspPreset): String = when (p.id) {
     "jazz" -> tr("preset_jazz", "爵士微醺")
     "piano" -> tr("preset_piano", "琴键独白")
     "live" -> tr("preset_live", "现场临境")
+    "drums" -> tr("preset_drums", "鼓点冲击")
+    "bass" -> tr("preset_bass", "贝斯律动")
+    "acoustic_guitar" -> tr("preset_acoustic_guitar", "原声吉他")
+    "electric_guitar" -> tr("preset_electric_guitar", "电吉他")
+    BuiltInPresets.SMART_ID -> tr("preset_smart", "智能调音")
     "custom" -> tr("custom", "自定义")
     else -> p.name
 }
@@ -90,6 +95,11 @@ internal fun presetSummary(p: DspPreset): String = when (p.id) {
     "jazz" -> tr("preset_jazz_summary", "温暖中低频与轻度耳机交叉馈送")
     "piano" -> tr("preset_piano_summary", "收紧低中频，保留琴键触感与泛音")
     "live" -> tr("preset_live_summary", "改善现场录音的清晰度与立体声宽度")
+    "drums" -> tr("preset_drums_summary", "增强底鼓力度与军鼓瞬态，保留钹片空气感")
+    "bass" -> tr("preset_bass_guitar_summary", "凸显贝斯质感与中频轮廓，保持稳固低频动态")
+    "acoustic_guitar" -> tr("preset_acoustic_guitar_summary", "削减箱体共鸣浑浊，突出拨弦颗粒感与泛音")
+    "electric_guitar" -> tr("preset_electric_guitar_summary", "聚焦中频穿透力与箱体厚度，柔化高频毛刺")
+    BuiltInPresets.SMART_ID -> tr("preset_smart_summary", "实时分析歌曲频谱与动态，自动平衡音色与能量分布")
     "custom" -> tr("preset_custom_summary", "实时调整均衡、动态与空间参数")
     else -> p.description
 }
@@ -152,7 +162,8 @@ internal fun presetSummary(p: DspPreset): String = when (p.id) {
         }
         item {
             Group(tr("sound_style", "声音风格")) {
-                Preference(tr("custom", "自定义"), tr("preset_custom_summary", "实时调整均衡、动态与空间参数")) { open("effect_custom") }
+                val isSmart = state.selected == BuiltInPresets.SMART_ID
+                Preference(tr("custom", "自定义"), if (isSmart) tr("smart_custom_disabled", "智能调音模式下已禁用自定义参数") else tr("preset_custom_summary", "实时调整均衡、动态与空间参数")) { open("effect_custom") }
                 GlassDropdownPreference(tr("overall_sound_style", "声音整体风格"),
                     listOf(tr("style_classic", "经典"), tr("style_balanced", "均衡"), tr("style_original", "原声")), state.style.ordinal,
                     backdrop = LocalToolbarBackdrop.current) { store.style(SoundStyle.entries[it]) }
@@ -185,15 +196,21 @@ internal fun presetSummary(p: DspPreset): String = when (p.id) {
     var resetting by remember { mutableStateOf(false) }
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
+            val canExportCurrent = state.current.id != BuiltInPresets.SMART_ID
             EffectsCard {
                 Preference(tr("import_preset", "预设导入")) { transfer = "import" }
-                Preference(tr("export_preset", "预设导出"), presetName(state.current)) { exportPreset = state.current; transfer = "export" }
+                Preference(
+                    tr("export_preset", "预设导出"),
+                    if (canExportCurrent) presetName(state.current) else tr("smart_preset_not_exportable", "智能调音为实时自适应模式，不支持导出"),
+                    enabled = canExportCurrent,
+                ) { exportPreset = state.current; transfer = "export" }
                 Preference(tr("online_presets", "在线预设库")) { open("effect_online") }
                 Preference(tr("restore_default_parameters", "恢复默认参数")) { resetting = true }
             }
         }
         if (selectedTab == 0) {
             item { Group(tr("core_sound_styles", "核心声音风格")) { BuiltInPresets.all.filter { it.core }.forEach { p -> PresetRow(p, state.selected == p.id) { actionPreset = p } } } }
+            item { EffectsCard { PresetRow(BuiltInPresets.smart, state.selected == BuiltInPresets.SMART_ID) { actionPreset = BuiltInPresets.smart } } }
             item { Group(tr("genre_sound_styles", "音乐风格参考")) { BuiltInPresets.all.filterNot { it.core }.forEach { p -> PresetRow(p, state.selected == p.id) { actionPreset = p } } } }
         }
         if (selectedTab == 1 && state.imported.isNotEmpty()) item {
@@ -208,13 +225,27 @@ internal fun presetSummary(p: DspPreset): String = when (p.id) {
             EffectsCard { Preference(tr("unsaved_preset", "未保存的预设")) { draft = true } }
         }
     }
-    WindowDialog(actionPreset != null, title = actionPreset?.let(::presetName), titleTextAlign = TextAlign.Start, onDismissRequest = { actionPreset = null }) {
-        val p = actionPreset
-        GlassDialogButton({ if (p != null) store.select(p.id); actionPreset = null }, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("use_preset", "使用")) }
-        if (p != null && state.imported.any { it.id == p.id }) GlassDialogButton({ deletePreset = p; actionPreset = null; deleting = true }, Modifier.fillMaxWidth().padding(top = 12.dp)) { Text(tr("delete", "删除")) }
-        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            GlassDialogButton({ exportPreset = p; actionPreset = null; transfer = "export" }, Modifier.weight(1f)) { Text(tr("export", "导出")) }
-            GlassDialogButton({ exportPreset = p; actionPreset = null; transfer = "share" }, Modifier.weight(1f)) { Text(tr("share", "分享")) }
+    val selectedAction = actionPreset
+    val isSmartAction = selectedAction?.id == BuiltInPresets.SMART_ID
+    WindowDialog(
+        selectedAction != null,
+        title = selectedAction?.let(::presetName),
+        summary = if (selectedAction != null && isSmartAction) presetSummary(selectedAction) else null,
+        titleTextAlign = TextAlign.Start,
+        summaryTextAlign = TextAlign.Start,
+        onDismissRequest = { actionPreset = null },
+    ) {
+        if (selectedAction != null && isSmartAction) {
+            GlassDialogButton({ store.select(selectedAction.id); actionPreset = null }, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("use_preset", "使用")) }
+            GlassDialogButton({ actionPreset = null }, Modifier.fillMaxWidth().padding(top = 12.dp)) { Text(tr("cancel", "取消")) }
+        } else if (selectedAction != null) {
+            val p = selectedAction
+            GlassDialogButton({ store.select(p.id); actionPreset = null }, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("use_preset", "使用")) }
+            if (state.imported.any { it.id == p.id }) GlassDialogButton({ deletePreset = p; actionPreset = null; deleting = true }, Modifier.fillMaxWidth().padding(top = 12.dp)) { Text(tr("delete", "删除")) }
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                GlassDialogButton({ exportPreset = p; actionPreset = null; transfer = "export" }, Modifier.weight(1f)) { Text(tr("export", "导出")) }
+                GlassDialogButton({ exportPreset = p; actionPreset = null; transfer = "share" }, Modifier.weight(1f)) { Text(tr("share", "分享")) }
+            }
         }
     }
     PresetTransfer(transfer, store, exportPreset) { transfer = "" }
@@ -353,43 +384,50 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
 @Composable fun CustomEffectsPage(padding: PaddingValues) {
     val store = (LocalContext.current.applicationContext as AuraApplication).effects
     val state by store.state.collectAsState()
+    val isSmart = state.selected == BuiltInPresets.SMART_ID
+    val customEnabled = !isSmart
     val c = state.editableConfig
+    val controlsEnabled = customEnabled && !c.bypass
     var saving by remember { mutableStateOf(false) }
-    fun change(block: (DspConfig) -> DspConfig) = store.custom(block(store.state.value.editableConfig))
+    fun change(block: (DspConfig) -> DspConfig) { if (customEnabled) store.custom(block(store.state.value.editableConfig)) }
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             EffectsCard {
-                Preference(tr("edit_from_current", "从当前预设开始编辑"), presetName(state.current)) { store.custom(state.current.config.copy(bypass = false)) }
-                Preference(tr("save_as_preset", "保存为新预设")) { store.custom(c); saving = true }
-                SwitchPreference(tr("enable_custom_processing", "启用自定义处理"), checked = !c.bypass) { enabled -> change { it.copy(bypass = !enabled) } }
+                Preference(
+                    tr("edit_from_current", "从当前预设开始编辑"),
+                    if (isSmart) tr("smart_custom_disabled", "智能调音模式下已禁用自定义参数") else presetName(state.current),
+                    enabled = customEnabled,
+                ) { store.custom(store.activeCurrentConfig.copy(bypass = false)) }
+                Preference(tr("save_as_preset", "保存为新预设"), enabled = customEnabled) { store.custom(c); saving = true }
+                SwitchPreference(tr("enable_custom_processing", "启用自定义处理"), checked = customEnabled && !c.bypass, enabled = customEnabled) { enabled -> change { it.copy(bypass = !enabled) } }
             }
         }
         item { Group(tr("effect_headroom", "增益余量")) {
-            SliderPreference(tr("effect_preamp", "前置增益"), c.preampDb.toFloat(), -18f..0f, "${decimal(c.preampDb)} dB", !c.bypass, steps = 35, defaultValue = -2f) { value -> change { it.copy(preampDb = value.toDouble()) } }
-            BasicComponent(title = tr("automatic_headroom", "自动增益保护"), summary = tr("automatic_headroom_summary", "在前置增益基础上，为 EQ 和声场增强额外预留余量，并限制输出峰值"), insideMargin = CompactPreferencePadding)
+            SliderPreference(tr("effect_preamp", "前置增益"), c.preampDb.toFloat(), -18f..0f, "${decimal(c.preampDb)} dB", controlsEnabled, steps = 35, defaultValue = -2f) { value -> change { it.copy(preampDb = value.toDouble()) } }
+            BasicComponent(title = tr("automatic_headroom", "自动增益保护"), summary = tr("automatic_headroom_summary", "在前置增益基础上，为 EQ 和声场增强额外预留余量，并限制输出峰值"), enabled = controlsEnabled, insideMargin = CompactPreferencePadding)
         } }
         items(c.bands.indices.toList(), key = { "band-$it" }) { index ->
             val b = c.bands[index]
             fun band(block: (EqBand) -> EqBand) = change { current -> current.copy(bands = current.bands.mapIndexed { i, v -> if (i == index) block(v) else v }) }
             Group("${tr("eq_band", "均衡频段")} ${index + 1}") {
-                GlassDropdownPreference(tr("filter_type", "滤波器类型"), listOf(tr("filter_peak", "峰值"), tr("filter_low", "低频搁架"), tr("filter_high", "高频搁架")), b.type.ordinal, enabled = !c.bypass, backdrop = LocalToolbarBackdrop.current) { type -> band { it.copy(type = FilterType.entries[type]) } }
-                SliderPreference(tr("eq_frequency", "频率"), b.frequency.toFloat(), 20f..20000f, "${b.frequency.roundToInt()} Hz", !c.bypass, defaultValue = 1000f) { value -> band { it.copy(frequency = value.toDouble()) } }
-                SliderPreference(tr("eq_gain", "增益"), b.gainDb.toFloat(), -9f..6f, "${decimal(b.gainDb)} dB", !c.bypass, steps = 29) { value -> band { it.copy(gainDb = value.toDouble()) } }
-                SliderPreference(tr("eq_q", "Q 值"), b.q.toFloat(), .3f..3f, decimal(b.q), !c.bypass, steps = 26, defaultValue = .707f) { value -> band { it.copy(q = value.toDouble().coerceIn(.3, 3.0)) } }
-                if (c.bands.size > 1) Preference(tr("remove_eq_band", "移除此频段")) { change { it.copy(bands = it.bands.filterIndexed { i, _ -> i != index }) } }
+                GlassDropdownPreference(tr("filter_type", "滤波器类型"), listOf(tr("filter_peak", "峰值"), tr("filter_low", "低频搁架"), tr("filter_high", "高频搁架")), b.type.ordinal, enabled = controlsEnabled, backdrop = LocalToolbarBackdrop.current) { type -> band { it.copy(type = FilterType.entries[type]) } }
+                SliderPreference(tr("eq_frequency", "频率"), b.frequency.toFloat(), 20f..20000f, "${b.frequency.roundToInt()} Hz", controlsEnabled, defaultValue = 1000f) { value -> band { it.copy(frequency = value.toDouble()) } }
+                SliderPreference(tr("eq_gain", "增益"), b.gainDb.toFloat(), -9f..6f, "${decimal(b.gainDb)} dB", controlsEnabled, steps = 29) { value -> band { it.copy(gainDb = value.toDouble()) } }
+                SliderPreference(tr("eq_q", "Q 值"), b.q.toFloat(), .3f..3f, decimal(b.q), controlsEnabled, steps = 26, defaultValue = .707f) { value -> band { it.copy(q = value.toDouble().coerceIn(.3, 3.0)) } }
+                if (c.bands.size > 1) Preference(tr("remove_eq_band", "移除此频段"), enabled = customEnabled) { change { it.copy(bands = it.bands.filterIndexed { i, _ -> i != index }) } }
             }
         }
-        if (c.bands.size < 8) item { EffectsCard { Preference(tr("add_eq_band", "添加均衡频段")) { change { it.copy(bands = it.bands + EqBand(1000.0, 0.0)) } } } }
+        if (c.bands.size < 8) item { EffectsCard { Preference(tr("add_eq_band", "添加均衡频段"), enabled = customEnabled) { change { it.copy(bands = it.bands + EqBand(1000.0, 0.0)) } } } }
         item { Group(tr("effect_spatial", "空间与音色")) {
-            SliderPreference(tr("effect_width", "立体声宽度"), c.width.toFloat(), .5f..1.4f, "${(c.width * 100).roundToInt()}%", !c.bypass, steps = 17, defaultValue = 1f) { value -> change { it.copy(width = value.toDouble()) } }
-            SliderPreference(tr("effect_crossfeed", "低频交叉馈送"), c.crossfeed.toFloat(), 0f..0.3f, "${(c.crossfeed * 100).roundToInt()}%", !c.bypass, steps = 29) { value -> change { it.copy(crossfeed = value.toDouble().coerceIn(0.0, .3)) } }
-            SliderPreference(tr("effect_saturation", "谐波染色"), c.saturation.toFloat(), 0f..0.25f, "${(c.saturation * 100).roundToInt()}%", !c.bypass, steps = 24) { value -> change { it.copy(saturation = value.toDouble()) } }
+            SliderPreference(tr("effect_width", "立体声宽度"), c.width.toFloat(), .5f..1.4f, "${(c.width * 100).roundToInt()}%", controlsEnabled, steps = 17, defaultValue = 1f) { value -> change { it.copy(width = value.toDouble()) } }
+            SliderPreference(tr("effect_crossfeed", "低频交叉馈送"), c.crossfeed.toFloat(), 0f..0.3f, "${(c.crossfeed * 100).roundToInt()}%", controlsEnabled, steps = 29) { value -> change { it.copy(crossfeed = value.toDouble().coerceIn(0.0, .3)) } }
+            SliderPreference(tr("effect_saturation", "谐波染色"), c.saturation.toFloat(), 0f..0.25f, "${(c.saturation * 100).roundToInt()}%", controlsEnabled, steps = 24) { value -> change { it.copy(saturation = value.toDouble()) } }
         } }
         item { Group(tr("effect_dynamics", "动态控制")) {
-            SliderPreference(tr("compressor_ratio", "压缩比"), c.ratio.toFloat(), 1f..4f, "${decimal(c.ratio)}:1", !c.bypass, steps = 29, defaultValue = 1f) { value -> change { it.copy(ratio = value.toDouble()) } }
-            SliderPreference(tr("compressor_threshold", "阈值"), c.thresholdDb.toFloat(), -30f..-3f, "${decimal(c.thresholdDb)} dB", !c.bypass, steps = 26, defaultValue = -12f) { value -> change { it.copy(thresholdDb = value.toDouble()) } }
-            SliderPreference(tr("compressor_attack", "启动时间"), c.attackMs.toFloat(), 1f..100f, "${c.attackMs.roundToInt()} ms", !c.bypass, defaultValue = 20f) { value -> change { it.copy(attackMs = value.toDouble()) } }
-            SliderPreference(tr("compressor_release", "释放时间"), c.releaseMs.toFloat(), 30f..1000f, "${c.releaseMs.roundToInt()} ms", !c.bypass, defaultValue = 160f) { value -> change { it.copy(releaseMs = value.toDouble()) } }
+            SliderPreference(tr("compressor_ratio", "压缩比"), c.ratio.toFloat(), 1f..4f, "${decimal(c.ratio)}:1", controlsEnabled, steps = 29, defaultValue = 1f) { value -> change { it.copy(ratio = value.toDouble()) } }
+            SliderPreference(tr("compressor_threshold", "阈值"), c.thresholdDb.toFloat(), -30f..-3f, "${decimal(c.thresholdDb)} dB", controlsEnabled, steps = 26, defaultValue = -12f) { value -> change { it.copy(thresholdDb = value.toDouble()) } }
+            SliderPreference(tr("compressor_attack", "启动时间"), c.attackMs.toFloat(), 1f..100f, "${c.attackMs.roundToInt()} ms", controlsEnabled, defaultValue = 20f) { value -> change { it.copy(attackMs = value.toDouble()) } }
+            SliderPreference(tr("compressor_release", "释放时间"), c.releaseMs.toFloat(), 30f..1000f, "${c.releaseMs.roundToInt()} ms", controlsEnabled, defaultValue = 160f) { value -> change { it.copy(releaseMs = value.toDouble()) } }
         } }
     }
     PresetDraftDialog(store, saving, onDismiss = { saving = false }, onSaved = { saving = false })

@@ -74,9 +74,12 @@ internal fun searchCategoryLabel(category: SearchCategory): String = when (categ
 @Composable
 internal fun SearchFilters(model: AuraViewModel) {
     val types = if (model.searchCloud) SearchCategory.entries else SearchCategory.entries.take(4)
+    val navigationStyle = model.settings.value.navigation
+    val material = rememberModuleNavigationMaterial(navigationStyle)
     Column {
-        SoftGlassHeaderTabs(listOf(tr("local", "本地"), tr("cloud", "云端")), if (model.searchCloud) 1 else 0) { model.changeSearchScope(it == 1) }
+        SoftGlassHeaderTabs(listOf(tr("local", "本地"), tr("cloud", "云端")), if (model.searchCloud) 1 else 0,
+            navigationStyle = navigationStyle, material = material) { model.changeSearchScope(it == 1) }
         SoftGlassHeaderTabs(types.map { searchCategoryLabel(it) }, types.indexOf(model.searchCategory).coerceAtLeast(0),
-            widthScale = 1f, scrollable = true) { model.changeSearchCategory(types[it]) }
+            widthScale = 1f, scrollable = true, navigationStyle = navigationStyle, material = material) { model.changeSearchCategory(types[it]) }
     }
 }

@@ -15,6 +15,12 @@ class EffectsRenderersFactory(context: Context, private val store: EffectsStore)
             .setAudioOutputProvider(AudioTrackAudioOutputProvider.Builder(context)
                 .setAudioTrackBufferSizeProvider(EffectsAudioBufferSizeProvider()).build())
             .build()
-        return ProcessingAudioSink(sink, store.outputWaveform) { store.realtimeConfig }
+        return ProcessingAudioSink(
+            sink = sink,
+            waveform = store.outputWaveform,
+            smartStyle = { store.activeSmartStyle },
+            trackGeneration = { store.trackGeneration },
+            onSmartConfig = { store.liveSmartConfig = it },
+        ) { store.realtimeConfig }
     }
 }

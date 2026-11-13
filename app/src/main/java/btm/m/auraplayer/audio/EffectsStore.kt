@@ -19,7 +19,7 @@ data class EffectsState(
     val draftOriginal: DspConfig? = null,
     val pendingSelection: String? = null,
 ) {
-    val presets get() = BuiltInPresets.all + DspPreset("custom", "Custom", "", custom) + imported
+    val presets get() = BuiltInPresets.all + BuiltInPresets.smart + DspPreset("custom", "Custom", "", custom) + imported
     val current get() = presets.firstOrNull { it.id == selected } ?: BuiltInPresets.all.first()
     val config get() = BuiltInPresets.styled(current.config, style)
     val featured get() = featuredPresets(presets, selected, counts, recent)
@@ -58,6 +58,22 @@ class EffectsStore(context: Context) {
     private val mutable = MutableStateFlow(EffectsStateCodec.decode(prefs.getString("state", "{}")!!, prefs.getString("library", null)))
     val state = mutable.asStateFlow()
     @Volatile var realtimeConfig: DspConfig = mutable.value.config; private set
+    @Volatile var smartTuningEnabled: Boolean = mutable.value.selected == BuiltInPresets.SMART_ID; private set
+    @Volatile private var activeStyle: SoundStyle = mutable.value.style
+    @Volatile var liveSmartConfig: DspConfig = BuiltInPresets.smart.config
+    @Volatile var trackGeneration: Long = 0L; private set
+    @Volatile private var currentTrackKey: String = ""
+
+    val activeSmartStyle: SoundStyle? get() = if (smartTuningEnabled) activeStyle else null
+    val activeCurrentConfig: DspConfig get() = if (state.value.selected == BuiltInPresets.SMART_ID) liveSmartConfig else state.value.current.config
+
+    fun notifyTrackChanged(trackKey: String) {
+        if (trackKey != currentTrackKey) {
+            currentTrackKey = trackKey
+            trackGeneration++
+            liveSmartConfig = BuiltInPresets.styled(BuiltInPresets.smart.config, activeStyle)
+        }
+    }
 
     fun select(id: String) = update { it.requestPreset(id, System.currentTimeMillis()) }
     fun restoreDefaults() = select("__defaults__")
@@ -79,6 +95,9 @@ class EffectsStore(context: Context) {
         val previous = mutable.value
         val next = block(previous)
         realtimeConfig = next.config
+        smartTuningEnabled = next.selected == BuiltInPresets.SMART_ID
+        activeStyle = next.style
+        if (!smartTuningEnabled) liveSmartConfig = BuiltInPresets.smart.config
         mutable.value = next
         prefs.edit().putString("state", EffectsStateCodec.encode(next)).apply {
             if (!prefs.contains("library") || previous.imported != next.imported) putString("library", EffectsStateCodec.encodeLibrary(next.imported))
