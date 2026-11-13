@@ -1,0 +1,48 @@
+Aura Player Privacy Policy
+
+Effective date: November 10, 2026
+Last revised: November 13, 2026
+
+This Privacy Policy explains how Aura Player handles local storage, system permissions, online music connections, and lyric searches. Aura Player has no user account system of its own, contains no commercial ads or behavioral analytics SDKs, and does not build user profiles. Network requests are sent to relevant providers only when you actively use online features.
+
+## 1. Local Storage and Security
+
+1.1 Your playback settings, UI and navigation material preferences, local playlists, playback history, favorites, custom audio presets, and artwork/audio caches are stored locally on your device. Images, JSON files, or QR codes generated through lyric sharing or preset export are output only when you save or share them via system dialogs; the software does not automatically back up personal settings or local media to the cloud.
+
+1.2 Credential Protection: When you sign in to NetEase Cloud Music, your session cookie is encrypted using Android Keystore before being saved locally. Logging out, clearing app data, or changing the API service URL immediately clears the stored session state and credentials.
+
+## 2. System Permissions
+
+2.1 Media Audio Access (READ_MEDIA_AUDIO): Used to scan and display your local music library and read audio tags and embedded artwork. Changes are written to local audio files only when you explicitly confirm saving in the Tag Editor through system write authorization.
+
+2.2 Network, Audio, and Notifications: INTERNET is used for online login, streaming, artwork fetching, and lyric searches; MODIFY_AUDIO_SETTINGS is used for audio effects and launching the system equalizer; POST_NOTIFICATIONS and FOREGROUND_SERVICE_MEDIA_PLAYBACK keep playback controls running and show download completion alerts. You can manage or revoke permissions anytime in system settings.
+
+## 3. Network Access: NetEase Music and Custom APIs
+
+3.1 Default Official Sign-In and Direct Connection: By default, sign-in loads the official NetEase Cloud Music HTTPS login page (https://music.163.com/m/login), and requests go directly to NetEase servers under NetEase's own privacy policy and terms.
+
+3.2 Custom API Services: If you configure and enable a custom NeteaseCloudMusicApiEnhanced service URL in advanced connection settings, playback, search, playlist, and login requests are sent to that server. Local network endpoints may use HTTP while public endpoints require HTTPS; only connect to services you fully trust.
+
+3.3 Online Downloads: When downloading a song or album artwork, the resource URL returned by NetEase is passed to the Android system downloader, and downloaded tracks are saved to public music storage (such as Music/Aura Player).
+
+## 4. Network Access: Online Lyrics and External Links
+
+4.1 Online Lyric Searches: When requesting lyrics, the app sends metadata such as song title, artist, album, and duration to NetEase, QQ Music, Kugou, Kuwo, or LRCLIB for matching, and may use online song IDs to query AMLL (via GitHub Raw / jsDelivr CDN) or TTML Hub (via GitHub Pages) for word-by-word or translated lyrics.
+
+4.2 Local Audio Is Never Uploaded: None of the online lyric, artwork, or streaming requests ever upload your local audio files.
+
+4.3 External Links: Tapping external links in About or Settings (author homepage, GitHub repository, Telegram group, QQ group, Afdian, or API source project) opens your browser or third-party apps, which are governed by those platforms' privacy policies.
+
+## 5. Network Connection Metadata
+
+5.1 When sending requests to music services, custom servers, repositories, or CDNs, the receiving servers observe standard internet connection metadata such as your IP address, timestamp, request path, query parameters, and User-Agent. Aura Player does not attach unrelated identifiers such as IMEI, Android ID, contacts, or installed app lists, though third-party servers may log requests under their own policies.
+
+## 6. Retention, Deletion, and Your Controls
+
+6.1 You can clear artwork, metadata, and audio playback caches in Settings anytime, delete custom audio presets, log out of NetEase Music to wipe encrypted session cookies, or revoke storage/network permissions in system settings to use Aura Player purely as an offline local player.
+
+6.2 Uninstalling the app removes app-private settings, caches, and encrypted credentials. However, music files downloaded to public directories (such as Music/Aura Player), manually exported presets or shared images, and server-side logs retained by third parties are not automatically deleted upon uninstallation and must be managed separately.
+
+## 7. Policy Updates and Contact
+
+7.1 This policy is updated alongside feature changes, with the revision date shown at the top of the page. If you have questions or suggestions regarding privacy handling, please open an Issue at https://github.com/ColdP/AuraPlayer (never include session cookies or sensitive personal data in public posts).

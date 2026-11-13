@@ -1,0 +1,42 @@
+Aura Player User Agreement
+
+Effective date: November 10, 2026
+Last revised: November 13, 2026
+
+Welcome to Aura Player ("the software"), an open-source local and NetEase Cloud Music player for Android 13 and above built with MIUIX and Media3. Before using the software, please read this Agreement, the Disclaimer, and the Privacy Policy to understand feature boundaries, copyright obligations, and how data is handled.
+
+## 1. Acceptance and Usage
+
+1.1 Installing, opening, or using the software indicates that you have read and understood this Agreement, the Disclaimer, and the Privacy Policy. If you do not agree to these terms, please stop using and uninstall the software.
+
+1.2 The software supports both pure local playback and optional online music services. You can use it offline as a local music player without signing in to any account; online playback, playlist syncing, artwork fetching, and lyric matching are triggered only when you use those features.
+
+## 2. Environment and Core Features
+
+2.1 The software is built and tested for Android 13 (API 33) and above. OEM system customizations, audio drivers, or background restrictions on specific devices may affect visual effects or background playback behavior.
+
+2.2 Core features include local library scanning and management, built-in audio effects and equalizer presets (with JSON and QR import/export), tag and cover editing, lyric sharing, and optional NetEase Cloud Music login, streaming, search, and downloads.
+
+## 3. Third-Party Music Services and Copyright Compliance
+
+3.1 Only play, search, share, or download music content that you are legally authorized to access. NetEase Cloud Music and other external music or lyric services are operated by their respective providers, and their account, regional, VIP, and purchase restrictions remain fully applicable.
+
+3.2 Music downloads use valid download URLs returned by NetEase Cloud Music together with the Android system downloader, saving tracks to public music storage (such as Music/Aura Player). This software does not bypass paywalls, unlock paid content, or circumvent DRM.
+
+## 4. Open-Source License and Trademarks
+
+4.1 This software is distributed as a whole under the GNU AGPL-3.0-or-later license. You may copy, modify, and redistribute it in accordance with the license terms, including preserving copyright notices, retaining the license text, and providing corresponding source code. Full license details are available in LICENSE, NOTICE, and the Open-Source Notices page in the app.
+
+4.2 Third-party open-source components remain governed by their respective licenses and copyright notices. Trademarks and service names such as NetEase Cloud Music, QQ Music, Kugou, Kuwo, Apple Music, Xiaomi, and HyperOS belong to their respective owners and are referenced solely to describe compatibility or design inspiration, implying no official endorsement or affiliation.
+
+## 5. Conduct and External Resources
+
+5.1 Use the software lawfully and responsibly. Do not use it to infringe intellectual property rights, distribute malicious files, bypass platform security controls, or disrupt third-party services; redistributed modifications must not include malicious code or impersonate official releases.
+
+5.2 Verify the trustworthiness of any externally obtained audio effect presets (JSON files or QR codes), media files, or configuration data before importing. When using online lyrics, artwork, or lyric-sharing features, comply with the rules of the respective platforms and never publicly share data containing session cookies or personal privacy information.
+
+## 6. Maintenance, Updates, and Contact
+
+6.1 This project is maintained by the author in spare time and is provided free of charge on an "as-is" basis. Continuous updates, per-device compatibility, and one-on-one support are not guaranteed; features may change or be removed if system APIs or third-party platforms change.
+
+6.2 If material updates are made to this Agreement or the Privacy Policy, the text and revision date will be updated accordingly. This Agreement is governed by the laws of the People's Republic of China; if any provision is found invalid, the remaining provisions remain effective. For questions or feedback, visit https://github.com/ColdP/AuraPlayer.

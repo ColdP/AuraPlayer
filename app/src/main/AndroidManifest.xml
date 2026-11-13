@@ -7,7 +7,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <application android:name=".AuraApplication" android:allowBackup="false"
-        android:label="Aura Player" android:icon="@drawable/ic_aura"
+        android:label="Aura Player" android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true" android:theme="@style/Theme.Aura"
         android:enableOnBackInvokedCallback="true" android:usesCleartextTraffic="true">
         <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">

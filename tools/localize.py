@@ -152,7 +152,6 @@ user_agreement|User agreement|利用規約
 disclaimer|Disclaimer|免責事項
 privacy|Privacy policy|プライバシーポリシー
 open_source|Open source notices|オープンソース声明
-contributors|Contributors|貢献者
 afdian|Afdian|Afdian
 support_afdian|Support me on Afdian|Afdian で応援
 afdian_author|Afdian: btm_m|Afdian: btm_m
@@ -287,10 +286,6 @@ extra = {
     '保存': ('Save', '保存'),
     '数值调整': ('Adjust value', '数値を調整'),
     '恢复默认数值': ('Restore default value', '既定値に戻す'),
-    'privacy_body': ('Aura Player reads audio metadata on your device and does not upload local music files. By default, you sign in on the official NetEase HTTPS page and connect directly to NetEase. If you select a custom API service, requests are sent to that service. Session cookies are encrypted using Android Keystore and cleared when you log out or change services. Artwork and streaming contact the corresponding network services. Lyric searches send the title, artist, album and duration to NetEase, QQ, Kuwo, KuGou or LrcLib, and online song IDs to AMLL / TTML Hub. Local audio is never uploaded. Only connect to a service you trust.', 'Aura Player は端末の音声情報を読み取り、ローカル音楽をアップロードしません。既定ではNetEase公式HTTPSページでログインし、NetEaseに直接接続します。独自のAPIを選ぶと、そのサービスにリクエストが送信されます。CookieはAndroid Keystoreで暗号化され、ログアウトや接続先変更で削除されます。画像と再生には通信を使用します。歌詞検索では曲名・アーティスト・アルバム・長さをNetEase、QQ、Kuwo、KuGou、LrcLibに送り、オンライン曲IDでAMLL / TTML Hubを検索します。ローカル音声はアップロードしません。信頼できるサービスを利用してください。'),
-    'agreement_body': ('Only play music you are entitled to access. NetEase account, regional and subscription restrictions still apply. This app does not unlock paid content or download music.', 'アクセス権のある音楽のみ再生してください。NetEaseの地域・会員制限が適用されます。有料コンテンツの解除や音楽ダウンロードは提供しません。'),
-    'disclaimer_body': ('This software is provided as is. Availability of third-party services is not guaranteed. Music copyrights belong to their respective owners. Do not use this software to infringe the rights of others.', '本ソフトウェアは現状のまま提供されます。第三者サービスの可用性は保証されません。音楽の著作権は権利者に帰属します。他者の権利を侵害しないでください。'),
-    'contributors_body': ('Aura Player: btm_m\n\nUI & glass components: HyperChanger / btm_m\nHome structure: Retro Music / Hemanth Savarala & contributors\nMIUIX: Yukonga & contributors\nBackdrop: Kyant & contributors\nNetEase API: NeteaseCloudMusicApiEnhanced & contributors\nLyrics: HyperMusicCover / zyl6932, HyperChanger / btm_m\nLyric matching & decryption: HyperLyrics Enhanced / juren233\nParser: Accompanist Lyrics Core\nCover palette: MaterialKolor\nPlayer icons: Apple Music / Apple Inc. (adapted selected queue and background-free favorite)', 'Aura Player: btm_m\n\nUIとガラス部品: HyperChanger / btm_m\nホーム構成: Retro Music / Hemanth Savarala と貢献者\nMIUIX: Yukonga と貢献者\nBackdrop: Kyant と貢献者\nNetEase API: NeteaseCloudMusicApiEnhanced と貢献者\n歌詞: HyperMusicCover / zyl6932、HyperChanger / btm_m\n歌詞照合と復号: HyperLyrics Enhanced / juren233\n解析: Accompanist Lyrics Core\nカバーの配色: MaterialKolor\nプレイヤーアイコン: Apple Music / Apple Inc.（キュー選択状態と背景なしのお気に入りを調整）'),
 }
 extra.update({'cloud_load_retry': ('Loading failed. Tap to retry', '読み込めません。タップして再試行'),
  'cache': ('Cache', 'キャッシュ'),
@@ -333,11 +328,7 @@ extra.update({'cloud_load_retry': ('Loading failed. Tap to retry', '読み込め
  'record_label': ('Record label', 'レーベル'),
  'release_time': ('Release date', 'リリース日'),
  'more_by_artist': ('More by this artist', 'このアーティストのほかの作品'),
- 'artist_info_unavailable': ('No artist biography available', 'アーティストの紹介はありません'),
- 'agreement_body': ('Only play or download music you are entitled to access. NetEase account, regional and '
-                    'subscription restrictions still apply. Downloads use NetEase download links and the system '
-                    'downloader. This app does not unlock paid content.',
-                    'アクセス権のある音楽のみ再生・ダウンロードしてください。NetEaseのアカウント・地域・会員制限が適用されます。NetEaseのダウンロードURLとシステムのダウンローダーを使用し、有料コンテンツの解除は行いません。')})
+ 'artist_info_unavailable': ('No artist biography available', 'アーティストの紹介はありません')})
 extra.update({
  'cloud': ('Cloud', 'クラウド'),
  'playback_lists': ('Playlists', 'プレイリスト'),

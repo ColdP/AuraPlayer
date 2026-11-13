@@ -37,9 +37,22 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
-import java.util.UUID
 import kotlin.math.roundToInt
+import kotlin.random.Random
+
+internal fun generateSoundPresetFileName(
+    extension: String = "json",
+    timestampMs: Long = System.currentTimeMillis(),
+    randomDigits: Int = Random.nextInt(1000, 10000),
+): String {
+    val stamp = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).format(Date(timestampMs))
+    val normalizedDigits = ((randomDigits % 10000) + 10000) % 10000
+    val ext = extension.trimStart('.').ifBlank { "json" }
+    return "AuraSoundPreset_${stamp}_${String.format(Locale.ROOT, "%04d", normalizedDigits)}.$ext"
+}
 
 internal fun presetName(p: DspPreset): String = when (p.id) {
     "reference" -> tr("preset_reference", "原声本真")
@@ -239,7 +252,7 @@ internal fun presetSummary(p: DspPreset): String = when (p.id) {
                     val file = withContext(Dispatchers.IO) {
                         val dir = context.cacheDir.resolve("preset-share").apply { mkdirs() }
                         dir.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 7L * 86400000 }?.forEach { it.delete() }
-                        dir.resolve("Aura-${UUID.randomUUID()}.$extension").apply { writeBytes(bytes) }
+                        dir.resolve(generateSoundPresetFileName(extension)).apply { writeBytes(bytes) }
                     }
                     val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.preset-files", file)
                     intent.putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -293,7 +306,7 @@ internal fun presetSummary(p: DspPreset): String = when (p.id) {
         GlassDialogButton(onClick = {
             if (mode == "import") jsonPicker.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
             else if (mode == "share") share(exportText().toByteArray(Charsets.UTF_8), "application/json", "json")
-            else { exportJson = exportText(); jsonWriter.launch("Aura-preset.json") }
+            else { exportJson = exportText(); jsonWriter.launch(generateSoundPresetFileName("json")) }
         }, modifier = Modifier.fillMaxWidth(), enabled = !busy) { Text(tr("preset_json_file", "JSON 文件")) }
         GlassDialogButton(onClick = {
             if (mode == "import") qrPicker.launch(arrayOf("image/*"))
@@ -330,7 +343,7 @@ internal fun presetSummary(p: DspPreset): String = when (p.id) {
         qr?.let { Image(it.asImageBitmap(), contentDescription = tr("preset_qr_image", "二维码图片"), modifier = Modifier.fillMaxWidth().aspectRatio(1f)) }
         Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             GlassDialogButton({ qr = null }, Modifier.weight(1f)) { Text(tr("done", "完成")) }
-            GlassDialogButton({ qrWriter.launch("Aura-preset.png") }, Modifier.weight(1f)) { Text(tr("save", "保存")) }
+            GlassDialogButton({ qrWriter.launch(generateSoundPresetFileName("png")) }, Modifier.weight(1f)) { Text(tr("save", "保存")) }
         }
     }
 }

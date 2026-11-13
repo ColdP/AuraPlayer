@@ -1,5 +1,6 @@
 package btm.m.auraplayer.audio
 
+import btm.m.auraplayer.ui.generateSoundPresetFileName
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -64,5 +65,11 @@ class PresetCodecTest {
         val payload = "aura-dsp:1:" + Base64.getUrlEncoder().encodeToString(bytes.toByteArray())
         assertTrue(runCatching { PresetQr.unpack(payload) }.isFailure)
         assertTrue(runCatching { PresetQr.unpack("aura-dsp:1:not-valid!") }.isFailure)
+    }
+    @Test fun soundPresetExportFileNameFollowsTimestampAndRandomDigitsTemplate() {
+        val defaultName = generateSoundPresetFileName()
+        assertTrue(Regex("^AuraSoundPreset_\\d{14}_\\d{4}\\.json$").matches(defaultName))
+        val customPng = generateSoundPresetFileName(extension = "png", randomDigits = 42)
+        assertTrue(Regex("^AuraSoundPreset_\\d{14}_0042\\.png$").matches(customPng))
     }
 }

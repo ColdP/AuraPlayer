@@ -1,0 +1,36 @@
+Aura Player Disclaimer
+
+Effective date: November 10, 2026
+Last revised: November 13, 2026
+
+Please read this Disclaimer carefully before editing audio tags, connecting to online services, or tuning custom audio effects in Aura Player. Back up important music files before writing tags or covers, and note that third-party APIs and returned resources are controlled by external providers.
+
+## 1. Independent Open-Source Project
+
+1.1 Aura Player is an independent third-party open-source project with no official authorization, partnership, or affiliation with NetEase Cloud Music, QQ Music, Kugou, Kuwo, Xiaomi, or any other service or platform. It is not an official client and does not provide official customer support.
+
+1.2 This software is primarily developed and tested on Android 13 and above. Error-free operation is not guaranteed across all OEM ROMs, emulators, or unverified environments.
+
+## 2. Local Files and Audio Processing Risks
+
+2.1 Tag and Artwork Editing: Editing song titles, artists, albums, lyrics, or embedded artwork writes directly to the original audio files on your device. Although the app handles common formats carefully, corrupted source files, non-standard encodings, concurrent edits by other apps, or insufficient storage may cause write failures or file corruption. Always keep backups of important media files.
+
+2.2 Audio Gain and Hearing Safety: Custom preamp gain, EQ boosts, dynamic compression, and high output volume may cause audio clipping, speaker or headphone overload, or hearing damage over prolonged listening. Keep automatic gain protection enabled when appropriate and listen at safe volume levels.
+
+## 3. As-Is Provision and Limitation of Liability
+
+3.1 The software and related documentation are provided "AS IS" and "AS AVAILABLE." To the maximum extent permitted by applicable law, the author makes no express or implied warranties regarding error-free operation, continuous availability, fitness for a particular purpose, or compatibility with future OS or third-party API changes.
+
+3.2 To the maximum extent permitted by applicable law, the author is not liable for data loss, file corruption, account restrictions, device damage, or any other direct or indirect losses arising from the use, misuse, or inability to use this software. This Disclaimer does not limit rights granted to you under open-source licenses or mandatory law.
+
+## 4. Third-Party Services and External Content
+
+4.1 NetEase Cloud Music sign-in and streaming endpoints, self-hosted API services you configure, online lyric sources (NetEase, QQ Music, Kugou, Kuwo, LRCLIB, AMLL, TTML Hub), and album artwork are provided and maintained by external platforms or community repositories.
+
+4.2 Developers have no control over the uptime, speed, accuracy, copyright status, or privacy practices of those external services. API changes, rate limits, authentication changes, or service shutdowns may render related features unavailable, and displaying external resources does not constitute any endorsement or guarantee.
+
+## 5. Issue Reporting and Redaction
+
+5.1 When submitting bug reports at https://github.com/ColdP/AuraPlayer, please include your device model, Android version, app version, and clear reproduction steps. Due to limited spare-time resources, fixed repair timelines are not promised.
+
+5.2 Before posting screenshots, presets, or diagnostic details publicly, always check and redact sensitive data such as session cookies, account identifiers, private server URLs/tokens, or personal file paths.

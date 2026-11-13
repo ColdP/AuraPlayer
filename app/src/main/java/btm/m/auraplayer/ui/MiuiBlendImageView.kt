@@ -102,8 +102,8 @@ class HyperCeilerBrandView(context: Context) : FrameLayout(context) {
         content.clipChildren = false
         content.clipToPadding = false
         addView(content, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
-        logo.setBlendDrawable(R.drawable.ic_hyperchanger_sp)
-        wordmark.setBlendDrawable(R.drawable.ic_hyperchanger_text_sp)
+        logo.setBlendDrawable(R.drawable.ic_auraplayer_sp)
+        wordmark.setBlendDrawable(R.drawable.ic_auraplayer_text_sp)
     }
 
     fun configure(
@@ -116,16 +116,15 @@ class HyperCeilerBrandView(context: Context) : FrameLayout(context) {
         onVersionClick: () -> Unit = {},
     ) {
         enableRootBlur()
-        content.translationY = -dp(40).toFloat()
         logo.setThemeDark(dark)
         wordmark.setThemeDark(dark)
-        logo.setBlendDrawable(R.drawable.ic_hyperchanger_sp)
-        wordmark.setBlendDrawable(R.drawable.ic_hyperchanger_text_sp)
+        logo.setBlendDrawable(R.drawable.ic_auraplayer_sp)
+        wordmark.setBlendDrawable(R.drawable.ic_auraplayer_text_sp)
         logo.layoutParams = LinearLayout.LayoutParams(logoSize, logoSize)
         logo.setOnClickListener { onLogoClick() }
-        val textHeight = (textWidth * 104f / 766f).toInt()
+        val textHeight = (textWidth * 105f / 623f).toInt()
         wordmark.layoutParams = LinearLayout.LayoutParams(textWidth, textHeight).apply {
-            topMargin = dp(14)
+            topMargin = dp(24)
         }
         version.layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,

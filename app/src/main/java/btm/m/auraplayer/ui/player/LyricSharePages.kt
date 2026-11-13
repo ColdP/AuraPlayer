@@ -171,6 +171,7 @@ internal fun LyricShareRoute(model: AuraViewModel, onBack: () -> Unit, isActive:
     var pickingBg by remember { mutableStateOf(false) }
     var exportDialogOpen by remember { mutableStateOf(false) }
     var exportPreviewBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var pendingSaveAsBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var busy by remember { mutableStateOf(false) }
 
     val pickCustomBg = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -205,6 +206,30 @@ internal fun LyricShareRoute(model: AuraViewModel, onBack: () -> Unit, isActive:
                 }
             } finally {
                 pickingFont = false
+            }
+        }
+    }
+    val exportImageWriter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
+        val bitmap = pendingSaveAsBitmap
+        pendingSaveAsBitmap = null
+        if (uri == null || bitmap == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            busy = true
+            try {
+                val ok = writeLyricBitmapToUri(context, uri, bitmap)
+                Toast.makeText(
+                    context,
+                    if (ok) tr("lyric_share_exported_as", "图片已导出")
+                    else tr("lyric_share_save_failed", "保存失败，请重试"),
+                    Toast.LENGTH_LONG,
+                ).show()
+                if (ok) exportDialogOpen = false
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                Toast.makeText(context, tr("lyric_share_save_failed", "保存失败，请重试"), Toast.LENGTH_LONG).show()
+            } finally {
+                busy = false
             }
         }
     }
@@ -259,7 +284,7 @@ internal fun LyricShareRoute(model: AuraViewModel, onBack: () -> Unit, isActive:
         generated = false
     }
 
-    fun exportCapturedPoster(shareAfterSave: Boolean) {
+    fun performPosterExport(action: LyricExportAction) {
         val captured = exportPreviewBitmap ?: return
         if (busy) return
         scope.launch {
@@ -268,26 +293,34 @@ internal fun LyricShareRoute(model: AuraViewModel, onBack: () -> Unit, isActive:
                 val bitmap = withContext(Dispatchers.Default) {
                     scaleBitmapForQuality(captured.asAndroidBitmap(), imageQuality)
                 }
-                if (shareAfterSave) {
-                    val result = runCatching { shareLyricBitmap(context, bitmap) }
-                    if (result.isFailure) {
-                        Toast.makeText(context, tr("lyric_share_failed", "无法打开分享面板，请尝试导出图片"), Toast.LENGTH_LONG).show()
-                    } else {
-                        exportDialogOpen = false
+                when (action) {
+                    LyricExportAction.SAVE_AS -> {
+                        pendingSaveAsBitmap = bitmap
+                        busy = false
+                        exportImageWriter.launch(buildLyricExportFileName(song?.title.orEmpty()))
                     }
-                } else {
-                    val ok = saveLyricBitmapToGallery(context, bitmap, song?.title.orEmpty())
-                    val message = if (ok) tr("lyric_share_saved", "已保存到相册 Pictures/Aura Player")
-                    else tr("lyric_share_save_failed", "保存失败，请重试")
-                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-                    if (ok) exportDialogOpen = false
+                    LyricExportAction.SHARE -> {
+                        val result = runCatching { shareLyricBitmap(context, bitmap) }
+                        if (result.isFailure) {
+                            Toast.makeText(context, tr("lyric_share_failed", "无法打开分享面板，请尝试导出图片"), Toast.LENGTH_LONG).show()
+                        } else {
+                            exportDialogOpen = false
+                        }
+                    }
+                    LyricExportAction.SAVE_TO_GALLERY -> {
+                        val ok = saveLyricBitmapToGallery(context, bitmap, song?.title.orEmpty())
+                        val message = if (ok) tr("lyric_share_saved", "已保存到相册 Pictures/Aura Player")
+                        else tr("lyric_share_save_failed", "保存失败，请重试")
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                        if (ok) exportDialogOpen = false
+                    }
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 Toast.makeText(
                     context,
-                    if (shareAfterSave) tr("lyric_share_failed", "无法打开分享面板，请尝试导出图片")
+                    if (action == LyricExportAction.SHARE) tr("lyric_share_failed", "无法打开分享面板，请尝试导出图片")
                     else tr("lyric_share_save_failed", "保存失败，请重试"),
                     Toast.LENGTH_LONG,
                 ).show()
@@ -684,23 +717,33 @@ internal fun LyricShareRoute(model: AuraViewModel, onBack: () -> Unit, isActive:
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 GlassDialogButton(
-                    onClick = { exportCapturedPoster(shareAfterSave = false) },
+                    onClick = { performPosterExport(LyricExportAction.SAVE_AS) },
                     modifier = Modifier.weight(1f),
                     enabled = !busy,
                 ) {
                     Text(tr("export", "导出"))
                 }
                 GlassDialogButton(
-                    onClick = { exportCapturedPoster(shareAfterSave = true) },
+                    onClick = { performPosterExport(LyricExportAction.SHARE) },
                     modifier = Modifier.weight(1f),
                     enabled = !busy,
-                    colors = ButtonDefaults.buttonColorsPrimary(),
                 ) {
                     Text(tr("share", "分享"))
                 }
             }
             GlassDialogButton(
-                onClick = { exportDialogOpen = false },
+                onClick = { performPosterExport(LyricExportAction.SAVE_TO_GALLERY) },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !busy,
+                colors = ButtonDefaults.buttonColorsPrimary(),
+            ) {
+                Text(tr("save", "保存"))
+            }
+            GlassDialogButton(
+                onClick = {
+                    pendingSaveAsBitmap = null
+                    exportDialogOpen = false
+                },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !busy,
             ) {
@@ -1263,10 +1306,30 @@ private fun BlurRevealPreference(
     }
 }
 
+private enum class LyricExportAction {
+    SAVE_TO_GALLERY,
+    SAVE_AS,
+    SHARE,
+}
+
+internal fun buildLyricExportFileName(songTitle: String, timestampMs: Long = System.currentTimeMillis()): String {
+    val safeName = songTitle.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifBlank { "Aura_Lyrics" }
+    return "${safeName}_${timestampMs}.png"
+}
+
+private suspend fun writeLyricBitmapToUri(context: Context, uri: Uri, bitmap: Bitmap): Boolean =
+    withContext(Dispatchers.IO) {
+        runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
+            } ?: error("Null output stream")
+            true
+        }.getOrDefault(false)
+    }
+
 private suspend fun saveLyricBitmapToGallery(context: Context, bitmap: Bitmap, songTitle: String): Boolean =
     withContext(Dispatchers.IO) {
-        val safeName = songTitle.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "Aura_Lyrics" }
-        val fileName = "${safeName}_${System.currentTimeMillis()}.png"
+        val fileName = buildLyricExportFileName(songTitle)
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
             put(MediaStore.Images.Media.MIME_TYPE, "image/png")

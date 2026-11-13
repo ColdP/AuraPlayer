@@ -90,4 +90,9 @@ class LyricShareTemplatesTest {
             lightPaperIds,
         )
     }
+
+    @Test fun buildLyricExportFileNameSanitizesInvalidCharacters() {
+        assertEquals("Song_Name_12345.png", buildLyricExportFileName("Song/Name", timestampMs = 12345L))
+        assertEquals("Aura_Lyrics_12345.png", buildLyricExportFileName("   ", timestampMs = 12345L))
+    }
 }
