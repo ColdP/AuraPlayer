@@ -1,12 +1,15 @@
 package btm.m.auraplayer.ui.player
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -29,7 +32,7 @@ import java.util.Locale
 @Composable
 internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdrop: com.kyant.backdrop.Backdrop,
                                 dismiss: () -> Unit, openPage: (String) -> Unit, closePlayer: () -> Unit,
-                                onBusy: (Boolean) -> Unit) {
+                                onBusy: (Boolean) -> Unit, expressive: PlayerExpressiveColors? = null) {
     val song = model.current ?: return
     val effects = (LocalContext.current.applicationContext as AuraApplication).effects
     val effectsState by effects.state.collectAsState()
@@ -45,38 +48,76 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
     val titleColors = BasicComponentColors(foreground, foreground.copy(alpha = .35f))
     val summaryColors = BasicComponentColors(foreground.copy(alpha = .68f), foreground.copy(alpha = .3f))
     @Composable fun leading(icon: ImageVector) { Image(icon, null, Modifier.padding(end = 14.dp).size(24.dp), colorFilter = ColorFilter.tint(foreground)) }
-    @Composable fun action(icon: ImageVector, title: String, summary: String? = null, enabled: Boolean = true, click: () -> Unit) {
-        ArrowPreference(title, summary = summary, titleColor = titleColors, summaryColor = summaryColors,
-            startAction = { leading(icon) }, insideMargin = PaddingValues(horizontal = 20.dp, vertical = 12.dp), enabled = enabled, onClick = click)
+    @Composable fun action(icon: ImageVector, title: String, summary: String? = null, enabled: Boolean = true,
+                            position: SheetItemPosition = SheetItemPosition.SINGLE, click: () -> Unit) {
+        if (expressive != null) {
+            SheetActionRow(icon, title, summary, enabled, expressive = expressive, position = position, onClick = click)
+        } else {
+            ArrowPreference(title, summary = summary, titleColor = titleColors, summaryColor = summaryColors,
+                startAction = { leading(icon) }, insideMargin = PaddingValues(horizontal = 20.dp, vertical = 12.dp), enabled = enabled, onClick = click)
+        }
     }
-    @Composable fun divider() { HorizontalDivider(Modifier.padding(horizontal = 20.dp, vertical = 5.dp), color = foreground.copy(alpha = .13f)) }
+    @Composable fun divider() {
+        if (expressive == null) HorizontalDivider(Modifier.padding(horizontal = 20.dp, vertical = 5.dp), color = foreground.copy(alpha = .13f))
+        else Spacer(Modifier.height(10.dp))
+    }
+    val sheetModifier = if (expressive != null) {
+        val sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+        Modifier.clip(sheetShape).background(expressive.surfaceContainerLow, sheetShape)
+    } else {
+        Modifier.neutralSheetMaterial(menuBackdrop)
+    }
     OverlayBottomSheet(show = show, onDismissRequest = dismiss, backgroundColor = Color.Transparent,
-        modifier = Modifier.neutralSheetMaterial(menuBackdrop),
+        modifier = sheetModifier,
         insideMargin = DpSize(0.dp, 0.dp),
-        dragHandleColor = foreground.copy(alpha = .45f)) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 8.dp)) {
-            Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Artwork(song.artwork, Modifier.size(58.dp), cornerRadius = ListArtworkCornerRadius)
-                Column(Modifier.weight(1f).padding(start = 14.dp)) {
-                    Text(song.title, color = foreground, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(listOf(song.artist, song.album).filter { it.isNotBlank() }.joinToString(" · "),
-                        color = foreground.copy(alpha = .7f), fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        dragHandleColor = expressive?.dragHandleColor ?: foreground.copy(alpha = .45f)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 12.dp)) {
+            if (expressive != null) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(expressive.surfaceContainerHigh)
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Artwork(song.artwork, Modifier.size(56.dp), cornerRadius = 16.dp)
+                    Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                        Text(song.title, color = expressive.onSurface, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(listOf(song.artist, song.album).filter { it.isNotBlank() }.joinToString(" · "),
+                            color = expressive.secondaryInk, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            } else {
+                Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Artwork(song.artwork, Modifier.size(58.dp), cornerRadius = ListArtworkCornerRadius)
+                    Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                        Text(song.title, color = foreground, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(listOf(song.artist, song.album).filter { it.isNotBlank() }.joinToString(" · "),
+                            color = foreground.copy(alpha = .7f), fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
             divider()
-            if (song.cloud) {
-                SongDownloadPreference(model, song, show, menuBackdrop)
-                val current = model.streamInfo?.let { stream -> levels.firstOrNull { it.quality.level == stream.level } }
-                    ?: levels.firstOrNull { it.quality == model.quality }
-                val summary = current?.let { cloudQualityText(it, model.streamInfo?.takeIf { s -> s.level == it.quality.level }, model.audioFormat) }
-                    ?: model.streamInfo?.let { stream -> StreamQuality.entries.firstOrNull { it.level == stream.level }?.let { cloudQualityText(CloudQuality(it, AudioDetails()), stream, model.audioFormat) } }
-                    ?: if (model.qualityLoading) tr("loading", "加载中…") else qualityName(model.quality)
-                SheetDropdown(MiuixIcons.Regular.AppRecording, tr("select_quality", "选择音质"), summary, menuBackdrop,
-                    DropdownEntry(buildList {
-                        if (model.qualityError) add(DropdownItem(tr("quality_retry", "获取音质失败，点击重试"), onClick = model::refreshQualities))
-                        addAll(qualityDropdownItems(levels, current?.quality ?: model.quality, { cloudQualityText(it) }) { model.selectQuality(it.quality) })
-                        if (isEmpty()) add(DropdownItem(if (model.qualityLoading) tr("loading", "加载中…") else tr("quality_unavailable", "此歌曲暂无可用音质"), enabled = false))
-                    }))
+            val group1Modifier = if (expressive != null) Modifier.fillMaxWidth().padding(horizontal = 16.dp) else Modifier.fillMaxWidth()
+            Column(group1Modifier, verticalArrangement = Arrangement.spacedBy(if (expressive != null) 2.dp else 0.dp)) {
+                if (song.cloud) {
+                    SongDownloadPreference(model, song, show, menuBackdrop, expressive = expressive, position = SheetItemPosition.TOP)
+                    val current = model.streamInfo?.let { stream -> levels.firstOrNull { it.quality.level == stream.level } }
+                        ?: levels.firstOrNull { it.quality == model.quality }
+                    val summary = current?.let { cloudQualityText(it, model.streamInfo?.takeIf { s -> s.level == it.quality.level }, model.audioFormat) }
+                        ?: model.streamInfo?.let { stream -> StreamQuality.entries.firstOrNull { it.level == stream.level }?.let { cloudQualityText(CloudQuality(it, AudioDetails()), stream, model.audioFormat) } }
+                        ?: if (model.qualityLoading) tr("loading", "加载中…") else qualityName(model.quality)
+                    SheetDropdown(MiuixIcons.Regular.AppRecording, tr("select_quality", "选择音质"), summary, menuBackdrop,
+                        DropdownEntry(buildList {
+                            if (model.qualityError) add(DropdownItem(tr("quality_retry", "获取音质失败，点击重试"), onClick = model::refreshQualities))
+                            addAll(qualityDropdownItems(levels, current?.quality ?: model.quality, { cloudQualityText(it) }) { model.selectQuality(it.quality) })
+                            if (isEmpty()) add(DropdownItem(if (model.qualityLoading) tr("loading", "加载中…") else tr("quality_unavailable", "此歌曲暂无可用音质"), enabled = false))
+                        }), expressive = expressive, position = SheetItemPosition.MIDDLE)
+                }
+                action(MiuixIcons.Regular.VolumeUp, tr("audio_effects", "音效"), presetName(effectsState.current),
+                    position = if (song.cloud) SheetItemPosition.BOTTOM else SheetItemPosition.SINGLE) { dismiss(); closePlayer(); openPage("audio_effects") }
             }
             fun openCollectionFromSheet(launch: () -> Unit) {
                 dismiss()
@@ -88,41 +129,46 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
                     openPage("collection:$afterId")
                 }
             }
-            action(MiuixIcons.Regular.VolumeUp, tr("audio_effects", "音效"), presetName(effectsState.current)) { dismiss(); closePlayer(); openPage("audio_effects") }
             divider()
-            action(MiuixIcons.Regular.Album, tr("album", "专辑"), song.album, !song.cloud || song.albumId > 0) {
-                openCollectionFromSheet { model.openSongAlbum(song) }
-            }
-            if (artists.size > 1) {
-                SheetDropdown(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, menuBackdrop,
-                    DropdownEntry(artists.map { artist ->
-                        DropdownItem(artist.name, enabled = !song.cloud || artist.id > 0,
-                            icon = { modifier -> Artwork(artist.artwork, modifier.size(30.dp), circular = true) },
-                            onClick = { openCollectionFromSheet { model.openSongArtist(song, artist) } })
-                    }))
-            } else action(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, !song.cloud || song.artistId > 0) {
-                openCollectionFromSheet { model.openSongArtist(song) }
-            }
-            if (!song.cloud) {
-                action(MiuixIcons.Regular.File, tr("tag_editor", "标签编辑器")) {
-                    dismiss(); closePlayer(); openPage(tagEditorRoute(song))
+            Column(group1Modifier, verticalArrangement = Arrangement.spacedBy(if (expressive != null) 2.dp else 0.dp)) {
+                action(MiuixIcons.Regular.Album, tr("album", "专辑"), song.album, !song.cloud || song.albumId > 0, position = SheetItemPosition.TOP) {
+                    openCollectionFromSheet { model.openSongAlbum(song) }
                 }
-                action(MiuixIcons.Regular.Info, tr("audio_info", "音频信息")) {
-                    audioInfoOpen = true
+                val artistPos = if (!song.cloud) SheetItemPosition.MIDDLE else SheetItemPosition.BOTTOM
+                if (artists.size > 1) {
+                    SheetDropdown(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, menuBackdrop,
+                        DropdownEntry(artists.map { artist ->
+                            DropdownItem(artist.name, enabled = !song.cloud || artist.id > 0,
+                                icon = { modifier -> Artwork(artist.artwork, modifier.size(30.dp), circular = true) },
+                                onClick = { openCollectionFromSheet { model.openSongArtist(song, artist) } })
+                        }), expressive = expressive, position = artistPos)
+                } else action(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, !song.cloud || song.artistId > 0, position = artistPos) {
+                    openCollectionFromSheet { model.openSongArtist(song) }
+                }
+                if (!song.cloud) {
+                    action(MiuixIcons.Regular.File, tr("tag_editor", "标签编辑器"), position = SheetItemPosition.MIDDLE) {
+                        dismiss(); closePlayer(); openPage(tagEditorRoute(song))
+                    }
+                    action(MiuixIcons.Regular.Info, tr("audio_info", "音频信息"), position = SheetItemPosition.BOTTOM) {
+                        audioInfoOpen = true
+                    }
                 }
             }
             divider()
-            SheetDropdown(MiuixIcons.Regular.Timer, tr("sleep_timer", "定时关闭"),
-                if (model.sleepRemaining > 0) timerText(model.sleepRemaining) else tr("timer_off", "未开启"), menuBackdrop,
-                DropdownEntry(listOf(DropdownItem(tr("cancel_timer", "取消定时关闭"), selected = model.sleepRemaining == 0L, onClick = { model.setSleepTimer(0) })) +
-                    listOf(5, 10, 15, 30, 45, 60, 90, 120).map { minutes ->
-                        DropdownItem("$minutes ${tr("minutes", "分钟")}",
-                            selected = model.sleepRemaining > 0 && model.playbackPreferences.sleepMinutes == minutes,
-                            onClick = { model.setSleepTimer(minutes) })
-                    }))
-            val speeds = listOf(.5f, .75f, 1f, 1.5f, 2f, 3f)
-            SheetDropdown(MiuixIcons.Regular.SearchDevice, tr("playback_speed", "倍速播放"), speedText(model.playbackSpeed), menuBackdrop,
-                DropdownEntry(speeds.map { speed -> DropdownItem(speedText(speed), selected = speed == model.playbackSpeed, onClick = { model.changePlaybackSpeed(speed) }) }))
+            Column(group1Modifier, verticalArrangement = Arrangement.spacedBy(if (expressive != null) 2.dp else 0.dp)) {
+                SheetDropdown(MiuixIcons.Regular.Timer, tr("sleep_timer", "定时关闭"),
+                    if (model.sleepRemaining > 0) timerText(model.sleepRemaining) else tr("timer_off", "未开启"), menuBackdrop,
+                    DropdownEntry(listOf(DropdownItem(tr("cancel_timer", "取消定时关闭"), selected = model.sleepRemaining == 0L, onClick = { model.setSleepTimer(0) })) +
+                        listOf(5, 10, 15, 30, 45, 60, 90, 120).map { minutes ->
+                            DropdownItem("$minutes ${tr("minutes", "分钟")}",
+                                selected = model.sleepRemaining > 0 && model.playbackPreferences.sleepMinutes == minutes,
+                                onClick = { model.setSleepTimer(minutes) })
+                        }), expressive = expressive, position = SheetItemPosition.TOP)
+                val speeds = listOf(.5f, .75f, 1f, 1.5f, 2f, 3f)
+                SheetDropdown(MiuixIcons.Regular.SearchDevice, tr("playback_speed", "倍速播放"), speedText(model.playbackSpeed), menuBackdrop,
+                    DropdownEntry(speeds.map { speed -> DropdownItem(speedText(speed), selected = speed == model.playbackSpeed, onClick = { model.changePlaybackSpeed(speed) }) }),
+                    expressive = expressive, position = SheetItemPosition.BOTTOM)
+            }
         }
     }
     if (!song.cloud) {

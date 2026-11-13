@@ -3,19 +3,24 @@ package btm.m.auraplayer.ui.player
 import android.content.SharedPreferences
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.data.Song
 import btm.m.auraplayer.download.MusicDownloads
@@ -54,22 +59,124 @@ internal fun streamQuality(stream: StreamInfo?): CloudQuality? {
     return CloudQuality(quality, AudioDetails(stream.codec, stream.sampleRate, stream.bits, stream.bitrate))
 }
 
+internal enum class SheetItemPosition { SINGLE, TOP, MIDDLE, BOTTOM }
+
+private fun sheetGroupShape(position: SheetItemPosition): RoundedCornerShape = when (position) {
+    SheetItemPosition.SINGLE -> RoundedCornerShape(22.dp)
+    SheetItemPosition.TOP -> RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 6.dp, bottomEnd = 6.dp)
+    SheetItemPosition.MIDDLE -> RoundedCornerShape(6.dp)
+    SheetItemPosition.BOTTOM -> RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 22.dp, bottomEnd = 22.dp)
+}
+
 @Composable
-internal fun SheetDropdown(icon: ImageVector, title: String, summary: String, backdrop: Backdrop?, entry: DropdownEntry) {
+internal fun SheetActionRow(
+    icon: ImageVector,
+    title: String,
+    summary: String? = null,
+    enabled: Boolean = true,
+    expressive: PlayerExpressiveColors? = null,
+    position: SheetItemPosition = SheetItemPosition.SINGLE,
+    isDropdown: Boolean = false,
+    onClick: () -> Unit,
+) {
+    if (expressive != null) {
+        val disabledAlpha = if (enabled) 1f else .38f
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(sheetGroupShape(position))
+                .background(expressive.surfaceContainer)
+                .clickable(enabled = enabled, onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(expressive.secondaryContainer.copy(alpha = disabledAlpha)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(19.dp),
+                    colorFilter = ColorFilter.tint(expressive.onSecondaryContainer.copy(alpha = disabledAlpha)),
+                )
+            }
+            Column(Modifier.weight(1f).padding(start = 14.dp, end = 8.dp)) {
+                Text(
+                    text = title,
+                    color = expressive.onSurface.copy(alpha = disabledAlpha),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!summary.isNullOrBlank()) {
+                    Text(
+                        text = summary,
+                        color = expressive.secondaryInk.copy(alpha = disabledAlpha),
+                        fontSize = 12.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            DropdownArrowEndAction(expressive.onSurfaceVariant.copy(alpha = if (enabled) .8f else .35f))
+        }
+        return
+    }
     val foreground = sheetForeground()
+    BasicComponent(
+        title = title,
+        summary = summary,
+        titleColor = BasicComponentColors(foreground, foreground.copy(alpha = .35f)),
+        summaryColor = BasicComponentColors(foreground.copy(alpha = .68f), foreground.copy(alpha = .3f)),
+        startAction = { Image(icon, null, Modifier.padding(end = 14.dp).size(24.dp), colorFilter = ColorFilter.tint(foreground)) },
+        endActions = {
+            if (isDropdown) DropdownArrowEndAction(foreground.copy(alpha = .7f))
+        },
+        insideMargin = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+        onClick = onClick,
+        enabled = enabled,
+    )
+}
+
+@Composable
+internal fun SheetDropdown(
+    icon: ImageVector,
+    title: String,
+    summary: String,
+    backdrop: Backdrop?,
+    entry: DropdownEntry,
+    expressive: PlayerExpressiveColors? = null,
+    position: SheetItemPosition = SheetItemPosition.SINGLE,
+) {
     GlassIconDropdownMenu(entry, backdrop, trigger = { toggle, enabled ->
-        BasicComponent(title = title, summary = summary,
-            titleColor = BasicComponentColors(foreground, foreground.copy(alpha = .35f)),
-            summaryColor = BasicComponentColors(foreground.copy(alpha = .68f), foreground.copy(alpha = .3f)),
-            startAction = { Image(icon, null, Modifier.padding(end = 14.dp).size(24.dp), colorFilter = ColorFilter.tint(foreground)) },
-            endActions = { DropdownArrowEndAction(foreground.copy(alpha = .7f)) },
-            insideMargin = PaddingValues(horizontal = 20.dp, vertical = 12.dp), onClick = toggle, enabled = enabled)
+        SheetActionRow(
+            icon = icon,
+            title = title,
+            summary = summary,
+            enabled = enabled,
+            expressive = expressive,
+            position = position,
+            isDropdown = true,
+            onClick = toggle,
+        )
     })
 }
 
 /** The clicked song owns its request and confirmation, independently of playback. */
 @Composable
-internal fun SongDownloadPreference(model: AuraViewModel, song: Song, active: Boolean, backdrop: Backdrop?) {
+internal fun SongDownloadPreference(
+    model: AuraViewModel,
+    song: Song,
+    active: Boolean,
+    backdrop: Backdrop?,
+    expressive: PlayerExpressiveColors? = null,
+    position: SheetItemPosition = SheetItemPosition.SINGLE,
+) {
     val context = LocalContext.current
     var levels by remember(song.key) { mutableStateOf<List<CloudQuality>>(emptyList()) }
     var loading by remember(song.key) { mutableStateOf(true) }
@@ -107,7 +214,7 @@ internal fun SongDownloadPreference(model: AuraViewModel, song: Song, active: Bo
             })
             if (loading && isEmpty()) add(DropdownItem(tr("loading", "加载中…"), enabled = false))
             if (failed || !loading && options.isEmpty()) add(DropdownItem(tr("quality_retry", "获取音质失败，点击重试"), onClick = { retry++ }))
-        }))
+        }), expressive = expressive, position = position)
     val choice = selected
     WindowDialog(choice != null,
         title = (if (choice != null && downloaded(choice.quality)) tr("download_again", "是否再次下载") else tr("download_confirm", "即将下载")) + " ${song.title}",

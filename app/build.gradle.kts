@@ -37,6 +37,7 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.4")
     implementation("io.github.kyant0:backdrop:2.0.0")
     implementation("io.github.kyant0:shapes:1.2.0")
+    implementation("io.github.itoseo:coui:0.0.1-alpha9")
     implementation("org.jetbrains.compose.ui:ui:1.11.0")
     implementation("org.jetbrains.compose.foundation:foundation:1.11.0")
     implementation("org.jetbrains.compose.animation:animation:1.11.0")

@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.*
 import androidx.core.view.WindowCompat
@@ -44,6 +45,11 @@ import btm.m.auraplayer.ui.player.LyricShareTransitionState
 import btm.m.auraplayer.ui.player.LocalLyricShareTransition
 import btm.m.auraplayer.ui.player.playerMiniBlurRadius
 import btm.m.auraplayer.ui.player.playerTransitionBlurRadius
+import com.itos.coui.search.CouiSearchBarDefaults
+import com.itos.coui.search.SearchBar
+import com.itos.coui.search.rememberCouiSearchBarState
+import com.itos.coui.theme.CouiColorScheme
+import com.itos.coui.theme.CouiTheme
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.delay
@@ -86,8 +92,35 @@ fun AuraRoot(model: AuraViewModel) {
             colorSpec = if (settings.colorSpec == 0) ThemeColorSpec.Spec2021 else ThemeColorSpec.Spec2025)
     }
     MiuixTheme(controller = controller, textStyles = remember { auraTextStyles() }) {
-        AuraAdaptiveLayout { AuraShell(model) }
+        ProvideAuraCouiTheme(settings.monet) {
+            AuraAdaptiveLayout { AuraShell(model) }
+        }
     }
+}
+
+@Composable
+private fun ProvideAuraCouiTheme(monet: Boolean, content: @Composable () -> Unit) {
+    val scheme = MiuixTheme.colorScheme
+    val dark = scheme.surface.luminance() < .5f
+    val couiColors = remember(scheme, dark) {
+        CouiColorScheme(
+            accent = scheme.primary,
+            onAccent = scheme.onPrimary,
+            surface = scheme.surface,
+            container = scheme.surfaceContainer,
+            onSurface = scheme.onSurface,
+            onSurfaceVariant = scheme.onSurfaceVariantSummary,
+            outlineVariant = scheme.outline,
+            background = scheme.background,
+            card = scheme.surfaceContainer,
+        )
+    }
+    CouiTheme(
+        darkTheme = dark,
+        colorScheme = couiColors,
+        materialTint = if (monet) scheme.surface else Color.Transparent,
+        content = content,
+    )
 }
 
 /** HyperChanger Shell ownership: retained page stack, delayed pop, per-page gesture owner. */
@@ -446,15 +479,47 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         LyricShareRoute(model, back, isActive)
         return
     }
+    val playlistSearchSupported = page == "collection" && !catalog && collection != null
+    var playlistSearchQuery by rememberSaveable { mutableStateOf("") }
+    var playlistSearchExpanded by rememberSaveable { mutableStateOf(false) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val closePlaylistSearch = {
+        playlistSearchExpanded = false
+        playlistSearchQuery = ""
+        keyboard?.hide()
+        Unit
+    }
+    BackHandler(
+        enabled = playlistSearchSupported && (playlistSearchExpanded || playlistSearchQuery.isNotEmpty()),
+        onBack = closePlaylistSearch,
+    )
     AppPage(title, back, showLargeTitle = page != "about" && (!catalog || page in setOf("artistSongs", "artistAlbums")),
+        recordCouiBackdrop = playlistSearchSupported,
         header = {
             when (page) {
                 "effect_library" -> SoftGlassHeaderTabs(listOf(tr("builtin_presets", "内置预设"), tr("user_presets", "用户预设")), presetTab) { presetTab = it }
                 "navigation_material" -> SoftGlassHeaderTabs(listOf(tr("nav_material_hyper", "HyperOS"), tr("nav_material_harmony", "HarmonyOS"), tr("nav_material_liquid", "液态玻璃")), materialTab) { materialTab = it }
-                "collection" -> if (destination?.cloud?.source == "rank") SoftGlassHeaderTabs(
-                    listOf(tr("rank_week", "最近一周"), tr("rank_all", "所有时间")),
-                    if (model.listeningRankWeek) 0 else 1,
-                    onSelected = { model.changeListeningRankPeriod(it == 0) })
+                "collection" -> if (playlistSearchSupported) {
+                    Column(Modifier.fillMaxWidth()) {
+                        if (destination?.cloud?.source == "rank") {
+                            SoftGlassHeaderTabs(
+                                listOf(tr("rank_week", "最近一周"), tr("rank_all", "所有时间")),
+                                if (model.listeningRankWeek) 0 else 1,
+                                onSelected = { model.changeListeningRankPeriod(it == 0) },
+                            )
+                        }
+                        PlaylistHeaderSearchBar(
+                            query = playlistSearchQuery,
+                            expanded = playlistSearchExpanded,
+                            onQueryChange = { playlistSearchQuery = it },
+                            onExpandedChange = { expanded ->
+                                playlistSearchExpanded = expanded
+                                if (!expanded) playlistSearchQuery = ""
+                            },
+                            onSearch = { keyboard?.hide() },
+                        )
+                    }
+                }
             }
         },
         useLegacyTopBarBackdrop = page == "about",
@@ -486,7 +551,14 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             "artists" -> AlbumsArtistsPage(model, contentPadding, 1)
             "collection" -> if (collection != null && destination != null) {
                 if (catalog) CatalogDetailPage(model, contentPadding, collection, destination.cloud, destination.id, open)
-                else CollectionPage(model, contentPadding, collection, destination.cloud)
+                else CollectionPage(
+                    model,
+                    contentPadding,
+                    collection,
+                    destination.cloud,
+                    searchQuery = playlistSearchQuery,
+                    searchExpanded = playlistSearchExpanded,
+                )
             }
             "artistSongs", "artistAlbums" -> if (collection != null && albumInfoDestination != null)
                 ArtistContentsPage(model, contentPadding, collection, albumInfoDestination.cloud, page == "artistAlbums")

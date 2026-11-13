@@ -25,6 +25,9 @@ import androidx.compose.ui.unit.*
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.data.*
 import coil3.compose.AsyncImage
+import com.itos.coui.search.CouiSearchBarDefaults
+import com.itos.coui.search.SearchBar
+import com.itos.coui.search.rememberCouiSearchBarState
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.*
@@ -175,40 +178,130 @@ fun AlbumsArtistsPage(model: AuraViewModel, padding: PaddingValues, tab: Int) {
     }
 }
 
+internal fun filterPlaylistSongs(songs: List<Song>, query: String): List<Song> {
+    val terms = query.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (terms.isEmpty()) return songs
+    return songs.filter { song ->
+        terms.all { term ->
+            song.title.contains(term, ignoreCase = true) ||
+                song.artist.contains(term, ignoreCase = true) ||
+                song.album.contains(term, ignoreCase = true) ||
+                song.albumArtist.contains(term, ignoreCase = true)
+        }
+    }
+}
+
+internal fun shouldAutoLoadRemainingPlaylistTracks(
+    searchActive: Boolean,
+    hasMore: Boolean,
+    loading: Boolean,
+    failed: Boolean,
+    accountRequiredMissing: Boolean = false,
+): Boolean = searchActive && hasMore && !loading && !failed && !accountRequiredMissing
+
 @Composable
-fun CollectionPage(model: AuraViewModel, padding: PaddingValues, collection: MusicCollection, cloud: CloudPlaylistContent?) {
+internal fun PlaylistHeaderSearchBar(
+    query: String,
+    expanded: Boolean,
+    onQueryChange: (String) -> Unit,
+    onExpandedChange: (Boolean) -> Unit,
+    onSearch: () -> Unit,
+) {
+    val backdrop = LocalAuraCouiBackdrop.current ?: return
+    val searchState = rememberCouiSearchBarState(expanded)
+    val scheme = MiuixTheme.colorScheme
+    val dark = scheme.surface.luminance() < .5f
+    val colors = CouiSearchBarDefaults.colors(dark).copy(
+        foreground = scheme.onSurface,
+        secondary = scheme.onSurfaceVariantSummary,
+        fallbackBackground = scheme.surfaceContainerHigh,
+    )
+    SearchBar(
+        modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
+        state = searchState,
+        query = query,
+        onQueryChange = onQueryChange,
+        onExpandedChange = onExpandedChange,
+        placeholder = tr("playlist_search_hint", "搜索歌单内歌曲、歌手或专辑"),
+        cancelText = tr("cancel", "取消"),
+        clearDescription = tr("clear", "清空"),
+        dark = dark,
+        backdrop = backdrop,
+        onSearch = onSearch,
+        shadowProgress = LocalToolbarCollapsed.current,
+        colors = colors,
+    )
+}
+
+@Composable
+fun CollectionPage(
+    model: AuraViewModel,
+    padding: PaddingValues,
+    collection: MusicCollection,
+    cloud: CloudPlaylistContent?,
+    searchQuery: String = "",
+    searchExpanded: Boolean = false,
+) {
     var addToPlaylist by remember { mutableStateOf(false) }
     val revision = model.history.revision
     val localPlaylist = remember(collection.key, revision) { model.history.playlists().find { "playlist:${it.id}" == collection.key } }
     val visible = remember(model.songs) { model.songs.map { it.key }.toSet() }
     val tracks = if (localPlaylist != null) model.songs.filter { it.key in localPlaylist.songKeys }
         else cloud?.songs ?: collection.songs.filter { it.cloud || it.key in visible }
+    val filtering = searchQuery.isNotBlank()
+    val searchActive = filtering || searchExpanded
+    LaunchedEffect(cloud, searchActive, cloud?.songs?.size, cloud?.loading, cloud?.hasMore, cloud?.failed, model.account != null) {
+        if (cloud != null && shouldAutoLoadRemainingPlaylistTracks(
+                searchActive = searchActive,
+                hasMore = cloud.hasMore,
+                loading = cloud.loading,
+                failed = cloud.failed,
+                accountRequiredMissing = cloud.source == "playlist" && model.account == null,
+            )
+        ) {
+            model.loadMoreCloudSongsFor(cloud)
+        }
+    }
+    val filteredTracks = remember(tracks, searchQuery) { filterPlaylistSongs(tracks, searchQuery) }
     val listeningRank = cloud?.source == "rank"
+    val rankByKey = remember(tracks, listeningRank) {
+        if (listeningRank) tracks.mapIndexed { index, song -> song.key to (index + 1) }.toMap() else emptyMap()
+    }
     val columns = LocalAuraLayout.current.listColumns
-    LazyColumn(pageContentModifier(), contentPadding = padding) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(searchQuery) { listState.scrollToItem(0) }
+    LazyColumn(pageContentModifier().imePadding(), state = listState, contentPadding = padding) {
         item {
             Row(Modifier.fillMaxWidth().padding(bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                 Artwork(collection.artwork.ifBlank { tracks.firstOrNull()?.artwork.orEmpty() }, Modifier.size(90.dp))
                 Column(Modifier.padding(start = 18.dp)) {
-                    Text("${cloud?.total ?: tracks.size} ${tr("song_count", "首歌曲")}", color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    val countText = if (filtering) "${filteredTracks.size} / ${cloud?.total ?: tracks.size} ${tr("song_count", "首歌曲")}"
+                        else "${cloud?.total ?: tracks.size} ${tr("song_count", "首歌曲")}"
+                    Text(countText, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 12.dp)) {
-                        GlassDialogButton({ model.playCollection(tracks, content = cloud) }, enabled = tracks.isNotEmpty(), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("play_all", "播放全部")) }
+                        GlassDialogButton(
+                            { model.playCollection(filteredTracks, content = if (filtering) null else cloud) },
+                            enabled = filteredTracks.isNotEmpty(),
+                            colors = ButtonDefaults.buttonColorsPrimary(),
+                        ) { Text(tr("play_all", "播放全部")) }
                         if (localPlaylist != null) GlassDialogButton({ addToPlaylist = true }) { Text(tr("add", "添加")) }
                         if (cloud != null) GlassDialogButton(model::refreshCloudSongs, enabled = !cloud.loading) { Text(tr("refresh", "刷新")) }
                     }
                 }
             }
         }
-        if (tracks.isEmpty() && (cloud == null || !cloud.loading && !cloud.failed && !cloud.hasMore)) item { EmptyState(tr("no_songs", "没有找到歌曲")) }
+        if (filteredTracks.isEmpty() && (cloud == null || !cloud.loading && !cloud.failed && !cloud.hasMore)) item { EmptyState(tr("no_songs", "没有找到歌曲")) }
         if (listeningRank) {
-            itemsIndexed(tracks, key = { _, song -> "rank-${song.key}" }) { index, song ->
-                RankSongRow(index + 1, song, model) { model.playCollection(tracks, index, cloud) }
+            itemsIndexed(filteredTracks, key = { _, song -> "rank-${song.key}" }) { index, song ->
+                val rank = rankByKey[song.key] ?: (index + 1)
+                RankSongRow(rank, song, model) { model.playCollection(filteredTracks, index, if (filtering) null else cloud) }
             }
-        } else songRows(tracks, model, columns, onRemove = localPlaylist?.let { playlist -> { song ->
+        } else songRows(filteredTracks, model, columns, onRemove = localPlaylist?.let { playlist -> { song ->
                 model.history.savePlaylists(model.history.playlists().map { if (it.id == playlist.id) it.copy(songKeys = it.songKeys - song.key) else it })
-        } }, onPlay = { model.playCollection(tracks, it, cloud) })
+        } }, onPlay = { model.playCollection(filteredTracks, it, if (filtering) null else cloud) })
         if (cloud != null && (cloud.hasMore || cloud.loading || cloud.failed)) item("cloud_song_paging") {
-            CloudPagingFooter(cloud.loading, cloud.failed) { model.loadMoreCloudSongsFor(cloud) }
+            val detail = if (searchActive && cloud.total > 0) "(${cloud.songs.size}/${cloud.total})" else ""
+            CloudPagingFooter(cloud.loading, cloud.failed, detail) { model.loadMoreCloudSongsFor(cloud) }
         }
     }
     if (addToPlaylist && localPlaylist != null) PlaylistSongPicker(model, localPlaylist) { addToPlaylist = false }
@@ -285,11 +378,18 @@ fun LocalPlaylistsPage(model: AuraViewModel, padding: PaddingValues) {
 }
 
 @Composable
-internal fun CloudPagingFooter(loading: Boolean, failed: Boolean, load: () -> Unit) {
+internal fun CloudPagingFooter(loading: Boolean, failed: Boolean, load: () -> Unit) =
+    CloudPagingFooter(loading, failed, "", load)
+
+@Composable
+internal fun CloudPagingFooter(loading: Boolean, failed: Boolean, detail: String, load: () -> Unit) {
     if (!loading && !failed) LaunchedEffect(Unit) { load() }
     Box(Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
         if (failed) GlassDialogButton(load) { Text(tr("cloud_load_retry", "加载失败，点击重试")) }
-        else Text(tr("loading", "正在加载…"), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        else Text(
+            if (detail.isBlank()) tr("loading", "正在加载…") else "${tr("loading", "正在加载…")} $detail",
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
     }
 }
 

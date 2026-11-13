@@ -33,11 +33,21 @@ import kotlin.math.*
 import kotlin.random.Random
 
 @Composable
-internal fun PlayerThemeBackground(artwork: String, palette: CorePalette, config: NowPlayingConfig,
-    compactProgress: Float, animate: Boolean, modifier: Modifier = Modifier) {
+internal fun PlayerThemeBackground(
+    artwork: String,
+    palette: CorePalette,
+    config: NowPlayingConfig,
+    compactProgress: Float,
+    animate: Boolean,
+    expressive: PlayerExpressiveColors? = null,
+    modifier: Modifier = Modifier,
+) {
+    val usesFlowingArt = config.theme == PlayerTheme.AURORA_BLUR ||
+        (config.theme == PlayerTheme.MATERIAL && config.materialBackground == MaterialPlayerBackground.AURORA_BLUR)
+    val usesMaterialWash = config.theme == PlayerTheme.MATERIAL && config.materialBackground == MaterialPlayerBackground.MATERIAL
     var phase by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(animate, config.theme, config.weather) {
-        if (!animate || (config.theme != PlayerTheme.AURORA_BLUR && config.weather == PlayerWeather.NONE)) return@LaunchedEffect
+    LaunchedEffect(animate, usesFlowingArt, usesMaterialWash, config.weather) {
+        if (!animate || (!usesFlowingArt && !usesMaterialWash && config.weather == PlayerWeather.NONE)) return@LaunchedEffect
         var last = withFrameNanos { it }
         while (true) {
             val now = withFrameNanos { it }
@@ -46,13 +56,14 @@ internal fun PlayerThemeBackground(artwork: String, palette: CorePalette, config
         }
     }
     val blur by animateFloatAsState(config.blurRadius, tween(220), label = "playerBackgroundBlur")
+    val materialMix by animateFloatAsState((config.materialColorMix / 100f).coerceIn(0f, 1f), tween(220), label = "playerMaterialMix")
     // Keep decoded pixels outside the theme Crossfade and outside Coil's loading state. A new
     // model must never clear the last successful background while its artwork is being decoded.
     val context = LocalContext.current
     var background by remember { mutableStateOf<ImageBitmap?>(null) }
     var previousBackground by remember { mutableStateOf<ImageBitmap?>(null) }
     val artworkBlend = remember { Animatable(1f) }
-    val usesArtwork = config.theme in setOf(PlayerTheme.AURORA_BLUR, PlayerTheme.BLUR, PlayerTheme.FULLSCREEN)
+    val usesArtwork = config.usesArtworkBackground
     LaunchedEffect(artwork, usesArtwork, context) {
         artworkBlend.snapTo(1f)
         previousBackground = null
@@ -77,12 +88,30 @@ internal fun PlayerThemeBackground(artwork: String, palette: CorePalette, config
         previousBackground = null
     }
     Box(modifier.clipToBounds()) {
-        Crossfade(config.theme, animationSpec = tween(380), label = "playerTheme") { theme ->
-            Box(Modifier.fillMaxSize().background(Color(palette.a2.tone(14)))) {
-                if (theme == PlayerTheme.AURORA || theme == PlayerTheme.AURORA_BLUR)
+        Crossfade(config.theme to config.materialBackground, animationSpec = tween(380), label = "playerTheme") { (theme, materialBg) ->
+            val materialMode = theme == PlayerTheme.MATERIAL
+            val baseColor = if (materialMode && materialBg == MaterialPlayerBackground.MATERIAL && expressive != null) {
+                expressive.surface
+            } else {
+                Color(palette.a2.tone(14))
+            }
+            Box(Modifier.fillMaxSize().background(baseColor)) {
+                val showAurora = theme == PlayerTheme.AURORA ||
+                    theme == PlayerTheme.AURORA_BLUR ||
+                    (materialMode && (materialBg == MaterialPlayerBackground.AURORA || materialBg == MaterialPlayerBackground.AURORA_BLUR))
+                val showArtwork = theme == PlayerTheme.AURORA_BLUR ||
+                    theme == PlayerTheme.BLUR ||
+                    theme == PlayerTheme.FULLSCREEN ||
+                    (materialMode && (materialBg == MaterialPlayerBackground.BLUR || materialBg == MaterialPlayerBackground.AURORA_BLUR))
+                if (materialMode && materialBg == MaterialPlayerBackground.MATERIAL && expressive != null) {
+                    MaterialExpressiveSurfaceWash(expressive, phase, washStrength = 1f - materialMix * .92f, Modifier.fillMaxSize())
+                }
+                if (showAurora) {
                     PlayerAmbientBackground(palette, Modifier.fillMaxSize(), animate)
-                if (theme == PlayerTheme.AURORA_BLUR || theme == PlayerTheme.BLUR || theme == PlayerTheme.FULLSCREEN) {
-                    val flowing = theme == PlayerTheme.AURORA_BLUR
+                }
+                if (showArtwork) {
+                    val flowing = theme == PlayerTheme.AURORA_BLUR ||
+                        (materialMode && materialBg == MaterialPlayerBackground.AURORA_BLUR)
                     val full = theme == PlayerTheme.FULLSCREEN
                     val radius = if (full) 40f * compactProgress else blur
                     Box(Modifier.fillMaxSize().graphicsLayer {
@@ -106,15 +135,62 @@ internal fun PlayerThemeBackground(artwork: String, palette: CorePalette, config
                         }
                     }
                     // Keep controls readable without turning clear negative-blur settings opaque.
-                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = when {
+                    val scrimScale = if (materialMode) 1f - materialMix * .6f else 1f
+                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = scrimScale * when {
                         full -> .22f + .16f * compactProgress
                         flowing -> .20f
                         else -> .28f
                     })))
                 }
+                if (materialMode && materialBg != MaterialPlayerBackground.MATERIAL && expressive != null && materialMix > 0.001f) {
+                    Box(Modifier.fillMaxSize().background(expressive.surface.copy(alpha = materialMix * .94f)))
+                }
             }
         }
         if (config.weather != PlayerWeather.NONE) PlayerWeatherOverlay(config.weather, phase)
+    }
+}
+
+@Composable
+private fun MaterialExpressiveSurfaceWash(colors: PlayerExpressiveColors, phase: Float, washStrength: Float, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        drawRect(colors.surface)
+        if (washStrength <= 0.005f) return@Canvas
+        val primaryAlpha = (if (colors.dark) .36f else .48f) * washStrength
+        val tertiaryAlpha = (if (colors.dark) .30f else .42f) * washStrength
+        val secondaryAlpha = (if (colors.dark) .25f else .34f) * washStrength
+        val driftX = sin(phase * .28f) * size.width * .06f
+        val driftY = cos(phase * .22f) * size.height * .05f
+        val topCenter = Offset(size.width * .24f + driftX, size.height * .18f + driftY)
+        val bottomCenter = Offset(size.width * .78f - driftX, size.height * .76f - driftY)
+        val midCenter = Offset(size.width * .72f + driftY, size.height * .38f - driftX)
+        drawCircle(
+            brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                listOf(colors.primaryContainer.copy(alpha = primaryAlpha), Color.Transparent),
+                center = topCenter,
+                radius = size.width * .95f,
+            ),
+            radius = size.width * .95f,
+            center = topCenter,
+        )
+        drawCircle(
+            brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                listOf(colors.tertiaryContainer.copy(alpha = tertiaryAlpha), Color.Transparent),
+                center = bottomCenter,
+                radius = size.width * .90f,
+            ),
+            radius = size.width * .90f,
+            center = bottomCenter,
+        )
+        drawCircle(
+            brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                listOf(colors.secondaryContainer.copy(alpha = secondaryAlpha), Color.Transparent),
+                center = midCenter,
+                radius = size.width * .68f,
+            ),
+            radius = size.width * .68f,
+            center = midCenter,
+        )
     }
 }
 

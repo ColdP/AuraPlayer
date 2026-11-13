@@ -141,7 +141,7 @@ This project is distributed under the [GNU AGPL-3.0-or-later](LICENSE) license. 
 
 - UI styling, glass components, navigation motion, and About/Donate layouts from [HyperChanger](https://github.com/ColdP/HyperChanger) (AGPL-3.0-or-later).
 - Home structure and MediaStore sorting adapted from [Retro Music](https://github.com/RetroMusicPlayer/RetroMusicPlayer) (GPL-3.0-or-later).
-- UI widgets and glass rendering powered by [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix) (Apache-2.0) and [Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass) (Apache-2.0).
+- UI widgets and glass rendering powered by [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix) (Apache-2.0) and [Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass) (Apache-2.0); playlist title-bar search uses [COUI-Kit](https://github.com/ItosEO/COUI-Kit) (MPL-2.0).
 - Lyric fetching, matching, and rendering from [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) (AGPL-3.0), [HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced) (GPL-3.0 / Apache-2.0), and [Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics) (Apache-2.0).
 - Additional dependencies: [Media3](https://developer.android.com/media/media3), [Coil](https://github.com/coil-kt/coil), [OkHttp](https://github.com/square/okhttp), [jaudiotagger](https://github.com/Adonai/jaudiotagger-android) (LGPL-2.1), [MaterialKolor](https://github.com/jordond/MaterialKolor) (MIT), [ZXing](https://github.com/zxing/zxing) (Apache-2.0), and [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) (MIT).
 

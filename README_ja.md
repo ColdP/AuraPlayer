@@ -141,7 +141,7 @@ Issue や Pull Request を歓迎します。参加前に [日本語コントリ�
 
 - UI スタイル、ガラスコンポーネント、ナビゲーションアニメーション、アプリ情報／寄付画面レイアウト：[HyperChanger](https://github.com/ColdP/HyperChanger)（AGPL-3.0-or-later）。
 - ホーム構成と MediaStore ソート処理の参考・移植：[Retro Music](https://github.com/RetroMusicPlayer/RetroMusicPlayer)（GPL-3.0-or-later）。
-- UI コンポーネントとガラス描画：[MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）および [Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0）。
+- UI コンポーネントとガラス描画：[MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）および [Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0）；プレイリストタイトルバーの検索コンポーネントは [COUI-Kit](https://github.com/ItosEO/COUI-Kit)（MPL-2.0）を使用しています。
 - 歌詞の取得・照合・描画：[HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（AGPL-3.0）、[HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced)（GPL-3.0 / Apache-2.0）、[Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics)（Apache-2.0）。
 - その他の主な依存ライブラリ：[Media3](https://developer.android.com/media/media3)、[Coil](https://github.com/coil-kt/coil)、[OkHttp](https://github.com/square/okhttp)、[jaudiotagger](https://github.com/Adonai/jaudiotagger-android)（LGPL-2.1）、[MaterialKolor](https://github.com/jordond/MaterialKolor)（MIT）、[ZXing](https://github.com/zxing/zxing)（Apache-2.0）、[NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT）。
 

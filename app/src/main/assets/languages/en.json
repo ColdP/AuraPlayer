@@ -297,6 +297,9 @@
     "player_theme_blur": "Blur",
     "player_theme_color": "Color",
     "player_theme_fullscreen": "Full screen",
+    "player_theme_material": "Material",
+    "player_material_background": "Page background",
+    "player_material_color_mix": "Material color blend",
     "playlist_add_failed": "Could not add the song. Tap a playlist to retry",
     "playlist_name": "Playlist name",
     "playlists": "Playlists",
@@ -613,6 +616,7 @@
     "audio_info_bitrate": "Bitrate",
     "audio_info_sample_rate": "Sample rate",
     "audio_info_codec": "Codec",
-    "copy_all": "Copy all"
+    "copy_all": "Copy all",
+    "playlist_search_hint": "Search songs, artists or albums"
   }
 }

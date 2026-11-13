@@ -297,6 +297,9 @@
     "player_theme_blur": "ぼかし",
     "player_theme_color": "単色",
     "player_theme_fullscreen": "全画面",
+    "player_theme_material": "Material",
+    "player_material_background": "ページ背景",
+    "player_material_color_mix": "Material カラーブレンド",
     "playlist_add_failed": "追加できませんでした。プレイリストをタップして再試行してください",
     "playlist_name": "プレイリスト名",
     "playlists": "プレイリスト",
@@ -613,6 +616,7 @@
     "audio_info_bitrate": "ビットレート",
     "audio_info_sample_rate": "サンプリングレート",
     "audio_info_codec": "コーデック",
-    "copy_all": "すべてコピー"
+    "copy_all": "すべてコピー",
+    "playlist_search_hint": "プレイリスト内の曲・アーティスト・アルバムを検索"
   }
 }

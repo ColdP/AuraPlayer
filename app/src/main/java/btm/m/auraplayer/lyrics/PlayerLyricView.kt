@@ -82,10 +82,29 @@ class PlayerLyricView(context: Context) : View(context) {
             invalidate()
         }
     }
+    private var inkArgb: Int = Color.WHITE
     private val colors = object : LyricWordRenderer.Colors {
-        override fun ink(alpha: Float, emphasis: Float, backing: Boolean) = Color.pack(1f, 1f, 1f, alpha.coerceIn(0f, 1f))
-        override fun white(alpha: Float, gain: Float) = Color.pack(1f, 1f, 1f, alpha.coerceIn(0f, 1f))
+        override fun ink(alpha: Float, emphasis: Float, backing: Boolean) = Color.pack(
+            Color.red(inkArgb) / 255f,
+            Color.green(inkArgb) / 255f,
+            Color.blue(inkArgb) / 255f,
+            alpha.coerceIn(0f, 1f),
+        )
+        override fun white(alpha: Float, gain: Float) = Color.pack(
+            Color.red(inkArgb) / 255f,
+            Color.green(inkArgb) / 255f,
+            Color.blue(inkArgb) / 255f,
+            alpha.coerceIn(0f, 1f),
+        )
         override fun glowGain(glow: Float) = 1f
+    }
+
+    fun inkColor(argb: Int) {
+        if (inkArgb == argb) return
+        inkArgb = argb
+        timestampPaint.color = argb
+        masks.evictAll()
+        invalidate()
     }
 
     override fun onAttachedToWindow() { super.onAttachedToWindow(); scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate); rebuild(); invalidate() }
@@ -108,7 +127,7 @@ class PlayerLyricView(context: Context) : View(context) {
         if (w != oldw) rebuild()
     }
     private fun paint(size: Float, weight: Int) = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = size * sd; color = Color.WHITE; typeface = Typeface.create(Typeface.DEFAULT, weight, false)
+        textSize = size * sd; color = inkArgb; typeface = Typeface.create(Typeface.DEFAULT, weight, false)
     }
     private fun layout(text: String, p: TextPaint, width: Int, opposite: Boolean) =
         StaticLayout.Builder.obtain(text, 0, text.length, p, width)
@@ -240,10 +259,11 @@ class PlayerLyricView(context: Context) : View(context) {
             val y = anchor + singing.position(i, base) - scroll[i] + manual
             if (y + row.height < -40 * d || y > height + 40 * d) continue
             if (i == browseSelected && browseAlpha > 0f) {
-                browsePaint.color = Color.WHITE
+                browsePaint.color = inkArgb
                 browsePaint.alpha = (browseAlpha * .10f * 255).toInt()
                 canvas.drawRoundRect(12 * d, y - 8 * d, width - 12 * d, y + row.height + 8 * d,
                     16 * d, 16 * d, browsePaint)
+                timestampPaint.color = inkArgb
                 timestampPaint.alpha = (browseAlpha * .85f * 255).toInt()
                 val metrics = timestampPaint.fontMetrics
                 val seconds = row.line.start.coerceAtLeast(0) / 1000
@@ -270,7 +290,7 @@ class PlayerLyricView(context: Context) : View(context) {
                 row.paint.alpha = 255
                 if (row.line.hasWords() && focused && visualFocus < 0) words.draw(canvas, row.line, row.main, row.paint, row.xs,
                     emphasis[i], sharpAlpha, sharpAlpha * .4f, 1.8f * d, true, 0, ms, row.glow, colors)
-                else { row.paint.color = Color.WHITE; row.paint.alpha = (sharpAlpha * 255).toInt(); row.main.draw(canvas) }
+                else { row.paint.color = inkArgb; row.paint.alpha = (sharpAlpha * 255).toInt(); row.main.draw(canvas) }
                 var underY = row.main.height.toFloat()
                 row.bg?.let { bg ->
                     val saveBg = canvas.save()
@@ -278,13 +298,13 @@ class PlayerLyricView(context: Context) : View(context) {
                     val backing = row.line.bg
                     if (backing.hasWords() && focused && visualFocus < 0) words.draw(canvas, backing, bg, row.bgPaint, row.bgXs,
                         emphasis[i], sharpAlpha * .8f, sharpAlpha * .32f, 1.08f * d, true, 1, ms, row.bgGlow, colors)
-                    else { row.bgPaint.color = Color.WHITE; row.bgPaint.alpha = (sharpAlpha * .8f * 255).toInt(); bg.draw(canvas) }
+                    else { row.bgPaint.color = inkArgb; row.bgPaint.alpha = (sharpAlpha * .8f * 255).toInt(); bg.draw(canvas) }
                     canvas.restoreToCount(saveBg)
                     underY += bg.height + 3 * d
                 }
                 row.below?.let {
                     canvas.translate(0f, underY + 5 * d)
-                    row.underPaint.color = Color.WHITE; row.underPaint.alpha = (sharpAlpha * .62f * 255).toInt()
+                    row.underPaint.color = inkArgb; row.underPaint.alpha = (sharpAlpha * .62f * 255).toInt()
                     it.draw(canvas)
                 }
             }
@@ -340,13 +360,13 @@ class PlayerLyricView(context: Context) : View(context) {
         val w = row.main.width + pad * 2; val h = row.height.toInt() + pad * 2
         val image = Bitmap.createBitmap(max(1, w / down), max(1, h / down), Bitmap.Config.ARGB_8888)
         val out = Canvas(image); out.scale(1f / down, 1f / down); out.translate(pad.toFloat(), pad.toFloat())
-        val p = TextPaint(row.paint).apply { color = Color.WHITE; alpha = 255; maskFilter = BlurMaskFilter(radius, BlurMaskFilter.Blur.NORMAL) }
-        val tp = TextPaint(row.underPaint).apply { alpha = 158; maskFilter = BlurMaskFilter(radius, BlurMaskFilter.Blur.NORMAL) }
+        val p = TextPaint(row.paint).apply { color = inkArgb; alpha = 255; maskFilter = BlurMaskFilter(radius, BlurMaskFilter.Blur.NORMAL) }
+        val tp = TextPaint(row.underPaint).apply { color = inkArgb; alpha = 158; maskFilter = BlurMaskFilter(radius, BlurMaskFilter.Blur.NORMAL) }
         layout(row.line.text, p, row.main.width, row.line.opposite).draw(out)
         var underY = row.main.height.toFloat()
         row.line.bg?.let { bg ->
             val saved = out.save(); out.translate(0f, underY + 3 * d)
-            val bp = TextPaint(row.bgPaint).apply { alpha = 204; maskFilter = BlurMaskFilter(radius, BlurMaskFilter.Blur.NORMAL) }
+            val bp = TextPaint(row.bgPaint).apply { color = inkArgb; alpha = 204; maskFilter = BlurMaskFilter(radius, BlurMaskFilter.Blur.NORMAL) }
             val bl = layout(bg.text, bp, row.main.width, row.line.opposite); bl.draw(out)
             out.restoreToCount(saved); underY += bl.height + 3 * d
         }

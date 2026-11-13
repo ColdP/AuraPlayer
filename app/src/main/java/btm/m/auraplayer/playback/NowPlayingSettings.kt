@@ -5,7 +5,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 
-enum class PlayerTheme { AURORA, AURORA_BLUR, BLUR, COLOR, FULLSCREEN }
+enum class PlayerTheme { AURORA, AURORA_BLUR, BLUR, COLOR, FULLSCREEN, MATERIAL }
+enum class MaterialPlayerBackground { MATERIAL, BLUR, AURORA, AURORA_BLUR }
 enum class PlayerWeather { NONE, SNOW, RAIN }
 enum class CoverAnimation { DEFAULT, CARD, BLUR, COVER, PAGE, STACK, VERTICAL_FLIP, HORIZONTAL_FLIP }
 
@@ -22,8 +23,19 @@ data class NowPlayingConfig(
     val immersiveLyrics: Boolean = false,
     val immersiveSeconds: Int = 5,
     val fullscreenGlass: Boolean = true,
+    val materialBackground: MaterialPlayerBackground = MaterialPlayerBackground.MATERIAL,
+    val materialColorMix: Int = 50,
 ) {
-    val hasBlurControl get() = theme == PlayerTheme.BLUR || theme == PlayerTheme.AURORA_BLUR
+    val usesArtworkBackground: Boolean
+        get() = theme == PlayerTheme.AURORA_BLUR ||
+            theme == PlayerTheme.BLUR ||
+            theme == PlayerTheme.FULLSCREEN ||
+            (theme == PlayerTheme.MATERIAL && (materialBackground == MaterialPlayerBackground.BLUR || materialBackground == MaterialPlayerBackground.AURORA_BLUR))
+
+    val hasBlurControl: Boolean
+        get() = theme == PlayerTheme.BLUR ||
+            theme == PlayerTheme.AURORA_BLUR ||
+            (theme == PlayerTheme.MATERIAL && (materialBackground == MaterialPlayerBackground.BLUR || materialBackground == MaterialPlayerBackground.AURORA_BLUR))
     // 0 keeps the existing default. Negative values approach clear, positive values add blur.
     val blurRadius get() = if (blur < 0) 48f * (blur.coerceAtLeast(-64) + 64) / 64 else 48f + blur.coerceAtMost(96)
 }
@@ -34,7 +46,13 @@ class NowPlayingSettings(context: Context) {
     private val mutable = MutableStateFlow(NowPlayingCodec.decode(prefs.getString("config", "{}")!!))
     val state = mutable.asStateFlow()
     fun update(change: (NowPlayingConfig) -> NowPlayingConfig) {
-        val next = change(mutable.value).let { it.copy(blur = it.blur.coerceIn(-64, 96), immersiveSeconds = it.immersiveSeconds.coerceIn(0, 30)) }
+        val next = change(mutable.value).let {
+            it.copy(
+                blur = it.blur.coerceIn(-64, 96),
+                immersiveSeconds = it.immersiveSeconds.coerceIn(0, 30),
+                materialColorMix = it.materialColorMix.coerceIn(0, 100),
+            )
+        }
         mutable.value = next
         prefs.edit().putString("config", NowPlayingCodec.encode(next)).apply()
     }
@@ -47,7 +65,8 @@ internal object NowPlayingCodec {
         put("openFromNotification", c.openFromNotification); put("keepLyricsAwake", c.keepLyricsAwake)
         put("showAudioInfo", c.showAudioInfo); put("swipeTracks", c.swipeTracks)
         put("immersiveLyrics", c.immersiveLyrics); put("immersiveSeconds", c.immersiveSeconds)
-        put("fullscreenGlass", c.fullscreenGlass)
+        put("fullscreenGlass", c.fullscreenGlass); put("materialBackground", c.materialBackground.name)
+        put("materialColorMix", c.materialColorMix)
     }.toString()
     fun decode(raw: String): NowPlayingConfig = runCatching {
         val j = JSONObject(raw); val defaults = NowPlayingConfig()
@@ -64,6 +83,8 @@ internal object NowPlayingCodec {
             immersiveLyrics = j.optBoolean("immersiveLyrics", defaults.immersiveLyrics),
             immersiveSeconds = j.optInt("immersiveSeconds", defaults.immersiveSeconds).coerceIn(0, 30),
             fullscreenGlass = j.optBoolean("fullscreenGlass", defaults.fullscreenGlass),
+            materialBackground = MaterialPlayerBackground.entries.firstOrNull { it.name == j.optString("materialBackground") } ?: defaults.materialBackground,
+            materialColorMix = j.optInt("materialColorMix", defaults.materialColorMix).coerceIn(0, 100),
         )
     }.getOrDefault(NowPlayingConfig())
 }

@@ -18,6 +18,10 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.*
 import btm.m.auraplayer.ui.navigation.*
+import com.itos.coui.backdrop.CouiBackdrop
+import com.itos.coui.backdrop.ProvideCouiBackdrop
+import com.itos.coui.backdrop.couiBackdrop
+import com.itos.coui.backdrop.rememberCouiBackdrop
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.BackdropEffectScope
 import com.kyant.backdrop.backdrops.LayerBackdrop
@@ -38,6 +42,8 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.ChevronBackward
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.abs
+internal val LocalAuraCouiBackdrop = staticCompositionLocalOf<CouiBackdrop?> { null }
+
 @Composable
 internal fun AppPage(
     title: String,
@@ -52,6 +58,7 @@ internal fun AppPage(
     pageBackground: (@Composable BoxScope.() -> Unit)? = null,
     useLegacyTopBarBackdrop: Boolean = pageBackground != null,
     topBarTint: ComposeColor? = null,
+    recordCouiBackdrop: Boolean = false,
     header: @Composable () -> Unit = {},
     overlay: @Composable BoxScope.() -> Unit = {},
     coveredBlur: Dp = 0.dp,
@@ -61,6 +68,10 @@ internal fun AppPage(
     val surface = MiuixTheme.colorScheme.surface
     val materialTint = topBarTint ?: surface
     val backdrop = rememberLayerBackdrop { drawRect(materialTint); drawContent() }
+    val couiBackdrop = if (recordCouiBackdrop) rememberCouiBackdrop {
+        drawRect(materialTint)
+        drawContent()
+    } else null
     val progressiveBackdrop = rememberMiuixLayerBackdrop {
         drawRect(materialTint)
         drawContent()
@@ -71,11 +82,16 @@ internal fun AppPage(
         animationSpec = tween(280, easing = FastOutSlowInEasing),
         label = "topBarMaterialProgress",
     )
+    val provideScope: @Composable (@Composable () -> Unit) -> Unit = { inner ->
+        if (couiBackdrop != null) ProvideCouiBackdrop(couiBackdrop, inner) else inner()
+    }
     CompositionLocalProvider(
         LocalToolbarBackdrop provides backdrop,
         LocalToolbarCollapsed provides collapsedFraction,
         LocalDialogBackdrop provides backdrop,
+        LocalAuraCouiBackdrop provides couiBackdrop,
     ) {
+    provideScope {
     Box(Modifier.fillMaxSize().background(surface)) {
     if (useLegacyTopBarBackdrop) pageBackground?.let {
         Box(Modifier.fillMaxSize().layerBackdrop(backdrop)) { it() }
@@ -152,7 +168,8 @@ internal fun AppPage(
             }
         }
     ) { padding ->
-        val contentModifier = Modifier.fillMaxSize().layerBackdrop(backdrop)
+        val baseContentModifier = Modifier.fillMaxSize().layerBackdrop(backdrop)
+        val contentModifier = if (couiBackdrop != null) baseContentModifier.couiBackdrop(couiBackdrop) else baseContentModifier
         Box(
             if (!useLegacyTopBarBackdrop) contentModifier.miuixLayerBackdrop(progressiveBackdrop) else contentModifier
         ) {
@@ -161,6 +178,7 @@ internal fun AppPage(
         }
     }
     overlay()
+    }
     }
     }
 }

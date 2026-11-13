@@ -9,17 +9,20 @@ class NowPlayingSettingsTest {
         assertEquals(expected, NowPlayingCodec.decode("{}"))
         assertEquals(expected, NowPlayingCodec.decode("not json"))
         assertEquals(PlayerTheme.AURORA, expected.theme)
+        assertEquals(MaterialPlayerBackground.MATERIAL, expected.materialBackground)
+        assertEquals(50, expected.materialColorMix)
         assertTrue(expected.showVolume && expected.showAudioInfo && expected.swipeTracks)
         assertFalse(expected.immersiveLyrics || expected.keepLyricsAwake)
         assertTrue(expected.fullscreenGlass)
     }
 
     @Test fun everyThemeAnimationAndToggleSurvivesRestart() {
-        for (theme in PlayerTheme.entries) for (animation in CoverAnimation.entries) for (weather in PlayerWeather.entries) {
+        for (theme in PlayerTheme.entries) for (bg in MaterialPlayerBackground.entries) for (animation in CoverAnimation.entries) for (weather in PlayerWeather.entries) {
             val config = NowPlayingConfig(theme, -32, weather, animation,
                 showVolume = false, openFromNotification = false, keepLyricsAwake = true,
                 showAudioInfo = false, swipeTracks = false,
-                immersiveLyrics = true, immersiveSeconds = 27, fullscreenGlass = false)
+                immersiveLyrics = true, immersiveSeconds = 27, fullscreenGlass = false,
+                materialBackground = bg, materialColorMix = 78)
             assertEquals(config, NowPlayingCodec.decode(NowPlayingCodec.encode(config)))
         }
     }
@@ -33,14 +36,15 @@ class NowPlayingSettingsTest {
     }
 
     @Test fun unknownEnumsFallBackIndividuallyAndSlidersClampToRequestedRanges() {
-        val config = NowPlayingCodec.decode("""{"theme":"future","weather":"future","coverAnimation":"future","blur":999,"immersiveSeconds":99,"showVolume":false}""")
+        val config = NowPlayingCodec.decode("""{"theme":"future","materialBackground":"future","weather":"future","coverAnimation":"future","blur":999,"immersiveSeconds":99,"materialColorMix":150,"showVolume":false}""")
         assertEquals(PlayerTheme.AURORA, config.theme)
+        assertEquals(MaterialPlayerBackground.MATERIAL, config.materialBackground)
         assertEquals(PlayerWeather.NONE, config.weather)
         assertEquals(CoverAnimation.DEFAULT, config.coverAnimation)
-        assertEquals(96, config.blur); assertEquals(30, config.immersiveSeconds)
+        assertEquals(96, config.blur); assertEquals(30, config.immersiveSeconds); assertEquals(100, config.materialColorMix)
         assertFalse(config.showVolume)
-        val low = NowPlayingCodec.decode("""{"blur":-100,"immersiveSeconds":-1}""")
-        assertEquals(-64, low.blur); assertEquals(0, low.immersiveSeconds)
+        val low = NowPlayingCodec.decode("""{"blur":-100,"immersiveSeconds":-1,"materialColorMix":-15}""")
+        assertEquals(-64, low.blur); assertEquals(0, low.immersiveSeconds); assertEquals(0, low.materialColorMix)
     }
 
     @Test fun blurIsContinuousFromClearThroughDefaultToMaximumAndOnlyCorrectThemesExposeIt() {
@@ -51,5 +55,11 @@ class NowPlayingSettingsTest {
         assertTrue(radii.zipWithNext().all { (a, b) -> a < b })
         for (theme in PlayerTheme.entries) assertEquals(theme == PlayerTheme.BLUR || theme == PlayerTheme.AURORA_BLUR,
             NowPlayingConfig(theme = theme).hasBlurControl)
+        for (bg in MaterialPlayerBackground.entries) {
+            val cfg = NowPlayingConfig(theme = PlayerTheme.MATERIAL, materialBackground = bg)
+            val expectBlur = bg == MaterialPlayerBackground.BLUR || bg == MaterialPlayerBackground.AURORA_BLUR
+            assertEquals(expectBlur, cfg.hasBlurControl)
+            assertEquals(expectBlur, cfg.usesArtworkBackground)
+        }
     }
 }

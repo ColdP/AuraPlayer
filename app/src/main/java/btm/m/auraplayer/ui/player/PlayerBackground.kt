@@ -11,14 +11,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.request.allowHardware
 import coil3.toBitmap
+import com.materialkolor.dynamiccolor.ColorSpec
+import com.materialkolor.hct.Hct
 import com.materialkolor.palettes.CorePalette
 import com.materialkolor.quantize.QuantizerCelebi
+import com.materialkolor.scheme.SchemeExpressive
 import com.materialkolor.score.Score
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -37,7 +41,7 @@ private fun coverMonetSeed(bitmap: Bitmap?): Int {
 }
 
 @Composable
-internal fun rememberPlayerMonetPalette(artwork: String): CorePalette {
+internal fun rememberPlayerArtworkSeed(artwork: String): Int {
     val context = LocalContext.current
     val seed by produceState(0xFF6750A4.toInt(), artwork) {
         value = withContext(Dispatchers.IO) {
@@ -47,7 +51,102 @@ internal fun rememberPlayerMonetPalette(artwork: String): CorePalette {
             coverMonetSeed(bitmap)
         }
     }
+    return seed
+}
+
+@Composable
+internal fun rememberPlayerMonetPalette(artwork: String): CorePalette {
+    val seed = rememberPlayerArtworkSeed(artwork)
     return remember(seed) { CorePalette.of(seed) }
+}
+
+@Immutable
+internal data class PlayerExpressiveColors(
+    val dark: Boolean,
+    val surface: Color,
+    val surfaceContainerLow: Color,
+    val surfaceContainer: Color,
+    val surfaceContainerHigh: Color,
+    val surfaceContainerHighest: Color,
+    val onSurface: Color,
+    val onSurfaceVariant: Color,
+    val primary: Color,
+    val onPrimary: Color,
+    val primaryContainer: Color,
+    val onPrimaryContainer: Color,
+    val secondary: Color,
+    val secondaryContainer: Color,
+    val onSecondaryContainer: Color,
+    val tertiaryContainer: Color,
+    val onTertiaryContainer: Color,
+    val outlineVariant: Color,
+    val activeInk: Color,
+    val secondaryInk: Color,
+    val timeInk: Color,
+    val iconInk: Color,
+    val dragHandleColor: Color,
+)
+
+@Composable
+internal fun rememberPlayerExpressiveColors(seed: Int, isDark: Boolean): PlayerExpressiveColors {
+    val target = remember(seed, isDark) {
+        val scheme = SchemeExpressive(Hct.fromInt(seed), isDark, 0.0, ColorSpec.SpecVersion.SPEC_2025)
+        val onSurface = Color(scheme.onSurface)
+        val onSurfaceVariant = Color(scheme.onSurfaceVariant)
+        val primary = Color(scheme.primary)
+        val secondary = Color(scheme.secondary)
+        PlayerExpressiveColors(
+            dark = isDark,
+            surface = Color(scheme.surface),
+            surfaceContainerLow = Color(scheme.surfaceContainerLow),
+            surfaceContainer = Color(scheme.surfaceContainer),
+            surfaceContainerHigh = Color(scheme.surfaceContainerHigh),
+            surfaceContainerHighest = Color(scheme.surfaceContainerHighest),
+            onSurface = onSurface,
+            onSurfaceVariant = onSurfaceVariant,
+            primary = primary,
+            onPrimary = Color(scheme.onPrimary),
+            primaryContainer = Color(scheme.primaryContainer),
+            onPrimaryContainer = Color(scheme.onPrimaryContainer),
+            secondary = secondary,
+            secondaryContainer = Color(scheme.secondaryContainer),
+            onSecondaryContainer = Color(scheme.onSecondaryContainer),
+            tertiaryContainer = Color(scheme.tertiaryContainer),
+            onTertiaryContainer = Color(scheme.onTertiaryContainer),
+            outlineVariant = Color(scheme.outlineVariant),
+            activeInk = onSurface,
+            secondaryInk = lerp(onSurfaceVariant, primary, if (isDark) .40f else .32f),
+            timeInk = lerp(onSurfaceVariant, primary, .24f),
+            iconInk = lerp(onSurfaceVariant, secondary, .28f),
+            dragHandleColor = lerp(onSurfaceVariant, primary, .35f).copy(alpha = if (isDark) .70f else .56f),
+        )
+    }
+    val animSpec = tween<Color>(700, easing = FastOutSlowInEasing)
+    return PlayerExpressiveColors(
+        dark = target.dark,
+        surface = animateColorAsState(target.surface, animSpec, label = "expSurface").value,
+        surfaceContainerLow = animateColorAsState(target.surfaceContainerLow, animSpec, label = "expSurfaceLow").value,
+        surfaceContainer = animateColorAsState(target.surfaceContainer, animSpec, label = "expSurfaceCont").value,
+        surfaceContainerHigh = animateColorAsState(target.surfaceContainerHigh, animSpec, label = "expSurfaceHigh").value,
+        surfaceContainerHighest = animateColorAsState(target.surfaceContainerHighest, animSpec, label = "expSurfaceHighest").value,
+        onSurface = animateColorAsState(target.onSurface, animSpec, label = "expOnSurface").value,
+        onSurfaceVariant = animateColorAsState(target.onSurfaceVariant, animSpec, label = "expOnSurfaceVar").value,
+        primary = animateColorAsState(target.primary, animSpec, label = "expPrimary").value,
+        onPrimary = animateColorAsState(target.onPrimary, animSpec, label = "expOnPrimary").value,
+        primaryContainer = animateColorAsState(target.primaryContainer, animSpec, label = "expPrimaryCont").value,
+        onPrimaryContainer = animateColorAsState(target.onPrimaryContainer, animSpec, label = "expOnPrimaryCont").value,
+        secondary = animateColorAsState(target.secondary, animSpec, label = "expSecondary").value,
+        secondaryContainer = animateColorAsState(target.secondaryContainer, animSpec, label = "expSecondaryCont").value,
+        onSecondaryContainer = animateColorAsState(target.onSecondaryContainer, animSpec, label = "expOnSecondaryCont").value,
+        tertiaryContainer = animateColorAsState(target.tertiaryContainer, animSpec, label = "expTertiaryCont").value,
+        onTertiaryContainer = animateColorAsState(target.onTertiaryContainer, animSpec, label = "expOnTertiaryCont").value,
+        outlineVariant = animateColorAsState(target.outlineVariant, animSpec, label = "expOutlineVar").value,
+        activeInk = animateColorAsState(target.activeInk, animSpec, label = "expActiveInk").value,
+        secondaryInk = animateColorAsState(target.secondaryInk, animSpec, label = "expSecondaryInk").value,
+        timeInk = animateColorAsState(target.timeInk, animSpec, label = "expTimeInk").value,
+        iconInk = animateColorAsState(target.iconInk, animSpec, label = "expIconInk").value,
+        dragHandleColor = animateColorAsState(target.dragHandleColor, animSpec, label = "expDragHandle").value,
+    )
 }
 
 @Composable

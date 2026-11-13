@@ -48,5 +48,6 @@ Extraction hashes are recorded locally in the Git-ignored docs/ directory.
 The former NetEase player controls have been replaced.
 
 - ZXing Core 3.5.3 — ZXing authors; Apache-2.0. Used unmodified for DSP preset QR images. License and upstream third-party notices: `app/src/main/assets/licenses/ZXing-Apache-2.0.txt`. DSP is independently implemented from documented formulas; research and parameter audit: `AUDIO_EFFECTS.md`.
+- COUI-Kit 0.0.1-alpha9 — https://github.com/ItosEO/COUI-Kit; MPL-2.0. Used unmodified as a dependency (`io.github.itoseo:coui:0.0.1-alpha9`) for playlist title-bar search (`SearchBar`) and `CouiBackdrop` sampling. Full license: `app/src/main/assets/licenses/COUI-Kit-MPL-2.0.txt`; upstream third-party notices (`NOTICE`, `coui-skia-LICENSE`, `coui-androidx-LICENSE`) and trademark policy (`TRADEMARKS.md`) remain applicable in `META-INF/coui/` and the upstream repository.
 
 Player appearance additions (2026-11-12): PlayerLyricView adds visual-center focus while browsing and smooth sharp/depth-mask blending to the HyperChanger/HyperMusicCover-derived renderer (AGPL-3.0). Lyrics render inline in SDR with the original held-note animation; the separate HDR panel and extended-range output have been removed. Existing upstream notices and license texts remain applicable.

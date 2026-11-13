@@ -37,6 +37,7 @@ import btm.m.auraplayer.R
 import btm.m.auraplayer.lyrics.PlayerLyricView
 import btm.m.auraplayer.playback.StreamQuality
 import btm.m.auraplayer.playback.NowPlayingConfig
+import btm.m.auraplayer.playback.MaterialPlayerBackground
 import btm.m.auraplayer.playback.PlayerTheme
 import btm.m.auraplayer.playback.CoverAnimation
 import btm.m.auraplayer.ui.*
@@ -154,6 +155,11 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
     val playerBackdrop = rememberLayerBackdrop()
     val miuixBackdrop = rememberMiuixBackdrop()
     val coverPalette = rememberPlayerMonetPalette(song.artwork)
+    val isMaterialTheme = appearance.theme == PlayerTheme.MATERIAL
+    val isDarkScheme = !isMaterialTheme || dark || appearance.materialBackground != MaterialPlayerBackground.MATERIAL
+    val coverSeed = rememberPlayerArtworkSeed(song.artwork)
+    val expressive = rememberPlayerExpressiveColors(coverSeed, isDark = isDarkScheme)
+    val activeExpressive = if (isMaterialTheme) expressive else null
     val shareActive = lyricShareTransition?.active == true
     val shareProgress = if (shareActive) lyricShareTransition.progress.coerceIn(0f, 1f) else 0f
     val shareBgAlpha = if (shareActive) 1f - lyricShareSmoothStep(0f, .86f, shareProgress) else 1f
@@ -253,6 +259,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
             Box(Modifier.wrapContentSize(Alignment.TopStart, unbounded = true).requiredSize(screenWidth, screenHeight)) {
                 Box(Modifier.fillMaxSize()) {
                     if (e > 0f) PlayerThemeBackground(song.artwork, coverPalette, appearance, lyricProgress.value.coerceIn(0f, 1f),
+                        expressive = activeExpressive,
                         animate = open && foreground && !gesturing && !shareActive,
                         modifier = Modifier.fillMaxSize().graphicsLayer { alpha = e * shareBgAlpha }.blur(shareBgBlur).layerBackdrop(playerBackdrop).miuixLayerBackdrop(miuixBackdrop))
                     FullPlayer(model, lyricProgress.value, expansion = e, miniColor = miniColor, miniSwipe = miniSwipeOffset.value + miniDrag.horizontalOffset,
@@ -268,6 +275,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                         onSwipeRelease = { settleSwipe(it, false) }, onSwipeCancel = { settleSwipe(0f, true) },
                         onLyrics = { lyricsOpen = !lyricsOpen; queueOpen = false }, queueOpen = queueOpen,
                         lyricsOpen = lyricsOpen, queueBlend = queueBlend.value, backdrop = playerBackdrop, menuTint = Color(coverPalette.a2.tone(20)),
+                        expressive = activeExpressive,
                         onLyricMenuExpanded = { lyricMenuOpen = it },
                         miuixBackdrop = miuixBackdrop, onMore = { actionsOpen = true },
                         onQueue = { queueOpen = !queueOpen; lyricsOpen = false },
@@ -349,7 +357,8 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
     }
     CompositionLocalProvider(LocalDialogBackdrop provides playerBackdrop) {
         PlayerActionsSheet(model, actionsOpen, playerBackdrop,
-            dismiss = { actionsOpen = false }, openPage = openPage, closePlayer = { onOpenChange(false) }, onBusy = { actionsBusy = it })
+            dismiss = { actionsOpen = false }, openPage = openPage, closePlayer = { onOpenChange(false) },
+            onBusy = { actionsBusy = it }, expressive = activeExpressive)
     }
 }
 
@@ -366,8 +375,11 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                        lyricsOpen: Boolean, queueBlend: Float, backdrop: Backdrop, menuTint: Color,
                        onLyricMenuExpanded: (Boolean) -> Unit,
                        miuixBackdrop: top.yukonga.miuix.kmp.blur.Backdrop, onMore: () -> Unit,
-                       onQueue: () -> Unit, openSharePage: (Int, Rect?, Rect?) -> Unit) {
+                       onQueue: () -> Unit, openSharePage: (Int, Rect?, Rect?) -> Unit,
+                       expressive: PlayerExpressiveColors? = null) {
     val song = model.current ?: return
+    val activeInk = expressive?.activeInk ?: Color.White
+    val secondaryInk = expressive?.secondaryInk ?: Color.White.copy(alpha = .85f)
     val density = LocalDensity.current
     val p = progress.coerceIn(0f, 1f)
     val alpha = ((expansion - .12f) / .88f).coerceIn(0f, 1f)
@@ -472,9 +484,13 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             .clip(RoundedCornerShape(50))
             .semantics { contentDescription = tr("collapse_player", "收起播放器") }
             .playerSurfaceClick(onClose), contentAlignment = Alignment.Center) {
-            Box(Modifier.width(80.dp).height(6.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = .36f)))
+            if (expressive != null) {
+                Box(Modifier.width(48.dp).height(4.5.dp).clip(RoundedCornerShape(50)).background(expressive.dragHandleColor))
+            } else {
+                Box(Modifier.width(80.dp).height(6.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = .36f)))
+            }
         }
-        if (queueBlend > .001f && p > 0f) PlayerQueue(model, Modifier
+        if (queueBlend > .001f && p > 0f) PlayerQueue(model, expressive = expressive, modifier = Modifier
             .offset(y = smallY + small + 20.dp * PlayerPaddingScale)
             .fillMaxWidth().height((seekY + 50.dp - smallY - small - 28.dp * PlayerPaddingScale).coerceAtLeast(1.dp))
             .graphicsLayer { this.alpha = p * queueBlend; translationY = (1f - p) * 24.dp.toPx() }
@@ -485,15 +501,32 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 (h - normalSeekY - nav - 10.dp).coerceAtLeast(controlsHeight))).padding(horizontal = margin)) {
             var scrub by remember(song.key) { mutableStateOf<Float?>(null) }
             val value = scrub ?: if (model.duration > 0) model.position.toFloat() / model.duration else 0f
+            val sliderMod = Modifier.padding(horizontal = controlSize(0.dp, coverInset.coerceAtLeast(0.dp))).fillMaxWidth().height(controlSize(20.dp * controlsScale, 24.dp))
+                .then(if (queueBlend > .5f) Modifier.clearAndSetSemantics {} else Modifier)
             Column(Modifier.graphicsLayer { this.alpha = 1f - queueBlend }) {
-            PillSlider(value, tr("playback_progress", "播放进度"), Modifier.padding(horizontal = controlSize(0.dp, coverInset.coerceAtLeast(0.dp))).fillMaxWidth().height(controlSize(20.dp * controlsScale, 24.dp))
-                .then(if (queueBlend > .5f) Modifier.clearAndSetSemantics {} else Modifier),
-                onChange = { scrub = it }, onFinished = { model.seekTo(((scrub ?: value) * model.duration).toLong()); scrub = null }, enabled = model.duration > 0 && !queueOpen)
+            if (expressive != null) {
+                MaterialWavyProgressSlider(
+                    value = value,
+                    playing = model.playing && scrub == null,
+                    label = tr("playback_progress", "播放进度"),
+                    activeColor = expressive.primary,
+                    trackColor = expressive.surfaceContainerHighest.copy(alpha = if (expressive.dark) .55f else .85f),
+                    modifier = sliderMod,
+                    onChange = { scrub = it },
+                    onFinished = { model.seekTo(((scrub ?: value) * model.duration).toLong()); scrub = null },
+                    enabled = model.duration > 0 && !queueOpen
+                )
+            } else {
+                PillSlider(value, tr("playback_progress", "播放进度"), sliderMod,
+                    onChange = { scrub = it }, onFinished = { model.seekTo(((scrub ?: value) * model.duration).toLong()); scrub = null }, enabled = model.duration > 0 && !queueOpen)
+            }
             Box(Modifier.padding(horizontal = controlSize(0.dp, coverInset.coerceAtLeast(0.dp))).fillMaxWidth().height(controlSize(20.dp * controlsScale, 26.dp))) {
-                Text(timeText(((scrub?.let { it * model.duration } ?: model.position.toFloat())).toLong()), color = Color.White.copy(alpha = .85f), fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.CenterStart))
-                Text(timeText(model.duration), color = Color.White.copy(alpha = .85f), fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.CenterEnd))
+                val timeColor = expressive?.timeInk ?: Color.White.copy(alpha = .85f)
+                val timeStyle = if (expressive != null) androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum") else androidx.compose.ui.text.TextStyle.Default
+                Text(timeText(((scrub?.let { it * model.duration } ?: model.position.toFloat())).toLong()), color = timeColor, fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold, style = timeStyle, modifier = Modifier.align(Alignment.CenterStart))
+                Text(timeText(model.duration), color = timeColor, fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold, style = timeStyle, modifier = Modifier.align(Alignment.CenterEnd))
                 val actualQuality = model.streamInfo?.level?.let { level -> StreamQuality.entries.firstOrNull { it.level == level } }
                 if (appearance.showAudioInfo && song.cloud) {
                     val qualityItems = buildList {
@@ -509,42 +542,111 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                         entry = DropdownEntry(qualityItems), backdrop = backdrop, modifier = Modifier.align(Alignment.Center), enabled = !queueOpen,
                         onExpandedChange = { qualityMenuOpen = it },
                         trigger = { toggle, enabled ->
-                            Box(Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = enabled) {
-                                model.refreshQualities(); toggle()
-                            }.padding(horizontal = 7.dp, vertical = 4.dp)) {
-                                Text(qualityName(actualQuality ?: model.quality), color = Color.White.copy(alpha = .85f), fontSize = 11.sp,
+                            Box(Modifier.clip(RoundedCornerShape(if (expressive != null) 50.dp else 8.dp))
+                                .then(if (expressive != null) Modifier.background(expressive.tertiaryContainer) else Modifier)
+                                .clickable(enabled = enabled) {
+                                    model.refreshQualities(); toggle()
+                                }.padding(horizontal = if (expressive != null) 11.dp else 7.dp, vertical = 4.dp)) {
+                                Text(qualityName(actualQuality ?: model.quality),
+                                    color = expressive?.onTertiaryContainer ?: timeColor, fontSize = 11.sp,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
                             }
                         }, content = {})
-                } else if (appearance.showAudioInfo) Text(localAudioText(model), color = Color.White.copy(alpha = .85f), fontSize = 11.sp,
+                } else if (appearance.showAudioInfo) Text(localAudioText(model), color = timeColor, fontSize = 11.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.align(Alignment.Center).padding(horizontal = 45.dp))
             }
             }
             Spacer(Modifier.weight(1f))
             Row(Modifier.fillMaxWidth().height(controlSize(64.dp * controlsScale, 100.dp)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
-                PlayerButton(R.drawable.ic_player_previous, tr("previous_track", "上一首"), Color.White, controlSize(32.dp * controlsScale, 48.dp), controlSize(52.dp * controlsScale, 76.dp), model::previous)
-                PlayerButton(if (model.playbackRequested) R.drawable.ic_player_pause else R.drawable.ic_player_play,
-                    if (model.playbackRequested) tr("pause", "暂停") else tr("play", "播放"), Color.White, controlSize(44.dp * controlsScale, 60.dp * .88f), controlSize(64.dp * controlsScale, 96.dp), model::togglePlayback)
-                PlayerButton(R.drawable.ic_player_next, tr("next_track", "下一首"), Color.White, controlSize(32.dp * controlsScale, 48.dp), controlSize(52.dp * controlsScale, 76.dp), model::next)
+                if (expressive != null) {
+                    MaterialExpressiveTransportButton(
+                        icon = R.drawable.ic_player_previous,
+                        label = tr("previous_track", "上一首"),
+                        containerColor = expressive.secondaryContainer,
+                        contentColor = expressive.onSecondaryContainer,
+                        width = controlSize(46.dp * controlsScale, 60.dp),
+                        height = controlSize(48.dp * controlsScale, 64.dp),
+                        iconSize = controlSize(26.dp * controlsScale, 36.dp) * PlayerIconScale,
+                        onClick = model::previous
+                    )
+                    MaterialExpressivePlayPauseButton(
+                        playing = model.playbackRequested,
+                        label = if (model.playbackRequested) tr("pause", "暂停") else tr("play", "播放"),
+                        colors = expressive,
+                        touchHeight = controlSize(58.dp * controlsScale, 76.dp),
+                        pausedWidth = controlSize(66.dp * controlsScale, 86.dp),
+                        playingWidth = controlSize(82.dp * controlsScale, 108.dp),
+                        iconSize = controlSize(34.dp * controlsScale, 44.dp) * PlayerIconScale,
+                        onClick = model::togglePlayback
+                    )
+                    MaterialExpressiveTransportButton(
+                        icon = R.drawable.ic_player_next,
+                        label = tr("next_track", "下一首"),
+                        containerColor = expressive.secondaryContainer,
+                        contentColor = expressive.onSecondaryContainer,
+                        width = controlSize(46.dp * controlsScale, 60.dp),
+                        height = controlSize(48.dp * controlsScale, 64.dp),
+                        iconSize = controlSize(26.dp * controlsScale, 36.dp) * PlayerIconScale,
+                        onClick = model::next
+                    )
+                } else {
+                    PlayerButton(R.drawable.ic_player_previous, tr("previous_track", "上一首"), Color.White, controlSize(32.dp * controlsScale, 48.dp), controlSize(52.dp * controlsScale, 76.dp), model::previous)
+                    PlayerButton(if (model.playbackRequested) R.drawable.ic_player_pause else R.drawable.ic_player_play,
+                        if (model.playbackRequested) tr("pause", "暂停") else tr("play", "播放"), Color.White, controlSize(44.dp * controlsScale, 60.dp * .88f), controlSize(64.dp * controlsScale, 96.dp), model::togglePlayback)
+                    PlayerButton(R.drawable.ic_player_next, tr("next_track", "下一首"), Color.White, controlSize(32.dp * controlsScale, 48.dp), controlSize(52.dp * controlsScale, 76.dp), model::next)
+                }
             }
             Spacer(Modifier.weight(1f))
-            if (appearance.showVolume) VolumeControl(Modifier.fillMaxWidth().height(controlSize(32.dp * controlsScale, 44.dp)))
+            if (appearance.showVolume) {
+                val volMod = Modifier.fillMaxWidth().height(controlSize(32.dp * controlsScale, 44.dp))
+                if (expressive != null) {
+                    MaterialExpressiveVolumeSlider(
+                        colors = expressive,
+                        modifier = volMod
+                    )
+                } else {
+                    VolumeControl(volMod)
+                }
+            }
             val bottomTouch = controlSize(40.dp * controlsScale, 48.dp)
             val bottomIcon = controlSize(27.dp * controlsScale, 32.dp)
             Row(Modifier.fillMaxWidth().height(controlSize(44.dp * controlsScale, 56.dp)), horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(bottomTouch).semantics { selected = lyricsOpen }) {
-                    PlayerButton(if (lyricsOpen) R.drawable.ic_player_lyrics_on else R.drawable.ic_player_lyrics, tr("lyrics", "歌词"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, onLyrics)
-
-                }
+                val modeIcon = when (model.playbackMode) { 1 -> R.drawable.ic_player_shuffle; 2 -> R.drawable.ic_player_repeat_one; else -> R.drawable.ic_player_repeat }
                 val modeDescription = when (model.playbackMode) { 1 -> tr("shuffle_mode", "随机播放"); 2 -> tr("repeat_one_mode", "单曲循环"); else -> tr("repeat_all_mode", "列表循环") }
-                PlayerButton(when (model.playbackMode) { 1 -> R.drawable.ic_player_shuffle; 2 -> R.drawable.ic_player_repeat_one; else -> R.drawable.ic_player_repeat }, modeDescription, Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, model::cyclePlaybackMode)
                 val revision = model.history.revision
                 val favorite = model.isFavorite(song)
-                PlayerButton(if (favorite) R.drawable.ic_player_favorite_on else R.drawable.ic_player_favorite,
-                    if (favorite) tr("unfavorite", "取消收藏") else tr("favorite", "收藏"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch) { model.toggleFavorite(song) }
-                Box(Modifier.semantics { selected = queueOpen }) {
-                    PlayerButton(if (queueOpen) R.drawable.ic_player_queue_on else R.drawable.ic_player_queue, tr("play_queue", "播放队列"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, onQueue)
+                if (expressive != null) {
+                    Box(Modifier.semantics { selected = lyricsOpen }) {
+                        MaterialExpressiveBottomButton(
+                            if (lyricsOpen) R.drawable.ic_player_lyrics_on else R.drawable.ic_player_lyrics,
+                            tr("lyrics", "歌词"), lyricsOpen, expressive, bottomTouch, bottomIcon * PlayerIconScale, onClick = onLyrics
+                        )
+                    }
+                    MaterialExpressiveBottomButton(
+                        modeIcon, modeDescription, false, expressive, bottomTouch, bottomIcon * PlayerIconScale, onClick = model::cyclePlaybackMode
+                    )
+                    MaterialExpressiveBottomButton(
+                        if (favorite) R.drawable.ic_player_favorite_on else R.drawable.ic_player_favorite,
+                        if (favorite) tr("unfavorite", "取消收藏") else tr("favorite", "收藏"),
+                        favorite, expressive, bottomTouch, bottomIcon * PlayerIconScale, useTertiary = true
+                    ) { model.toggleFavorite(song) }
+                    Box(Modifier.semantics { selected = queueOpen }) {
+                        MaterialExpressiveBottomButton(
+                            if (queueOpen) R.drawable.ic_player_queue_on else R.drawable.ic_player_queue,
+                            tr("play_queue", "播放队列"), queueOpen, expressive, bottomTouch, bottomIcon * PlayerIconScale, onClick = onQueue
+                        )
+                    }
+                } else {
+                    Box(Modifier.size(bottomTouch).semantics { selected = lyricsOpen }) {
+                        PlayerButton(if (lyricsOpen) R.drawable.ic_player_lyrics_on else R.drawable.ic_player_lyrics, tr("lyrics", "歌词"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, onLyrics)
+                    }
+                    PlayerButton(modeIcon, modeDescription, Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, model::cyclePlaybackMode)
+                    PlayerButton(if (favorite) R.drawable.ic_player_favorite_on else R.drawable.ic_player_favorite,
+                        if (favorite) tr("unfavorite", "取消收藏") else tr("favorite", "收藏"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch) { model.toggleFavorite(song) }
+                    Box(Modifier.semantics { selected = queueOpen }) {
+                        PlayerButton(if (queueOpen) R.drawable.ic_player_queue_on else R.drawable.ic_player_queue, tr("play_queue", "播放队列"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, onQueue)
+                    }
                 }
             }
         }
@@ -584,8 +686,9 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 }
                 .blur(((1f - alpha) * 14f + (1f - p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp)) {
                 if (model.lyrics.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(if (model.lyricsLoading) tr("lyrics_loading", "正在获取歌词…") else tr("lyrics_empty", "暂无歌词"), color = Color.White.copy(alpha = .55f), fontSize = 20.sp)
+                    Text(if (model.lyricsLoading) tr("lyrics_loading", "正在获取歌词…") else tr("lyrics_empty", "暂无歌词"), color = activeInk.copy(alpha = .55f), fontSize = 20.sp)
                 } else AndroidView(factory = { PlayerLyricView(it) }, update = {
+                    it.inkColor(activeInk.toArgb())
                     it.submit(model.lyrics, model.showTranslation, model.showPronunciation, model.lyricSize.scale)
                     it.position(model.position, model.playing)
                     it.onSeek = model::seekTo
@@ -603,7 +706,8 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         val sharedX = lerp(miniCoverX, coverX + (smallX - coverX) * p, e)
         val sharedY = lerp(miniCoverY, coverY + (smallY - coverY) * p, e)
         val sharedScale = sharedSize / coverSize
-        val sharedRadius = lerp(13.dp * miniScale, 24.dp + (9.dp - 24.dp) * p, e)
+        val baseCoverRadius = if (expressive != null) 28.dp else 24.dp
+        val sharedRadius = lerp(13.dp * miniScale, baseCoverRadius + (9.dp - baseCoverRadius) * p, e)
         val sharedClick = if (e < .5f) onExpand else if (queueOpen) onQueue else onLyrics
         val miniShift = miniSwipe / density.density
         val miniAlpha = (1f - abs(miniSwipe) / fullWidthPx.coerceAtLeast(1f) * .35f).coerceIn(.55f, 1f)
@@ -630,7 +734,8 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         val expandedTextWidth = if (fullscreen) (fullCard.width - 84.dp).coerceAtLeast(24.dp) else coverSize
         val fullTextWidth = expandedTextWidth + ((w - compactTextX - 68.dp).coerceAtLeast(24.dp) - expandedTextWidth) * p
         val textWidth = (miniTextWidth + (fullTextWidth - miniTextWidth) * e) / textScale
-        val textColor = lerp(miniColor, Color.White, e)
+        val textColor = lerp(miniColor, activeInk, e)
+        val artistColor = lerp(miniColor.copy(alpha = .8f), expressive?.secondaryInk ?: Color.White.copy(alpha = .8f), e)
         val miniTextY = (miniHeight - measuredTextHeight * .7f * miniScale) / 2
         val mixProgress = mixVisual?.progress?.coerceIn(0f, 1f)
         val mixFromAlpha = mixProgress?.let { (1f - it).coerceIn(0f, 1f) } ?: 0f
@@ -648,7 +753,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !shareActive, onClick = sharedClick)) {
             Text(mixVisual?.fromTitle ?: song.title, color = textColor, fontSize = 20.sp * metadataSize, lineHeight = 25.sp * metadataSize,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(mixVisual?.fromArtist ?: song.artist, color = textColor.copy(alpha = .8f), fontSize = 16.sp * metadataSize, lineHeight = 21.sp * metadataSize,
+            Text(mixVisual?.fromArtist ?: song.artist, color = artistColor, fontSize = 16.sp * metadataSize, lineHeight = 21.sp * metadataSize,
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (mixVisual != null) Column(Modifier.fillMaxSize().graphicsLayer {
@@ -657,7 +762,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         }) {
             Text(mixVisual.toTitle, color = textColor, fontSize = 20.sp * metadataSize, lineHeight = 25.sp * metadataSize,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(mixVisual.toArtist, color = textColor.copy(alpha = .8f), fontSize = 16.sp * metadataSize, lineHeight = 21.sp * metadataSize,
+            Text(mixVisual.toArtist, color = artistColor, fontSize = 16.sp * metadataSize, lineHeight = 21.sp * metadataSize,
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         /* Keep the normal click target over the two metadata layers. */
@@ -674,9 +779,22 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             Box(Modifier.offset(bigX + (compactX - bigX) * p, bigY + (compactY - bigY) * p)
                 .size(buttonSize).graphicsLayer { this.alpha = alpha * shareChromeAlpha; scaleX = 1f - .08f * p; scaleY = scaleX }
                 .blur(shareChromeBlur)
-                .clip(RoundedCornerShape(50)).clickable(enabled = !shareActive, onClick = onMore), contentAlignment = Alignment.Center) {
-                Box(Modifier.size(46.dp * .85f * .92f).playerMenuMaterial(miuixBackdrop, menuTint, 50.dp)) {
-                    Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.align(Alignment.Center).size(24.dp * PlayerIconScale * .92f), colorFilter = ColorFilter.tint(Color.White))
+                .clip(RoundedCornerShape(50)), contentAlignment = Alignment.Center) {
+                if (expressive != null) {
+                    MaterialExpressiveMoreButton(
+                        label = tr("more", "更多"),
+                        colors = expressive,
+                        buttonSize = 46.dp * .85f * .92f,
+                        iconSize = 24.dp * PlayerIconScale * .92f,
+                        enabled = !shareActive,
+                        onClick = onMore
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize().clickable(enabled = !shareActive, onClick = onMore), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(46.dp * .85f * .92f).playerMenuMaterial(miuixBackdrop, menuTint, 50.dp)) {
+                            Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.align(Alignment.Center).size(24.dp * PlayerIconScale * .92f), colorFilter = ColorFilter.tint(Color.White))
+                        }
+                    }
                 }
             }
         }
@@ -718,7 +836,16 @@ private fun Cover(uri: String, modifier: Modifier, radius: Dp, onClick: (() -> U
 
 @Composable
 private fun QueueSwipeRow(song: btm.m.auraplayer.data.Song, current: Boolean, index: Int, model: AuraViewModel,
-                          dragging: Boolean, onDragState: (Boolean) -> Unit, reorderHandle: (Modifier) -> Modifier) {
+                          dragging: Boolean, onDragState: (Boolean) -> Unit, reorderHandle: (Modifier) -> Modifier,
+                          expressive: PlayerExpressiveColors? = null) {
+    val ink = expressive?.activeInk ?: Color.White
+    val rowHighlight = when {
+        expressive != null && dragging -> expressive.surfaceContainerHighest.copy(alpha = .75f)
+        expressive != null && current -> expressive.secondaryContainer.copy(alpha = .85f)
+        dragging -> Color.White.copy(alpha = .14f)
+        current -> Color.White.copy(alpha = .10f)
+        else -> Color.Transparent
+    }
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val deleteWidth = with(density) { 92.dp.toPx() }
@@ -726,16 +853,16 @@ private fun QueueSwipeRow(song: btm.m.auraplayer.data.Song, current: Boolean, in
     val progress = (-offset.value / deleteWidth).coerceIn(0f, 1f)
     val scale by animateFloatAsState(if (dragging) 0.975f else 1f, spring(dampingRatio = .72f, stiffness = 430f), label = "queueRowScale")
     Box(Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(14.dp))) {
-        Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = if (progress > .001f) .08f + progress * .22f else 0f)), contentAlignment = Alignment.CenterEnd) {
+        Box(Modifier.fillMaxSize().background(ink.copy(alpha = if (progress > .001f) .08f + progress * .22f else 0f)), contentAlignment = Alignment.CenterEnd) {
             Box(Modifier.padding(end = 16.dp).size(38.dp).graphicsLayer {
                 scaleX = .72f + .28f * progress; scaleY = .72f + .28f * progress
                 alpha = progress; this.alpha = progress
-            }.blur(((1f - progress) * 8f).dp).clip(CircleShape).background(Color.White.copy(alpha = .22f)), contentAlignment = Alignment.Center) {
-                Image(MiuixIcons.Regular.Delete, tr("delete", "删除"), Modifier.size(21.dp), colorFilter = ColorFilter.tint(Color.White))
+            }.blur(((1f - progress) * 8f).dp).clip(CircleShape).background(ink.copy(alpha = .22f)), contentAlignment = Alignment.Center) {
+                Image(MiuixIcons.Regular.Delete, tr("delete", "删除"), Modifier.size(21.dp), colorFilter = ColorFilter.tint(ink))
             }
         }
         Row(Modifier.fillMaxWidth().graphicsLayer { translationX = offset.value; scaleX = scale; scaleY = scale }
-            .clip(RoundedCornerShape(14.dp)).background(if (current || dragging) Color.White.copy(alpha = if (dragging) .14f else .10f) else Color.Transparent)
+            .clip(RoundedCornerShape(14.dp)).background(rowHighlight)
             .pointerInput(song.key) {
                 detectHorizontalDragGestures(
                     onHorizontalDrag = { change, amount ->
@@ -750,9 +877,9 @@ private fun QueueSwipeRow(song: btm.m.auraplayer.data.Song, current: Boolean, in
             .padding(vertical = 6.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Cover(song.artwork, Modifier.size(44.dp), 8.dp)
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text(song.title, color = Color.White, fontSize = 15.sp, fontWeight = if (current) FontWeight.Bold else FontWeight.Medium,
+                Text(song.title, color = if (expressive != null && current) expressive.onSecondaryContainer else ink, fontSize = 15.sp, fontWeight = if (current) FontWeight.Bold else FontWeight.Medium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(song.artist, color = Color.White.copy(alpha = .66f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(song.artist, color = (if (expressive != null && current) expressive.onSecondaryContainer else ink).copy(alpha = .66f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Box(reorderHandle(Modifier.size(40.dp, 44.dp)).semantics {
                 contentDescription = tr("reorder_queue", "调整播放顺序")
@@ -761,14 +888,14 @@ private fun QueueSwipeRow(song: btm.m.auraplayer.data.Song, current: Boolean, in
                     CustomAccessibilityAction(tr("move_down", "下移")) { if (index < model.queue.lastIndex) { model.moveQueue(index, index + 1); true } else false },
                 )
             }, contentAlignment = Alignment.Center) {
-                Image(painterResource(R.drawable.ic_player_reorder), null, Modifier.size(22.dp * PlayerIconScale), colorFilter = ColorFilter.tint(Color.White.copy(alpha = .42f)))
+                Image(painterResource(R.drawable.ic_player_reorder), null, Modifier.size(22.dp * PlayerIconScale), colorFilter = ColorFilter.tint(ink.copy(alpha = .42f)))
             }
         }
     }
 }
 
 @Composable
-private fun PlayerQueue(model: AuraViewModel, modifier: Modifier = Modifier) {
+private fun PlayerQueue(model: AuraViewModel, modifier: Modifier = Modifier, expressive: PlayerExpressiveColors? = null) {
     val list = rememberLazyListState(initialFirstVisibleItemIndex = model.queueIndex.coerceAtLeast(0))
     val density = LocalDensity.current
     val rowStep = with(density) { 58.dp.toPx() }
@@ -812,7 +939,8 @@ private fun PlayerQueue(model: AuraViewModel, modifier: Modifier = Modifier) {
                             remainder -= direction * rowStep
                         }
                     }
-                } })
+                } },
+                expressive = expressive)
         }
     }
     }

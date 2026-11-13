@@ -141,7 +141,7 @@ Aura-Player/
 
 - 界面风格、玻璃组件、导航动画及关于/捐赠页面布局来源：[HyperChanger](https://github.com/ColdP/HyperChanger)（AGPL-3.0-or-later）。
 - 首页结构与 MediaStore 排序逻辑适配自 [Retro Music](https://github.com/RetroMusicPlayer/RetroMusicPlayer)（GPL-3.0-or-later）。
-- 控件与模糊基础基于 [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）与 [Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0）。
+- 控件与模糊基础基于 [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）、[Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0），歌单标题栏搜索组件使用 [COUI-Kit](https://github.com/ItosEO/COUI-Kit)（MPL-2.0）。
 - 歌词解析、匹配与渲染来源：[HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（AGPL-3.0）、[HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced)（GPL-3.0 / Apache-2.0）与 [Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics)（Apache-2.0）。
 - 其他核心依赖：[Media3](https://developer.android.com/media/media3)、[Coil](https://github.com/coil-kt/coil)、[OkHttp](https://github.com/square/okhttp)、[jaudiotagger](https://github.com/Adonai/jaudiotagger-android)（LGPL-2.1）、[MaterialKolor](https://github.com/jordond/MaterialKolor)（MIT）、[ZXing](https://github.com/zxing/zxing)（Apache-2.0）及 [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT）。
 

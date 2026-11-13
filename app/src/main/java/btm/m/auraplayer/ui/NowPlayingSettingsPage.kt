@@ -23,13 +23,49 @@ fun NowPlayingSettingsPage(padding: PaddingValues) {
     val immersionBlur by immersion.animateFloat(transitionSpec = { tween(220) }, label = "blur") { if (it) 0f else 8f }
     val fullScreen = updateTransition(state.theme == PlayerTheme.FULLSCREEN, label = "player-glass-setting")
     val glassBlur by fullScreen.animateFloat(transitionSpec = { tween(220) }, label = "blur") { if (it) 0f else 8f }
+    val materialSetting = updateTransition(state.theme == PlayerTheme.MATERIAL, label = "player-material-setting")
+    val materialBlur by materialSetting.animateFloat(transitionSpec = { tween(220) }, label = "blur") { if (it) 0f else 8f }
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Group(tr("appearance", "外观")) {
                 GlassDropdownPreference(tr("player_interface_theme", "界面主题"),
-                    listOf(tr("player_theme_aurora", "流光"), tr("player_theme_aurora_blur", "流光模糊"), tr("player_theme_blur", "模糊"),
-                        tr("player_theme_color", "颜色"), tr("player_theme_fullscreen", "全屏")), state.theme.ordinal, backdrop = LocalToolbarBackdrop.current) { index ->
+                    listOf(
+                        tr("player_theme_aurora", "流光"),
+                        tr("player_theme_aurora_blur", "流光模糊"),
+                        tr("player_theme_blur", "模糊"),
+                        tr("player_theme_color", "颜色"),
+                        tr("player_theme_fullscreen", "全屏"),
+                        tr("player_theme_material", "Material"),
+                    ), state.theme.ordinal, backdrop = LocalToolbarBackdrop.current) { index ->
                     store.update { it.copy(theme = PlayerTheme.entries[index]) }
+                }
+                materialSetting.AnimatedVisibility(visible = { it }, enter = fadeIn(tween(220)) + expandVertically(tween(220)),
+                    exit = fadeOut(tween(220)) + shrinkVertically(tween(220))) {
+                    Box(Modifier.blur(materialBlur.dp)) {
+                        Column {
+                            GlassDropdownPreference(
+                                tr("player_material_background", "页面背景"),
+                                listOf(
+                                    tr("player_theme_material", "Material"),
+                                    tr("player_theme_blur", "模糊"),
+                                    tr("player_theme_aurora", "流光"),
+                                    tr("player_theme_aurora_blur", "流光模糊"),
+                                ),
+                                state.materialBackground.ordinal,
+                                backdrop = LocalToolbarBackdrop.current,
+                            ) { index ->
+                                store.update { it.copy(materialBackground = MaterialPlayerBackground.entries[index]) }
+                            }
+                            SliderPreference(
+                                tr("player_material_color_mix", "Material 混色强度"),
+                                state.materialColorMix.toFloat(),
+                                0f..100f,
+                                "${state.materialColorMix}%",
+                                steps = 99,
+                                defaultValue = 50f,
+                            ) { value -> store.update { it.copy(materialColorMix = value.roundToInt()) } }
+                        }
+                    }
                 }
                 fullScreen.AnimatedVisibility(visible = { it }, enter = fadeIn(tween(220)) + expandVertically(tween(220)),
                     exit = fadeOut(tween(220)) + shrinkVertically(tween(220))) {
