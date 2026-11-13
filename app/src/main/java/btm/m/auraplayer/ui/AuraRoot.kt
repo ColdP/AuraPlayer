@@ -39,8 +39,9 @@ import btm.m.auraplayer.ui.player.LocalSongActions
 import btm.m.auraplayer.ui.player.LocalOpenTagEditor
 import btm.m.auraplayer.ui.player.SongActionRequest
 import btm.m.auraplayer.ui.player.SongActionsSheet
-import btm.m.auraplayer.ui.player.LyricSharePage
 import btm.m.auraplayer.ui.player.LyricShareRoute
+import btm.m.auraplayer.ui.player.LyricShareTransitionState
+import btm.m.auraplayer.ui.player.LocalLyricShareTransition
 import btm.m.auraplayer.ui.player.playerMiniBlurRadius
 import btm.m.auraplayer.ui.player.playerTransitionBlurRadius
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -110,10 +111,13 @@ private fun AuraShell(model: AuraViewModel) {
     val pages = remember { mutableStateListOf<String>() }
     val tagEditorExitGuard = remember { TagEditorExitGuard() }
     val seamless = remember { SeamlessNavigationState() }
+    val lyricShareTransition = remember { LyricShareTransitionState() }
     val scope = rememberCoroutineScope()
     var closing by remember { mutableStateOf(false) }
     var closingIndex by remember { mutableIntStateOf(-1) }
     var playerOpen by rememberSaveable { mutableStateOf(false) }
+    var playerReturnIndex by rememberSaveable { mutableIntStateOf(-1) }
+    var restoreLyricsRequest by remember { mutableIntStateOf(0) }
     var playerExpansion by remember { mutableFloatStateOf(0f) }
     val mainActivity = context as btm.m.auraplayer.MainActivity
     val mediaPlayerRequest = mainActivity.mediaPlayerRequest
@@ -131,21 +135,22 @@ private fun AuraShell(model: AuraViewModel) {
     val visibleCollection = pages.lastOrNull()?.takeIf { it.startsWith("collection:") }?.substringAfter(':')?.toLongOrNull()
         ?.let(model::collectionDestination)?.collection
     val catalogDark = visibleCollection?.key?.let { it.startsWith("artist:") || it.startsWith("cloud:artist:") } == true
+    val playerCoveringBars = playerOpen && (!lyricShareTransition.active || lyricShareTransition.progress < .45f)
     SideEffect {
         val activity = context as btm.m.auraplayer.MainActivity
         WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
-            isAppearanceLightStatusBars = !playerDark && !playerOpen && !catalogDark
-            isAppearanceLightNavigationBars = !playerDark && !playerOpen
+            isAppearanceLightStatusBars = !playerDark && !playerCoveringBars && !catalogDark
+            isAppearanceLightNavigationBars = !playerDark && !playerCoveringBars
         }
         activity.window.statusBarColor = android.graphics.Color.TRANSPARENT
         activity.window.navigationBarColor = android.graphics.Color.TRANSPARENT
         activity.window.isStatusBarContrastEnforced = false
     }
-    LaunchedEffect(playerOpen, playerDark, catalogDark) {
+    LaunchedEffect(playerCoveringBars, playerDark, catalogDark) {
         val activity = context as btm.m.auraplayer.MainActivity
         val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
-        controller.isAppearanceLightStatusBars = !playerOpen && !playerDark && !catalogDark
-        controller.isAppearanceLightNavigationBars = !playerOpen && !playerDark
+        controller.isAppearanceLightStatusBars = !playerCoveringBars && !playerDark && !catalogDark
+        controller.isAppearanceLightNavigationBars = !playerCoveringBars && !playerDark
     }
     var searchOpen by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
@@ -158,6 +163,12 @@ private fun AuraShell(model: AuraViewModel) {
             pages += target
         }
     }
+    val openFromPlayer: (String) -> Unit = { target ->
+        open(target)
+        if (pages.lastOrNull() == target) {
+            playerReturnIndex = pages.lastIndex
+        }
+    }
     LaunchedEffect(model.activeCollectionId) {
         val route = "collection:${model.activeCollectionId}"
         if (model.collection != null && route !in pages) open(route)
@@ -168,6 +179,8 @@ private fun AuraShell(model: AuraViewModel) {
             val route = pages[index]
             if (route.substringBefore(':') in setOf("collection", "albumInfo", "artistSongs", "artistAlbums") && route.substringAfter(':').toLongOrNull() !in collectionIds) {
                 pages.removeAt(index); seamless.entries.remove(index)
+                if (index == playerReturnIndex) playerReturnIndex = -1
+                else if (index < playerReturnIndex) playerReturnIndex--
             }
         }
     }
@@ -179,6 +192,7 @@ private fun AuraShell(model: AuraViewModel) {
             val index = pages.lastIndex
             val leaving = pages.last()
             val entry = seamless.entries[index]
+            val returnToPlayer = index == playerReturnIndex
             closing = true
             if (entry == null) closingIndex = index
             scope.launch {
@@ -188,6 +202,11 @@ private fun AuraShell(model: AuraViewModel) {
                     else delay(207)
                     seamless.entries.remove(index)
                     if (pages.lastIndex == index) pages.removeAt(index)
+                    if (returnToPlayer) {
+                        playerReturnIndex = -1
+                        if (leaving == "lyricShare") restoreLyricsRequest++
+                        if (model.current != null) playerOpen = true
+                    }
                     if (leaving.startsWith("collection:")) leaving.substringAfter(':').toLongOrNull()?.let(model::closeCollection)
                     if (leaving == "directory") model.closeDirectory()
                 } finally { closingIndex = -1; closing = false }
@@ -222,10 +241,13 @@ private fun AuraShell(model: AuraViewModel) {
         },
         animationSpec = if (rootBackGesture) snap()
             else tween(280, easing = FastOutSlowInEasing), label = "secondaryPlayerDock")
-    val materialPageIndex = pages.indexOf("navigation_material")
+    val chromeHiddenIndex = pages.indexOfLast { it == "navigation_material" || it == "lyricShare" }
+    val chromeHidden = chromeHiddenIndex >= 0 && closingIndex != chromeHiddenIndex
     val materialChromeExit by animateFloatAsState(
-        if (materialPageIndex >= 0 && closingIndex != materialPageIndex) 1f else 0f,
-        tween(280, easing = FastOutSlowInEasing), label = "materialPreviewChromeExit")
+        if (chromeHidden) 1f else 0f,
+        if (lyricShareTransition.active && chromeHidden) snap() else tween(280, easing = FastOutSlowInEasing),
+        label = "materialPreviewChromeExit",
+    )
     val baseBlur by animateFloatAsState(when {
         revealingBase -> 0f
         rootBackGesture || (topEntry != null && pages.size == 1) -> gestureBlur
@@ -234,6 +256,7 @@ private fun AuraShell(model: AuraViewModel) {
     val rootLabels = listOf(tr("home", "首页"), tr("cloud", "云端"), tr("local", "本地"))
     val saveableTabs = rememberSaveableStateHolder()
     CompositionLocalProvider(LocalSeamlessNavigation provides seamless, LocalDialogBackdrop provides backdrop,
+        LocalLyricShareTransition provides lyricShareTransition,
         LocalTagEditorExitGuard provides tagEditorExitGuard,
         LocalOpenTagEditor provides { song -> playerOpen = false; searchOpen = false; open(tagEditorRoute(song)) },
         LocalSongActions provides { request -> songActions = request; songActionsOpen = true }) {
@@ -293,12 +316,13 @@ private fun AuraShell(model: AuraViewModel) {
                         }, animationSpec = if (!revealing && index == pages.lastIndex - 1 && (backState.isSwiping || topEntry != null)) snap() else tween(252, easing = FastOutSlowInEasing))
                         val visible = remember { MutableTransitionState(false).apply { targetState = true } }
                         if (closingIndex == index) visible.targetState = false
+                        val seamlessLyricEntry = stackPage == "lyricShare" && lyricShareTransition.active
                         AnimatedVisibility(visibleState = visible,
-                            enter = if (entry != null) EnterTransition.None else slideInHorizontally(tween(252, easing = FastOutSlowInEasing)) { it / 7 } + fadeIn(tween(189)) + scaleIn(tween(252), initialScale = .985f),
+                            enter = if (entry != null || seamlessLyricEntry) EnterTransition.None else slideInHorizontally(tween(252, easing = FastOutSlowInEasing)) { it / 7 } + fadeIn(tween(189)) + scaleIn(tween(252), initialScale = .985f),
                             exit = if (entry != null) ExitTransition.None else slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { exitDirection * it / 3 } + fadeOut(tween(162)) + scaleOut(tween(207), targetScale = .975f),
                             modifier = Modifier.fillMaxSize()) {
                             val transitionBlur by transition.animateFloat(transitionSpec = { tween(207, easing = FastOutSlowInEasing) }) { state ->
-                                if (entry != null || state == EnterExitState.Visible) 0f else 12f
+                                if (entry != null || seamlessLyricEntry || state == EnterExitState.Visible) 0f else 12f
                             }
                             Box(Modifier.fillMaxSize().blur((coveredBlur + transitionBlur).dp).then(
                                 if (isTop && entry == null && momentumOwner == (index to stackPage)) Modifier.momentumBackTransform(backState) else Modifier)) {
@@ -321,8 +345,9 @@ private fun AuraShell(model: AuraViewModel) {
                 btm.m.auraplayer.ui.player.PlayerHost(model, backdrop, miniVisible = !searchVisible,
                     secondaryProgress = secondaryProgress,
                     chromeExitProgress = materialChromeExit,
+                    restoreLyricsRequest = restoreLyricsRequest,
                     onExpansionProgress = { playerExpansion = it },
-                    open = playerOpen, onOpenChange = { playerOpen = it }, openPage = open)
+                    open = playerOpen, onOpenChange = { playerOpen = it }, openPage = openFromPlayer)
                 if (searchVisible) {
                     CompositionLocalProvider(LocalToolbarBackdrop provides backdrop) {
                         val results = model.searchHits.map { hit -> HomeSearchResult(hit.key, hit.title,
@@ -402,12 +427,15 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "artistSongs" -> tr("top_songs", "热门歌曲")
         "artistAlbums" -> tr("albums", "专辑")
         "directory" -> model.directory?.title.orEmpty()
-        "lyricShare" -> tr("share_lyrics", "分享歌词")
         else -> legalTitle(page)
     }
     if (page == "tagEditor") {
         val uri = Uri.decode(route.substringAfter(':'))
         TagEditorPage(model, model.localSong(uri), { if (!tagEditorExitGuard.intercept(route)) back() }, isActive)
+        return
+    }
+    if (page == "lyricShare") {
+        LyricShareRoute(model, back, isActive)
         return
     }
     AppPage(title, back, showLargeTitle = page != "about" && (!catalog || page in setOf("artistSongs", "artistAlbums")),
@@ -456,7 +484,6 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
                 ArtistContentsPage(model, contentPadding, collection, albumInfoDestination.cloud, page == "artistAlbums")
             "albumInfo" -> if (collection != null && albumInfoDestination != null) AlbumInfoPage(model, contentPadding, collection, albumInfoDestination.cloud)
             "directory" -> DirectoryPage(model, contentPadding)
-            "lyricShare" -> LyricShareRoute(model, contentPadding, LocalToolbarBackdrop.current, back)
             else -> LegalPage(page, contentPadding)
         }
     }

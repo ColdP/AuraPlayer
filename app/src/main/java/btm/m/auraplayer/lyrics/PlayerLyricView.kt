@@ -12,6 +12,7 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.LruCache
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import kotlinx.coroutines.*
@@ -73,7 +74,14 @@ class PlayerLyricView(context: Context) : View(context) {
     private val longPressHandler = Handler(Looper.getMainLooper())
     private var longPressTriggered = false
     private var longPressRow = -1
-    private val longPressAction = Runnable { if (longPressRow >= 0 && !dragging) { longPressTriggered = true; onLongPress(longPressRow); invalidate() } }
+    private val longPressAction = Runnable {
+        if (longPressRow >= 0 && !dragging && isAttachedToWindow) {
+            longPressTriggered = true
+            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            onLongPress(longPressRow)
+            invalidate()
+        }
+    }
     private val colors = object : LyricWordRenderer.Colors {
         override fun ink(alpha: Float, emphasis: Float, backing: Boolean) = Color.pack(1f, 1f, 1f, alpha.coerceIn(0f, 1f))
         override fun white(alpha: Float, gain: Float) = Color.pack(1f, 1f, 1f, alpha.coerceIn(0f, 1f))
@@ -345,13 +353,33 @@ class PlayerLyricView(context: Context) : View(context) {
         row.line.under(mode)?.let { out.translate(0f, underY + 5 * d); layout(it, tp, row.main.width, row.line.opposite).draw(out) }
         return image
     }
+    private fun rowAt(yPos: Float): Int = rows.indices.firstOrNull { i ->
+        val y = height * .15f + singing.position(i, base) - (scroll.getOrNull(i) ?: 0f) + manual
+        yPos in (y - 6f * d)..(y + rows[i].height + 6f * d)
+    } ?: -1
+
+    fun rowBoundsInWindow(index: Int): RectF? {
+        val row = rows.getOrNull(index) ?: return null
+        val loc = IntArray(2)
+        getLocationInWindow(loc)
+        val top = loc[1] + height * .15f + singing.position(index, base) - (scroll.getOrNull(index) ?: 0f) + manual
+        return RectF(loc[0] + 26f * d, top, loc[0] + width - 26f * d, top + row.height)
+    }
+
+    fun viewportBoundsInWindow(): RectF {
+        val loc = IntArray(2)
+        getLocationInWindow(loc)
+        return RectF(loc[0].toFloat(), loc[1].toFloat(), (loc[0] + width).toFloat(), (loc[1] + height).toFloat())
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downY = event.y; lastY = event.y; dragging = false
                 longPressTriggered = false
-                longPressRow = rows.indices.firstOrNull { i -> val y = height * .15f + singing.position(i, base) - (scroll.getOrNull(i) ?: 0f) + manual; event.y in y..(y + rows[i].height) } ?: -1
-                longPressHandler.postDelayed(longPressAction, 520L)
+                longPressHandler.removeCallbacks(longPressAction)
+                longPressRow = rowAt(event.y)
+                if (longPressRow >= 0) longPressHandler.postDelayed(longPressAction, 520L)
                 if (manualUntil > SystemClock.uptimeMillis()) manualUntil = SystemClock.uptimeMillis() + 3000
                 parent?.requestDisallowInterceptTouchEvent(true); return true
             }
@@ -365,8 +393,8 @@ class PlayerLyricView(context: Context) : View(context) {
                 longPressHandler.removeCallbacks(longPressAction)
                 if (dragging) manualUntil = SystemClock.uptimeMillis() + 3000
                 else if (!longPressTriggered) {
-                    rows.indices.firstOrNull { i -> val y = height * .15f + singing.position(i, base) - scroll[i] + manual; event.y in y..(y + rows[i].height) }
-                        ?.let { onSeek(source[it].start.toLong()); manual = 0f; manualUntil = 0L }
+                    val hit = rowAt(event.y)
+                    if (hit >= 0) { onSeek(source[hit].start.toLong()); manual = 0f; manualUntil = 0L }
                     performClick()
                 }
                 longPressTriggered = false; longPressRow = -1

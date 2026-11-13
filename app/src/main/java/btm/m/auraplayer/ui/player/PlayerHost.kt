@@ -51,7 +51,9 @@ import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.DropdownEntry
@@ -82,6 +84,7 @@ internal object PlayerNavigationGeometry {
 internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: Boolean,
                         secondaryProgress: Float = 0f,
                         chromeExitProgress: Float = 0f,
+                        restoreLyricsRequest: Int = 0,
                         onExpansionProgress: (Float) -> Unit,
                         open: Boolean, onOpenChange: (Boolean) -> Unit, openPage: (String) -> Unit) {
     val liveSong = model.current
@@ -109,23 +112,30 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
     var actionsOpen by remember { mutableStateOf(false) }
     var actionsBusy by remember { mutableStateOf(false) }
     var shareOpening by remember { mutableStateOf(false) }
+    val lyricShareTransition = LocalLyricShareTransition.current
     val miniSwipeOffset = remember { Animatable(0f) }
     val miniDrag = remember { MiniPlayerDragState() }
-    LaunchedEffect(open, gesturing) {
-        if (!gesturing) expansion.animateTo(if (open) 1f else 0f, spring(.88f, 300f, visibilityThreshold = .0005f))
+    LaunchedEffect(open, gesturing, shareOpening) {
+        if (!gesturing && !shareOpening) expansion.animateTo(if (open) 1f else 0f, spring(.88f, 300f, visibilityThreshold = .0005f))
     }
-    LaunchedEffect(compactOpen) {
-        if (!gesturing) lyricProgress.animateTo(if (compactOpen) 1f else 0f, spring(.86f, 280f, visibilityThreshold = .0005f))
+    LaunchedEffect(compactOpen, shareOpening) {
+        if (!gesturing && !shareOpening) lyricProgress.animateTo(if (compactOpen) 1f else 0f, spring(.86f, 280f, visibilityThreshold = .0005f))
     }
     LaunchedEffect(queueOpen, lyricsOpen) {
         queueBlend.animateTo(if (queueOpen) 1f else 0f, tween(280, easing = FastOutSlowInEasing))
+    }
+    LaunchedEffect(restoreLyricsRequest) {
+        if (restoreLyricsRequest > 0) {
+            lyricsOpen = true
+            queueOpen = false
+        }
     }
     fun back() {
         if (compactOpen) { lyricsOpen = false; queueOpen = false }
         else onOpenChange(false)
     }
-    BackHandler(open && !model.settings.value.predictive && !lyricMenuOpen && !actionsBusy) { back() }
-    PredictiveBackHandler(enabled = open && model.settings.value.predictive && !lyricMenuOpen && !actionsBusy && swipeDistance == 0f && !settlingSwipe) { events ->
+    BackHandler(open && !model.settings.value.predictive && !lyricMenuOpen && !actionsBusy && !shareOpening) { back() }
+    PredictiveBackHandler(enabled = open && model.settings.value.predictive && !lyricMenuOpen && !actionsBusy && !shareOpening && swipeDistance == 0f && !settlingSwipe) { events ->
         val secondary = compactOpen
         val target = if (secondary) lyricProgress else expansion
         val start = target.value
@@ -144,6 +154,10 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
     val playerBackdrop = rememberLayerBackdrop()
     val miuixBackdrop = rememberMiuixBackdrop()
     val coverPalette = rememberPlayerMonetPalette(song.artwork)
+    val shareActive = lyricShareTransition?.active == true
+    val shareProgress = if (shareActive) lyricShareTransition.progress.coerceIn(0f, 1f) else 0f
+    val shareBgAlpha = if (shareActive) 1f - lyricShareSmoothStep(0f, .86f, shareProgress) else 1f
+    val shareBgBlur = if (shareActive) (shareProgress * 28f).dp else 0.dp
     val hostAlpha by animateFloatAsState(if (miniVisible || open) 1f else 0f, tween(280, easing = FastOutSlowInEasing), label = "playerHostVisibility")
     val chromeExitDistance = PlayerNavigationGeometry.barHeight +
         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp
@@ -173,7 +187,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
         val e = (gestureExpansion - swipeDistance / swipeRange).coerceIn(0f, 1f)
         // Publish the actual morph, including drag/predictive back and cancelled gestures.
         // The shell blurs its own page layers so shared artwork/metadata stay sharp.
-        SideEffect { onExpansionProgress(e) }
+        SideEffect { onExpansionProgress(e * (1f - shareProgress)) }
         fun settleSwipe(velocity: Float, cancelled: Boolean) {
             val releaseExpansion = (expansion.value - swipeDistance / swipeRange).coerceIn(0f, 1f)
             val dismiss = !cancelled && PlayerDismissGesture.shouldDismiss(swipeDistance / densityScale,
@@ -191,9 +205,9 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
         val shape = RoundedCornerShape((miniHeight / 2) * (1f - e) + screenCorner * e)
         Box(Modifier.offset(metrics.outerInset * (1f - e), miniY * (1f - e))
             .size(lerp(miniWidth, screenWidth, e), lerp(miniHeight, screenHeight, e))
-            .miniPlayerMaterial(backdrop, style, shape, e)
+            .then(if (shareActive && e > .995f) Modifier else Modifier.miniPlayerMaterial(backdrop, style, shape, e))
             .clip(shape)
-            .playerMiniDragGesture(enabled = !open && !settlingSwipe && e < .34f,
+            .playerMiniDragGesture(enabled = !open && !settlingSwipe && !shareOpening && e < .34f,
                 allowTrackSwipe = appearance.swipeTracks,
                 onStart = { axis ->
                     miniDrag.begin(axis, expansion.value)
@@ -239,15 +253,16 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
             Box(Modifier.wrapContentSize(Alignment.TopStart, unbounded = true).requiredSize(screenWidth, screenHeight)) {
                 Box(Modifier.fillMaxSize()) {
                     if (e > 0f) PlayerThemeBackground(song.artwork, coverPalette, appearance, lyricProgress.value.coerceIn(0f, 1f),
-                        animate = open && foreground && !gesturing,
-                        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = e }.layerBackdrop(playerBackdrop).miuixLayerBackdrop(miuixBackdrop))
+                        animate = open && foreground && !gesturing && !shareActive,
+                        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = e * shareBgAlpha }.blur(shareBgBlur).layerBackdrop(playerBackdrop).miuixLayerBackdrop(miuixBackdrop))
                     FullPlayer(model, lyricProgress.value, expansion = e, miniColor = miniColor, miniSwipe = miniSwipeOffset.value + miniDrag.horizontalOffset,
                         miniWidth = miniWidth, miniHeight = miniHeight,
                         miniControlClearance = 110.dp - 50.dp * dock,
-                        appearance = appearance, active = open && foreground, controlsUnobscured = !actionsBusy && !lyricMenuOpen,
+                        appearance = appearance, active = open && foreground && !shareActive, controlsUnobscured = !actionsBusy && !lyricMenuOpen && !shareActive,
                         mixVisual = mixVisual,
+                        shareTransition = lyricShareTransition,
                         onExpand = { onOpenChange(true) }, onClose = { onOpenChange(false) },
-                        swipeEnabled = open && !settlingSwipe && !lyricMenuOpen && !actionsBusy,
+                        swipeEnabled = open && !settlingSwipe && !lyricMenuOpen && !actionsBusy && !shareOpening,
                         onSwipeStart = { gesturing = true; scope.launch { expansion.stop() } },
                         onSwipeDelta = { swipeDistance = (swipeDistance + it).coerceIn(0f, swipeRange) },
                         onSwipeRelease = { settleSwipe(it, false) }, onSwipeCancel = { settleSwipe(0f, true) },
@@ -256,23 +271,50 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                         onLyricMenuExpanded = { lyricMenuOpen = it },
                         miuixBackdrop = miuixBackdrop, onMore = { actionsOpen = true },
                         onQueue = { queueOpen = !queueOpen; lyricsOpen = false },
-                        openSharePage = { index ->
-                            // Detach the Android lyric renderer before placing the share route
-                            // above the player. On Android 17, keeping the View alive together
-                            // with the page backdrop can make RenderThread recurse through the
-                            // recorded blur tree and crash while the route is entering.
+                        openSharePage = { index, rowBounds, viewportBounds ->
                             if (!shareOpening) {
                                 shareOpening = true
                                 model.prepareLyricShare(index)
-                                lyricsOpen = false
-                                queueOpen = false
-                                // Wait for the lyric AndroidView to leave the composition before
-                                // entering the page stack. This keeps the shared player backdrop
-                                // from recording a live View during the transition.
+                                val transition = lyricShareTransition
+                                transition?.sourceRowBounds = rowBounds
+                                transition?.sourceViewportBounds = viewportBounds
+                                transition?.targetCardBounds = null
+                                transition?.targetRowBounds = null
+                                transition?.targetReady = false
+                                transition?.progress = 0f
+                                transition?.active = true
+                                openPage("lyricShare")
                                 scope.launch {
-                                    lyricProgress.animateTo(0f, tween(190, easing = FastOutSlowInEasing))
-                                    openPage("lyricShare")
-                                    shareOpening = false
+                                    try {
+                                        if (transition != null) {
+                                            withTimeoutOrNull(180L) {
+                                                snapshotFlow { transition.targetReady }.first { it }
+                                            }
+                                            val anim = Animatable(0f)
+                                            anim.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = tween(420, easing = FastOutSlowInEasing),
+                                            ) {
+                                                transition.progress = value
+                                            }
+                                            transition.progress = 1f
+                                        } else {
+                                            lyricProgress.animateTo(0f, tween(190, easing = FastOutSlowInEasing))
+                                            withFrameNanos { }
+                                        }
+                                        expansion.snapTo(0f)
+                                        lyricProgress.snapTo(0f)
+                                        lyricsOpen = false
+                                        queueOpen = false
+                                        onOpenChange(false)
+                                    } finally {
+                                        transition?.active = false
+                                        transition?.sourceRowBounds = null
+                                        transition?.sourceViewportBounds = null
+                                        transition?.targetCardBounds = null
+                                        transition?.targetRowBounds = null
+                                        shareOpening = false
+                                    }
                                 }
                             }
                         })
@@ -281,7 +323,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
             val miniAlpha = (1f - e / .34f).coerceIn(0f, 1f)
             if (miniAlpha > 0f) {
                 Box(Modifier.matchParentSize()
-                    .clickable(enabled = !open, interactionSource = remember { MutableInteractionSource() }, indication = null,
+                    .clickable(enabled = !open && !shareOpening, interactionSource = remember { MutableInteractionSource() }, indication = null,
                         onClick = { onOpenChange(true) }))
             }
             if (miniAlpha > 0f) Box(Modifier.fillMaxWidth().height(miniHeight)
@@ -315,6 +357,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
 private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                        appearance: NowPlayingConfig, active: Boolean, controlsUnobscured: Boolean,
                        mixVisual: btm.m.auraplayer.auramix.AuraMixVisualTransition?,
+                       shareTransition: LyricShareTransitionState? = null,
                        miniColor: Color, miniSwipe: Float, miniWidth: Dp, miniHeight: Dp,
                        miniControlClearance: Dp, onExpand: () -> Unit,
                        swipeEnabled: Boolean, onSwipeStart: () -> Unit, onSwipeDelta: (Float) -> Unit,
@@ -323,7 +366,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                        lyricsOpen: Boolean, queueBlend: Float, backdrop: Backdrop, menuTint: Color,
                        onLyricMenuExpanded: (Boolean) -> Unit,
                        miuixBackdrop: top.yukonga.miuix.kmp.blur.Backdrop, onMore: () -> Unit,
-                       onQueue: () -> Unit, openSharePage: (Int) -> Unit) {
+                       onQueue: () -> Unit, openSharePage: (Int, Rect?, Rect?) -> Unit) {
     val song = model.current ?: return
     val density = LocalDensity.current
     val p = progress.coerceIn(0f, 1f)
@@ -348,6 +391,10 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
     }
     LaunchedEffect(lyricsOpen, active) { lastInteraction = if (lyricsOpen && active) 0L else android.os.SystemClock.uptimeMillis() }
     val controlsVisibility by animateFloatAsState(if (immersive) 0f else 1f, tween(280, easing = FastOutSlowInEasing), label = "immersiveControls")
+    val shareActive = shareTransition?.active == true
+    val shareP = if (shareActive) shareTransition.progress.coerceIn(0f, 1f) else 0f
+    val shareChromeAlpha = if (shareActive) 1f - lyricShareSmoothStep(0f, .82f, shareP) else 1f
+    val shareChromeBlur = if (shareActive) (shareP * 24f).dp else 0.dp
     BoxWithConstraints(Modifier.fillMaxSize()
         .pointerInput(Unit) {
             awaitPointerEventScope {
@@ -406,7 +453,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 onDrawSurface = { drawRect(menuTint.copy(alpha = .18f)) })
             else Modifier.playerMenuMaterial(miuixBackdrop, menuTint, 30.dp)
             Box(Modifier.offset(fullCard.left, glassTop).size(fullCard.width, fullCard.height)
-                .graphicsLayer { this.alpha = alpha * (1f - p) }
+                .graphicsLayer { this.alpha = alpha * (1f - p) * shareChromeAlpha }.blur(shareChromeBlur)
                 .then(cardMaterial).clip(RoundedCornerShape(30.dp)).drawWithContent {
                     drawContent()
                     if (appearance.fullscreenGlass && touchLight > .001f) {
@@ -418,30 +465,14 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             if (p < .01f) Box(Modifier.fillMaxWidth().height(glassTop.coerceAtLeast(0.dp))
                 .playerTrackSwipe(appearance.swipeTracks && active, model::next, model::previous))
         }
-        // Only controls and secondary content blur/fade; artwork and metadata stay sharp.
-        if (alpha > 0f) Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }
-            .blur(((1f - alpha) * 14f).dp)) {
+        // Only controls and secondary content blur/fade; artwork, metadata, and exiting lyrics transform independently.
+        if (alpha > 0f) Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha * shareChromeAlpha }
+            .blur(((1f - alpha) * 14f).dp + shareChromeBlur)) {
         Box(Modifier.align(Alignment.TopCenter).offset(y = status + 12.dp * PlayerPaddingScale).size(104.dp, 32.dp)
             .clip(RoundedCornerShape(50))
             .semantics { contentDescription = tr("collapse_player", "收起播放器") }
             .playerSurfaceClick(onClose), contentAlignment = Alignment.Center) {
             Box(Modifier.width(80.dp).height(6.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = .36f)))
-        }
-        if (p > 0f && queueBlend < .999f) {
-            Box(Modifier.offset(y = smallY + small + 20.dp * PlayerPaddingScale).fillMaxWidth()
-            .height((seekY - smallY - small - 35.dp * PlayerPaddingScale + (h - nav - seekY) * (1f - controlsVisibility)).coerceAtLeast(1.dp))
-            .graphicsLayer { this.alpha = p * (1f - queueBlend); translationY = (1f - p) * 24.dp.toPx() }
-            .blur(((1f - p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp)) {
-                if (model.lyrics.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(if (model.lyricsLoading) tr("lyrics_loading", "正在获取歌词…") else tr("lyrics_empty", "暂无歌词"), color = Color.White.copy(alpha = .55f), fontSize = 20.sp)
-                } else AndroidView(factory = { PlayerLyricView(it) }, update = {
-                    it.submit(model.lyrics, model.showTranslation, model.showPronunciation, model.lyricSize.scale)
-                    it.position(model.position, model.playing)
-                    it.onSeek = model::seekTo
-                    it.onLongPress = { index -> openSharePage(index) }
-                    it.keepScreenOn = appearance.keepLyricsAwake && active && lyricsOpen
-                }, modifier = Modifier.fillMaxSize())
-        }
         }
         if (queueBlend > .001f && p > 0f) PlayerQueue(model, Modifier
             .offset(y = smallY + small + 20.dp * PlayerPaddingScale)
@@ -518,6 +549,51 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             }
         }
         }
+        if (alpha > 0f && p > 0f && queueBlend < .999f) {
+            Box(Modifier.offset(y = smallY + small + 20.dp * PlayerPaddingScale).fillMaxWidth()
+                .height((seekY - smallY - small - 35.dp * PlayerPaddingScale + (h - nav - seekY) * (1f - controlsVisibility)).coerceAtLeast(1.dp))
+                .graphicsLayer {
+                    val shareExitAlpha = if (shareActive) 1f - lyricShareSmoothStep(.06f, .62f, shareP) else 1f
+                    this.alpha = alpha * p * (1f - queueBlend) * shareExitAlpha
+                    var tx = 0f
+                    var ty = (1f - p) * 24.dp.toPx()
+                    if (shareActive) {
+                        val tState = shareTransition
+                        val vp = tState.sourceViewportBounds
+                        val srcCenter = tState.sourceRowBounds?.center ?: vp?.center
+                        val dstCenter = tState.targetRowBounds?.center ?: tState.targetCardBounds?.center
+                        val srcH = tState.sourceRowBounds?.height?.takeIf { it > 0f }
+                        val dstH = tState.targetRowBounds?.height?.takeIf { it > 0f }
+                        val endScale = if (srcH != null && dstH != null) (dstH / srcH).coerceIn(.48f, .88f) else .62f
+                        val scale = 1f + (endScale - 1f) * shareP
+                        if (vp != null && vp.width > 0f && vp.height > 0f && srcCenter != null) {
+                            transformOrigin = TransformOrigin(
+                                ((srcCenter.x - vp.left) / vp.width).coerceIn(0f, 1f),
+                                ((srcCenter.y - vp.top) / vp.height).coerceIn(0f, 1f),
+                            )
+                        }
+                        scaleX = scale
+                        scaleY = scale
+                        if (srcCenter != null && dstCenter != null) {
+                            tx += (dstCenter.x - srcCenter.x) * shareP
+                            ty += (dstCenter.y - srcCenter.y) * shareP
+                        }
+                    }
+                    translationX = tx
+                    translationY = ty
+                }
+                .blur(((1f - alpha) * 14f + (1f - p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp)) {
+                if (model.lyrics.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(if (model.lyricsLoading) tr("lyrics_loading", "正在获取歌词…") else tr("lyrics_empty", "暂无歌词"), color = Color.White.copy(alpha = .55f), fontSize = 20.sp)
+                } else AndroidView(factory = { PlayerLyricView(it) }, update = {
+                    it.submit(model.lyrics, model.showTranslation, model.showPronunciation, model.lyricSize.scale)
+                    it.position(model.position, model.playing)
+                    it.onSeek = model::seekTo
+                    it.onLongPress = { index -> openSharePage(index, it.rowBoundsInWindow(index)?.toComposeRect(), it.viewportBoundsInWindow().toComposeRect()) }
+                    it.keepScreenOn = appearance.keepLyricsAwake && active && lyricsOpen
+                }, modifier = Modifier.fillMaxSize())
+            }
+        }
         val fullCoverSize = coverSize + (small - coverSize) * p
         val miniScale = miniHeight / PlayerNavigationGeometry.miniHeight
         val miniCoverSize = 44.dp * miniScale
@@ -534,9 +610,9 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         Cover(song.artwork, Modifier.offset(sharedX, sharedY).size(coverSize).graphicsLayer {
             transformOrigin = TransformOrigin(0f, 0f); scaleX = sharedScale; scaleY = sharedScale
             translationX = miniShift
-            this.alpha = miniAlpha * if (fullscreen) 1f - e * (1f - p) else 1f
-        }.playerTrackSwipe(appearance.swipeTracks && active && p < .01f && !fullscreen, model::next, model::previous),
-            sharedRadius / sharedScale, onClick = sharedClick, mixVisual = mixVisual,
+            this.alpha = miniAlpha * (if (fullscreen) 1f - e * (1f - p) else 1f) * shareChromeAlpha
+        }.blur(shareChromeBlur).playerTrackSwipe(appearance.swipeTracks && active && p < .01f && !fullscreen, model::next, model::previous),
+            sharedRadius / sharedScale, onClick = { if (!shareActive) sharedClick() }, mixVisual = mixVisual,
             animation = appearance.coverAnimation, animate = active && e > .99f, transitionKey = song.key)
         val compactTextX = smallX + small + 12.dp * PlayerPaddingScale
         val expandedTextX = if (fullscreen) fullCard.left + 16.dp else coverX
@@ -562,14 +638,14 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         Box(Modifier.offset(lerp(miniTextX, fullTextX, e), miniTextY + (fullTextY - miniTextY) * e)
             .width(textWidth).height(measuredTextHeight).graphicsLayer {
                 translationX = miniShift
-                this.alpha = miniAlpha
-            }) {
+                this.alpha = miniAlpha * shareChromeAlpha
+            }.blur(shareChromeBlur)) {
         Column(Modifier.fillMaxSize()
             .width(textWidth).onSizeChanged { textHeight = it.height }.graphicsLayer {
                 transformOrigin = TransformOrigin(0f, 0f); scaleX = textScale; scaleY = textScale
                 this.alpha = miniAlpha * if (mixVisual == null) 1f else mixFromAlpha
             }
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = sharedClick)) {
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !shareActive, onClick = sharedClick)) {
             Text(mixVisual?.fromTitle ?: song.title, color = textColor, fontSize = 20.sp * metadataSize, lineHeight = 25.sp * metadataSize,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(mixVisual?.fromArtist ?: song.artist, color = textColor.copy(alpha = .8f), fontSize = 16.sp * metadataSize, lineHeight = 21.sp * metadataSize,
@@ -585,7 +661,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         /* Keep the normal click target over the two metadata layers. */
-        Box(Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = sharedClick))
+        Box(Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !shareActive, onClick = sharedClick))
         }
 
         // One button moves and scales between both layouts, outside the content's blur layer.
@@ -596,8 +672,9 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             val compactX = w - 68.dp
             val compactY = smallY + (small - buttonSize) / 2
             Box(Modifier.offset(bigX + (compactX - bigX) * p, bigY + (compactY - bigY) * p)
-                .size(buttonSize).graphicsLayer { this.alpha = alpha; scaleX = 1f - .08f * p; scaleY = scaleX }
-                .clip(RoundedCornerShape(50)).clickable(onClick = onMore), contentAlignment = Alignment.Center) {
+                .size(buttonSize).graphicsLayer { this.alpha = alpha * shareChromeAlpha; scaleX = 1f - .08f * p; scaleY = scaleX }
+                .blur(shareChromeBlur)
+                .clip(RoundedCornerShape(50)).clickable(enabled = !shareActive, onClick = onMore), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(46.dp * .85f * .92f).playerMenuMaterial(miuixBackdrop, menuTint, 50.dp)) {
                     Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.align(Alignment.Center).size(24.dp * PlayerIconScale * .92f), colorFilter = ColorFilter.tint(Color.White))
                 }
@@ -607,8 +684,8 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         if (alpha > 0f && p > 0f && queueBlend < .01f && controlsVisibility > .001f) {
             LyricOptionsMenu(model, miuixBackdrop, menuTint, if (fullscreen) margin else coverX, seekY - 52.dp,
                 w, status + 8.dp,
-                Modifier.graphicsLayer { this.alpha = alpha * p * controlsVisibility }
-                    .blur(((1f - p + 1f - controlsVisibility) * 14f).dp), onLyricMenuExpanded)
+                Modifier.graphicsLayer { this.alpha = alpha * p * controlsVisibility * shareChromeAlpha }
+                    .blur(((1f - p + 1f - controlsVisibility) * 14f).dp + shareChromeBlur), onLyricMenuExpanded)
         }
 
     }

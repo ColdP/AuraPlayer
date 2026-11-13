@@ -77,18 +77,30 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
                         if (isEmpty()) add(DropdownItem(if (model.qualityLoading) tr("loading", "加载中…") else tr("quality_unavailable", "此歌曲暂无可用音质"), enabled = false))
                     }))
             }
+            fun openCollectionFromSheet(launch: () -> Unit) {
+                dismiss()
+                val beforeId = model.activeCollectionId
+                launch()
+                closePlayer()
+                val afterId = model.activeCollectionId
+                if (afterId > 0L && (afterId != beforeId || model.collection != null)) {
+                    openPage("collection:$afterId")
+                }
+            }
             action(MiuixIcons.Regular.VolumeUp, tr("audio_effects", "音效"), presetName(effectsState.current)) { dismiss(); closePlayer(); openPage("audio_effects") }
             divider()
-            action(MiuixIcons.Regular.Album, tr("album", "专辑"), song.album, !song.cloud || song.albumId > 0) { dismiss(); model.openSongAlbum(song); closePlayer() }
+            action(MiuixIcons.Regular.Album, tr("album", "专辑"), song.album, !song.cloud || song.albumId > 0) {
+                openCollectionFromSheet { model.openSongAlbum(song) }
+            }
             if (artists.size > 1) {
                 SheetDropdown(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, menuBackdrop,
                     DropdownEntry(artists.map { artist ->
                         DropdownItem(artist.name, enabled = !song.cloud || artist.id > 0,
                             icon = { modifier -> Artwork(artist.artwork, modifier.size(30.dp), circular = true) },
-                            onClick = { dismiss(); model.openSongArtist(song, artist); closePlayer() })
+                            onClick = { openCollectionFromSheet { model.openSongArtist(song, artist) } })
                     }))
             } else action(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, !song.cloud || song.artistId > 0) {
-                dismiss(); model.openSongArtist(song); closePlayer()
+                openCollectionFromSheet { model.openSongArtist(song) }
             }
             if (!song.cloud) action(MiuixIcons.Regular.File, tr("tag_editor", "标签编辑器")) {
                 dismiss(); closePlayer(); openPage(tagEditorRoute(song))
