@@ -90,3 +90,10 @@ Player appearance additions (2026-11-12): PlayerLyricView adds visual-center foc
 COUI-Kit 0.0.1-alpha9 — https://github.com/ItosEO/COUI-Kit
 Mozilla Public License, Version 2.0 (MPL-2.0); used unmodified as a dependency (io.github.itoseo:coui:0.0.1-alpha9) for playlist title-bar search (`SearchBar`) and `CouiBackdrop` sampling.
 Full license: licenses/COUI-Kit-MPL-2.0.txt. Upstream third-party notices and trademark policy (NOTICE, TRADEMARKS.md, coui-skia-LICENSE, coui-androidx-LICENSE) are preserved in META-INF/coui/ and the upstream repository, without implying official COUI-Kit endorsement.
+
+OneUI_Kit — MIT
+Copyright (c) 2026 The One UI Kit Authors
+Originates from OneUIProject/oneui-design & OneUIProject/oneui-core (MIT, Copyright (c) 2022 Yanndroid & BlackMesa123).
+Imported in app/src/main/java/dev/pascal/oneuikit/ (`MonetTones`, `OneUiPalette`, `BoSwitchView`, `DragOnlySeekBar`, `OneUiWidgets`) to implement the `One` interface style and One UI bottom navigation bar. Changes: `DragOnlySeekBar` extends standard `android.widget.SeekBar` (per OneUI_Kit docs/components.md) to keep AndroidX compatibility without SESL duplicate-class conflicts, alongside `fromSeed`, programmatic state-sync helpers, and Compose bridge components in `OneUiTheme.kt`.
+Full MIT license & retained upstream notices: licenses/OneUI-Kit-MIT.txt.
+One UI is a trademark of Samsung Electronics Co., Ltd. This integration is unofficial and is not affiliated with, authorized by, or endorsed by Samsung Electronics Co., Ltd.

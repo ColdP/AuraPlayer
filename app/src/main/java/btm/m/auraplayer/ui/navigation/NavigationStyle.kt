@@ -6,7 +6,9 @@ enum class NavigationStyle(val preferenceValue: String, val displayName: String)
     LIQUID_GLASS("liquid_glass", "液态玻璃底部导航栏"),
     HYPER_OS("hyper_os", "HyperOS 底部导航栏"),
     HYPER_OS_FLOATING("hyper_os_floating", "HyperOS 悬浮导航栏"),
-    HARMONY_OS_FLOATING("harmony_os_floating", "Harmony 悬浮导航栏");
+    HARMONY_OS_FLOATING("harmony_os_floating", "Harmony 悬浮导航栏"),
+    MATERIAL("material", "Material 导航栏"),
+    ONE("one", "One UI 导航栏");
 
     companion object {
         const val PREFERENCE_KEY = "nav_style"

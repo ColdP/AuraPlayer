@@ -60,12 +60,18 @@ internal fun NavigationAppSearchField(
     enabled: Boolean = true,
 ) {
     val backdrop = LocalToolbarBackdrop.current
+    val uiStyle = LocalAppUiStyle.current
+    val solidSurface = uiStyle != AppUiStyle.HYPER
     val colorStyle = LocalAppInterfaceStyle.current == AppInterfaceStyle.COLOR
     val shape = remember { Capsule(RoundedCornerStyle.Continuous) }
     val surface = MiuixTheme.colorScheme.surfaceContainer
     val light = surface.luminance() > .5f
-    val glassAvailable = backdrop != null && isRuntimeShaderSupported()
-    val tint = (if (light) Color(0xFFF8F8F8) else surface)
+    val glassAvailable = !solidSurface && backdrop != null && isRuntimeShaderSupported()
+    val tint = if (uiStyle == AppUiStyle.ONE) {
+        Color(rememberActiveOneUiPalette().cardAlt)
+    } else if (uiStyle == AppUiStyle.MATERIAL) {
+        MiuixTheme.colorScheme.surfaceContainerHigh
+    } else (if (light) Color(0xFFF8F8F8) else surface)
         .copy(alpha = if (glassAvailable && colorStyle) .62f else if (glassAvailable) .30f else .90f)
     val glass = if (!drawSurface) Modifier else if (glassAvailable) {
         Modifier.drawBackdrop(

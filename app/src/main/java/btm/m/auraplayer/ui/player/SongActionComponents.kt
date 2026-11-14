@@ -38,11 +38,19 @@ import top.yukonga.miuix.kmp.icon.extended.Download
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun sheetForeground(): Color = if (MiuixTheme.colorScheme.surface.luminance() > .5f) Color(0xFF191919) else Color.White
+internal fun sheetForeground(): Color = when (LocalAppUiStyle.current) {
+    AppUiStyle.ONE -> Color(rememberActiveOneUiPalette().text)
+    else -> if (MiuixTheme.colorScheme.surface.luminance() > .5f) Color(0xFF191919) else Color.White
+}
 
 /** Same sampling and edge light as glass dialogs, with a neutral surface in either theme. */
 @Composable
 internal fun Modifier.neutralSheetMaterial(backdrop: Backdrop?): Modifier {
+    if (LocalAppUiStyle.current == AppUiStyle.ONE) {
+        val palette = rememberActiveOneUiPalette()
+        val shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
+        return clip(shape).background(Color(palette.card), shape)
+    }
     val light = MiuixTheme.colorScheme.surface.luminance() > .5f
     val tint = (if (light) Color(0xFFF8F8F8) else Color(0xFF202022)).copy(alpha = .80f)
     val shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp)
@@ -125,6 +133,63 @@ internal fun SheetActionRow(
                 }
             }
             val arrowTint = expressive.onSurfaceVariant.copy(alpha = if (enabled) .75f else .35f)
+            if (isDropdown) {
+                DropdownArrowEndAction(arrowTint)
+            } else {
+                Image(
+                    imageVector = MiuixIcons.Basic.ArrowRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(DropdownDefaults.ArrowSize),
+                    colorFilter = ColorFilter.tint(arrowTint),
+                )
+            }
+        }
+        return
+    }
+    if (LocalAppUiStyle.current == AppUiStyle.ONE) {
+        val palette = rememberActiveOneUiPalette()
+        val disabledAlpha = if (enabled) 1f else .42f
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = enabled, onClick = onClick)
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(palette.chip).copy(alpha = disabledAlpha)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(19.dp),
+                    colorFilter = ColorFilter.tint(Color(palette.onChip).copy(alpha = disabledAlpha)),
+                )
+            }
+            Column(Modifier.weight(1f).padding(start = 14.dp, end = 8.dp)) {
+                Text(
+                    text = title,
+                    color = Color(palette.text).copy(alpha = disabledAlpha),
+                    fontSize = 15.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!summary.isNullOrBlank()) {
+                    Text(
+                        text = summary,
+                        color = Color(palette.subText).copy(alpha = disabledAlpha),
+                        fontSize = 12.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            val arrowTint = Color(palette.subText).copy(alpha = if (enabled) .75f else .35f)
             if (isDropdown) {
                 DropdownArrowEndAction(arrowTint)
             } else {

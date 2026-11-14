@@ -36,6 +36,7 @@ fun NowPlayingSettingsPage(padding: PaddingValues) {
                         tr("player_theme_color", "颜色"),
                         tr("player_theme_fullscreen", "全屏"),
                         tr("player_theme_material", "Material"),
+                        tr("player_theme_one", "One"),
                     ), state.theme.ordinal, backdrop = LocalToolbarBackdrop.current) { index ->
                     store.update { it.copy(theme = PlayerTheme.entries[index]) }
                 }
@@ -79,6 +80,18 @@ fun NowPlayingSettingsPage(padding: PaddingValues) {
                         SliderPreference(tr("player_blur_amount", "模糊程度"), state.blur.toFloat(), -64f..96f,
                             state.blur.toString(), steps = 159, defaultValue = 0f) { value -> store.update { it.copy(blur = value.roundToInt()) } }
                     }
+                }
+                GlassDropdownPreference(
+                    tr("player_glow_progress", "炫光进度条"),
+                    listOf(
+                        tr("player_glow_off", "不开启"),
+                        tr("player_glow_hyper", "Hyper"),
+                        tr("player_glow_one", "One"),
+                    ),
+                    state.glowProgress.ordinal,
+                    backdrop = LocalToolbarBackdrop.current,
+                ) { index ->
+                    store.update { it.copy(glowProgress = GlowProgressStyle.entries[index]) }
                 }
                 GlassDropdownPreference(tr("player_special_effect", "特殊效果"),
                     listOf(tr("player_effect_none", "不显示"), tr("player_effect_snow", "降雪"), tr("player_effect_rain", "降雨")),

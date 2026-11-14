@@ -71,4 +71,29 @@ class OutputWaveformTest {
         assertEquals(.6f, first.peaks.max(), 0f)
         assertNotSame(first, waveform.snapshot)
     }
+
+    @Test fun spectrumSeparatesLowAndHighFrequenciesAndClearsWhenInactive() {
+        val sampleRate = 48000
+        val frames = 2400
+        fun sinePcm(freqHz: Double): ByteBuffer = ByteBuffer.allocate(frames * 4).order(ByteOrder.LITTLE_ENDIAN).apply {
+            for (i in 0 until frames) {
+                putFloat((0.6 * kotlin.math.sin(2.0 * kotlin.math.PI * freqHz * i / sampleRate)).toFloat())
+            }
+            flip()
+        }
+
+        val waveform = OutputWaveform().apply { spectrumEnabled = true }
+        waveform.offer(sinePcm(80.0), C.ENCODING_PCM_FLOAT, 1, sampleRate)
+        val bassSpectrum = waveform.snapshot!!.spectrum
+        assertEquals(OutputWaveform.SPECTRUM_BANDS, bassSpectrum.size)
+        assertTrue(bassSpectrum[0] + bassSpectrum[1] > bassSpectrum[6] + bassSpectrum[7] + 0.15f)
+
+        waveform.offer(sinePcm(6000.0), C.ENCODING_PCM_FLOAT, 1, sampleRate)
+        val trebleSpectrum = waveform.snapshot!!.spectrum
+        assertTrue(trebleSpectrum[6] + trebleSpectrum[7] > trebleSpectrum[0] + trebleSpectrum[1] + 0.15f)
+
+        waveform.spectrumEnabled = false
+        waveform.offer(sinePcm(80.0), C.ENCODING_PCM_FLOAT, 1, sampleRate)
+        assertNull(waveform.snapshot)
+    }
 }

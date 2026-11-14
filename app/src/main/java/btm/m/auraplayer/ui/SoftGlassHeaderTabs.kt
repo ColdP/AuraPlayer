@@ -72,6 +72,27 @@ internal fun SoftGlassHeaderTabs(
     material: NavigationMaterial? = null,
     onSelected: (Int) -> Unit,
 ) {
+    when (LocalAppUiStyle.current) {
+        AppUiStyle.MATERIAL -> {
+            MaterialExpressiveSegmentedTabs(
+                tabs = tabs,
+                selected = selected,
+                scrollable = scrollable,
+                onSelected = onSelected,
+            )
+            return
+        }
+        AppUiStyle.ONE -> {
+            OneUiSegmentedTabs(
+                tabs = tabs,
+                selected = selected,
+                scrollable = scrollable,
+                onSelected = onSelected,
+            )
+            return
+        }
+        AppUiStyle.HYPER -> Unit
+    }
     val backdrop = LocalToolbarBackdrop.current
     val scheme = MiuixTheme.colorScheme
     val dark = scheme.surface.luminance() < .5f

@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.*
@@ -18,7 +21,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
@@ -68,12 +73,100 @@ fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction:
     val artworkSize = if (layout.tablet) 48.dp else 44.dp
     val openActions = LocalSongActions.current
     val backdrop = LocalToolbarBackdrop.current
+    val isCurrent = model.current?.key == song.key
+    when (LocalAppUiStyle.current) {
+        AppUiStyle.ONE -> {
+            val palette = rememberActiveOneUiPalette()
+            val rowBg = if (isCurrent) Color(palette.chip).copy(alpha = 0.72f) else Color.Transparent
+            val titleColor = if (isCurrent) Color(palette.accentDeep) else Color(palette.text)
+            val subColor = Color(palette.subText)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(rowBg)
+                    .clickable(onClick = onClick)
+                    .padding(vertical = 9.dp, horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Artwork(song.artwork, Modifier.size(artworkSize), cornerRadius = ListArtworkCornerRadius)
+                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                    Text(
+                        song.title.ifBlank { tr("unknown_title", "未命名歌曲") },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        fontSize = 15.5.sp,
+                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                        color = titleColor,
+                    )
+                    Text(
+                        "${song.artist} · ${song.album}",
+                        fontSize = 13.sp,
+                        color = subColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(durationText(song.duration), fontSize = 12.sp, color = subColor)
+                    IconButton(onClick = { openActions(SongActionRequest(song, backdrop, onLongAction)) }, modifier = Modifier.size(40.dp)) {
+                        Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.size(20.dp), colorFilter = ColorFilter.tint(if (isCurrent) Color(palette.accentDeep) else subColor))
+                    }
+                }
+            }
+            return
+        }
+        AppUiStyle.MATERIAL -> {
+            val scheme = rememberActiveExpressiveScheme()
+            val rowBg = if (isCurrent) scheme.secondaryContainer else Color.Transparent
+            val titleColor = if (isCurrent) scheme.onSecondaryContainer else scheme.onSurface
+            val subColor = if (isCurrent) scheme.onSecondaryContainer.copy(alpha = 0.78f) else scheme.onSurfaceVariant
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(rowBg)
+                    .clickable(onClick = onClick)
+                    .padding(vertical = 8.dp, horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Artwork(song.artwork, Modifier.size(artworkSize), cornerRadius = ListArtworkCornerRadius)
+                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                    Text(
+                        song.title.ifBlank { tr("unknown_title", "未命名歌曲") },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        fontSize = 15.5.sp,
+                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                        color = titleColor,
+                    )
+                    Text(
+                        "${song.artist} · ${song.album}",
+                        fontSize = 13.sp,
+                        color = subColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 3.dp),
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(durationText(song.duration), fontSize = 12.sp, color = subColor)
+                    IconButton(onClick = { openActions(SongActionRequest(song, backdrop, onLongAction)) }, modifier = Modifier.size(40.dp)) {
+                        Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.size(20.dp), colorFilter = ColorFilter.tint(if (isCurrent) scheme.onSecondaryContainer else scheme.onSurfaceVariant))
+                    }
+                }
+            }
+            return
+        }
+        AppUiStyle.HYPER -> Unit
+    }
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(vertical = 7.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Artwork(song.artwork, Modifier.size(artworkSize), cornerRadius = ListArtworkCornerRadius)
         Column(Modifier.weight(1f).padding(horizontal = 11.dp)) {
             Text(song.title.ifBlank { tr("unknown_title", "未命名歌曲") }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 15.sp,
-                fontWeight = if (model.current?.key == song.key) FontWeight.Bold else FontWeight.Medium,
-                color = if (model.current?.key == song.key) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface)
+                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                color = if (isCurrent) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface)
             Text("${song.artist} · ${song.album}", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
         }
@@ -121,11 +214,77 @@ fun SongsPage(model: AuraViewModel, padding: PaddingValues, requestPermission: (
     val columns = LocalAuraLayout.current.listColumns
     LazyColumn(pageContentModifier(), contentPadding = padding) {
         item("song_categories") {
-            SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
-                Column {
-                    Preference(tr("albums", "专辑"), onClick = { onOpenSecondary(0) })
-                    Preference(tr("artists", "艺术家"), onClick = { onOpenSecondary(1) })
-                    Preference(tr("playback_lists", "播放列表"), onClick = { onOpenSecondary(2) })
+            if (LocalAppUiStyle.current == AppUiStyle.ONE) {
+                val palette = rememberActiveOneUiPalette()
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val items = listOf(
+                        tr("albums", "专辑") to 0,
+                        tr("artists", "艺术家") to 1,
+                        tr("playback_lists", "播放列表") to 2,
+                    )
+                    items.forEach { (label, target) ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(22.dp))
+                                .background(Color(palette.card))
+                                .clickable { onOpenSecondary(target) }
+                                .padding(horizontal = 10.dp, vertical = 14.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = label,
+                                color = Color(palette.accentDeep),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            } else if (LocalAppUiStyle.current == AppUiStyle.MATERIAL) {
+                val scheme = rememberActiveExpressiveScheme()
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val items = listOf(
+                        tr("albums", "专辑") to 0,
+                        tr("artists", "艺术家") to 1,
+                        tr("playback_lists", "播放列表") to 2,
+                    )
+                    items.forEach { (label, target) ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(scheme.secondaryContainer)
+                                .clickable { onOpenSecondary(target) }
+                                .padding(horizontal = 10.dp, vertical = 14.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = label,
+                                color = scheme.onSecondaryContainer,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            } else {
+                SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+                    Column {
+                        Preference(tr("albums", "专辑"), onClick = { onOpenSecondary(0) })
+                        Preference(tr("artists", "艺术家"), onClick = { onOpenSecondary(1) })
+                        Preference(tr("playback_lists", "播放列表"), onClick = { onOpenSecondary(2) })
+                    }
                 }
             }
         }
@@ -207,6 +366,162 @@ internal fun PlaylistHeaderSearchBar(
     onExpandedChange: (Boolean) -> Unit,
     onSearch: () -> Unit,
 ) {
+    if (LocalAppUiStyle.current == AppUiStyle.ONE) {
+        val palette = rememberActiveOneUiPalette()
+        val focusManager = LocalFocusManager.current
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = LocalAuraLayout.current.pageMargin)
+                .padding(top = 4.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .clip(CircleShape)
+                    .background(Color(palette.cardAlt), CircleShape)
+                    .clickable { if (!expanded) onExpandedChange(true) }
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    MiuixIcons.Regular.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = Color(palette.subText),
+                )
+                Spacer(Modifier.width(12.dp))
+                BasicTextField(
+                    value = query,
+                    onValueChange = {
+                        if (!expanded) onExpandedChange(true)
+                        onQueryChange(it)
+                    },
+                    singleLine = true,
+                    textStyle = MiuixTheme.textStyles.body1.copy(color = Color(palette.text)),
+                    cursorBrush = SolidColor(Color(palette.accentDeep)),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        focusManager.clearFocus()
+                        onSearch()
+                    }),
+                    modifier = Modifier.weight(1f),
+                    decorationBox = { inner ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (query.isEmpty()) {
+                                Text(
+                                    tr("playlist_search_hint", "搜索歌单内歌曲、歌手或专辑"),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MiuixTheme.textStyles.body1,
+                                    color = Color(palette.subText),
+                                )
+                            }
+                            inner()
+                        }
+                    },
+                )
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(32.dp)) {
+                        Icon(MiuixIcons.Regular.Close, tr("clear", "清空"), Modifier.size(18.dp), tint = Color(palette.subText))
+                    }
+                }
+            }
+            if (expanded || query.isNotEmpty()) {
+                OneUiButton(
+                    onClick = {
+                        focusManager.clearFocus()
+                        onQueryChange("")
+                        onExpandedChange(false)
+                    },
+                ) {
+                    Text(tr("cancel", "取消"), fontSize = 13.5.sp)
+                }
+            }
+        }
+        return
+    }
+    if (LocalAppUiStyle.current == AppUiStyle.MATERIAL) {
+        val scheme = rememberActiveExpressiveScheme()
+        val focusManager = LocalFocusManager.current
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = LocalAuraLayout.current.pageMargin)
+                .padding(top = 4.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .clip(CircleShape)
+                    .background(scheme.surfaceContainerHigh, CircleShape)
+                    .clickable { if (!expanded) onExpandedChange(true) }
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    MiuixIcons.Regular.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = scheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(12.dp))
+                BasicTextField(
+                    value = query,
+                    onValueChange = {
+                        if (!expanded) onExpandedChange(true)
+                        onQueryChange(it)
+                    },
+                    singleLine = true,
+                    textStyle = MiuixTheme.textStyles.body1.copy(color = scheme.onSurface),
+                    cursorBrush = SolidColor(scheme.primary),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        focusManager.clearFocus()
+                        onSearch()
+                    }),
+                    modifier = Modifier.weight(1f),
+                    decorationBox = { inner ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (query.isEmpty()) {
+                                Text(
+                                    tr("playlist_search_hint", "搜索歌单内歌曲、歌手或专辑"),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MiuixTheme.textStyles.body1,
+                                    color = scheme.onSurfaceVariant,
+                                )
+                            }
+                            inner()
+                        }
+                    },
+                )
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(32.dp)) {
+                        Icon(MiuixIcons.Regular.Close, tr("clear", "清空"), Modifier.size(18.dp), tint = scheme.onSurfaceVariant)
+                    }
+                }
+            }
+            if (expanded || query.isNotEmpty()) {
+                MaterialExpressiveButton(
+                    onClick = {
+                        focusManager.clearFocus()
+                        onQueryChange("")
+                        onExpandedChange(false)
+                    },
+                ) {
+                    Text(tr("cancel", "取消"), fontSize = 13.5.sp)
+                }
+            }
+        }
+        return
+    }
     val backdrop = LocalAuraCouiBackdrop.current ?: return
     val searchState = rememberCouiSearchBarState(expanded)
     val scheme = MiuixTheme.colorScheme
@@ -362,7 +677,7 @@ fun LocalPlaylistsPage(model: AuraViewModel, padding: PaddingValues) {
         }
     }
     WindowDialog(creating, title = tr("new_playlist", "新建歌单"), onDismissRequest = { creating = false }) {
-        TextField(name, { name = it }, label = tr("playlist_name", "歌单名称"), singleLine = true, modifier = Modifier.fillMaxWidth())
+        AuraTextField(name, { name = it }, label = tr("playlist_name", "歌单名称"), singleLine = true, modifier = Modifier.fillMaxWidth())
         GlassDialogButton({
             model.history.savePlaylists(playlists + LocalPlaylist(UUID.randomUUID().toString(), name.trim(), emptyList()))
             creating = false
@@ -400,7 +715,7 @@ private fun PlaylistSongPicker(model: AuraViewModel, playlist: LocalPlaylist, di
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
             items(model.songs, key = { it.key }) { song ->
                 BasicComponent(title = song.title, summary = song.artist, onClick = { selected = if (song.key in selected) selected - song.key else selected + song.key },
-                    endActions = { Checkbox(state = androidx.compose.ui.state.ToggleableState(song.key in selected), onClick = { selected = if (song.key in selected) selected - song.key else selected + song.key }) })
+                    endActions = { AuraCheckbox(checked = song.key in selected, onCheckedChange = { selected = if (song.key in selected) selected - song.key else selected + song.key }) })
             }
         }
         GlassDialogButton({

@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -100,11 +101,29 @@ fun HomePage(model: AuraViewModel, padding: PaddingValues, requestPermission: ()
                 val large = small * 2 + 4.dp
                 Column {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Box(Modifier.size(large).clip(RoundedCornerShape(16.dp))
-                        .background(MiuixTheme.colorScheme.primary.copy(alpha = .12f))
-                        .clickable { model.playNext(suggestions) }.padding(8.dp), contentAlignment = Alignment.CenterStart) {
-                        Text(tr("new_music_mix", "新歌混烧"), color = MiuixTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold, fontSize = 24.sp)
+                    val uiStyle = LocalAppUiStyle.current
+                    val scheme = if (uiStyle == AppUiStyle.MATERIAL) rememberActiveExpressiveScheme() else null
+                    val onePalette = if (uiStyle == AppUiStyle.ONE) rememberActiveOneUiPalette() else null
+                    val tileCorner = when (uiStyle) {
+                        AppUiStyle.ONE -> 26.dp
+                        AppUiStyle.MATERIAL -> 22.dp
+                        AppUiStyle.HYPER -> 16.dp
+                    }
+                    val tileBg = when (uiStyle) {
+                        AppUiStyle.ONE -> Color(onePalette!!.chip)
+                        AppUiStyle.MATERIAL -> scheme!!.primaryContainer
+                        AppUiStyle.HYPER -> MiuixTheme.colorScheme.primary.copy(alpha = .12f)
+                    }
+                    val tileFg = when (uiStyle) {
+                        AppUiStyle.ONE -> Color(onePalette!!.onChip)
+                        AppUiStyle.MATERIAL -> scheme!!.onPrimaryContainer
+                        AppUiStyle.HYPER -> MiuixTheme.colorScheme.primary
+                    }
+                    Box(Modifier.size(large).clip(RoundedCornerShape(tileCorner))
+                        .background(tileBg)
+                        .clickable { model.playNext(suggestions) }.padding(if (uiStyle != AppUiStyle.HYPER) 12.dp else 8.dp), contentAlignment = Alignment.CenterStart) {
+                        Text(tr("new_music_mix", "新歌混烧"), color = tileFg,
+                            fontWeight = FontWeight.Bold, fontSize = if (uiStyle != AppUiStyle.HYPER) 22.sp else 24.sp)
                     }
                     Column(Modifier.width(small), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         SuggestionCover(suggestions[0], model, Modifier.fillMaxWidth().aspectRatio(1f))
@@ -148,6 +167,64 @@ fun HomePage(model: AuraViewModel, padding: PaddingValues, requestPermission: ()
 
 @Composable
 private fun HomeAction(title: String, icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
+    if (LocalAppUiStyle.current == AppUiStyle.ONE) {
+        val palette = rememberActiveOneUiPalette()
+        Row(
+            modifier = modifier
+                .heightIn(min = 58.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(palette.card))
+                .clickable(onClick = onClick)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(Color(palette.chip)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(icon, null, Modifier.size(20.dp), colorFilter = ColorFilter.tint(Color(palette.onChip)))
+            }
+            Text(
+                text = title,
+                color = Color(palette.text),
+                fontSize = 14.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 10.dp),
+            )
+        }
+        return
+    }
+    if (LocalAppUiStyle.current == AppUiStyle.MATERIAL) {
+        val scheme = rememberActiveExpressiveScheme()
+        Row(
+            modifier = modifier
+                .heightIn(min = 58.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(scheme.surfaceContainerHigh)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier.size(34.dp).clip(CircleShape).background(scheme.secondaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(icon, null, Modifier.size(19.dp), colorFilter = ColorFilter.tint(scheme.onSecondaryContainer))
+            }
+            Text(
+                text = title,
+                color = scheme.onSurface,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 10.dp),
+            )
+        }
+        return
+    }
     Row(modifier.heightIn(min = 50.dp).clip(RoundedCornerShape(16.dp))
         .background(MiuixTheme.colorScheme.surfaceContainer).clickable(onClick = onClick)
         .padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -175,6 +252,33 @@ private fun LazyListScope.homeCollections(title: String, collections: List<Music
 
 @Composable
 private fun HomeSectionHeader(title: String, onClick: () -> Unit) {
+    if (LocalAppUiStyle.current == AppUiStyle.ONE) {
+        val palette = rememberActiveOneUiPalette()
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(vertical = 14.dp, horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, Modifier.weight(1f), color = Color(palette.text), fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(20.dp), colorFilter = ColorFilter.tint(Color(palette.accentDeep)))
+        }
+        return
+    }
+    if (LocalAppUiStyle.current == AppUiStyle.MATERIAL) {
+        val scheme = rememberActiveExpressiveScheme()
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(vertical = 14.dp, horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, Modifier.weight(1f), color = scheme.onSurface, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Box(
+                modifier = Modifier.size(30.dp).clip(CircleShape).background(scheme.secondaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(16.dp), colorFilter = ColorFilter.tint(scheme.onSecondaryContainer))
+            }
+        }
+        return
+    }
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, Modifier.weight(1f), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
         Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary))

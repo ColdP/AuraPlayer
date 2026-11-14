@@ -16,19 +16,27 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import btm.m.auraplayer.AuraApplication
 import btm.m.auraplayer.audio.*
 import kotlinx.coroutines.Dispatchers
@@ -108,6 +116,84 @@ internal fun presetSummary(p: DspPreset): String = when (p.id) {
     SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp), content = content)
 
 @Composable private fun PresetRow(p: DspPreset, selected: Boolean, select: () -> Unit) {
+    if (LocalAppUiStyle.current == AppUiStyle.ONE) {
+        val palette = rememberActiveOneUiPalette()
+        val rowBg = if (selected) androidx.compose.ui.graphics.Color(palette.chip).copy(alpha = 0.65f) else androidx.compose.ui.graphics.Color.Transparent
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(rowBg)
+                .clickable(onClick = select)
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    presetName(p),
+                    color = androidx.compose.ui.graphics.Color(if (selected) palette.accentDeep else palette.text),
+                    fontSize = 15.5.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                )
+                val summary = presetSummary(p)
+                if (summary.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        summary,
+                        color = androidx.compose.ui.graphics.Color(palette.subText),
+                        fontSize = 13.sp,
+                    )
+                }
+            }
+            if (selected) {
+                Spacer(Modifier.width(12.dp))
+                Canvas(Modifier.size(16.dp)) {
+                    val path = Path().apply { moveTo(size.width * .17f, size.height * .5f); lineTo(size.width * .4f, size.height * .73f); lineTo(size.width * .85f, size.height * .24f) }
+                    drawPath(path, androidx.compose.ui.graphics.Color(palette.accentDeep), style = Stroke(2.2.dp.toPx(), cap = StrokeCap.Round))
+                }
+            }
+        }
+        return
+    }
+    if (LocalAppUiStyle.current == AppUiStyle.MATERIAL) {
+        val scheme = rememberActiveExpressiveScheme()
+        val rowMod = if (selected) {
+            Modifier.fillMaxWidth().background(scheme.secondaryContainer).clickable(onClick = select).padding(horizontal = 18.dp, vertical = 14.dp)
+        } else {
+            Modifier.fillMaxWidth().clickable(onClick = select).padding(horizontal = 18.dp, vertical = 14.dp)
+        }
+        Row(modifier = rowMod, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    presetName(p),
+                    color = if (selected) scheme.onSecondaryContainer else scheme.onSurface,
+                    fontSize = 15.5.sp,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                )
+                val summary = presetSummary(p)
+                if (summary.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        summary,
+                        color = if (selected) scheme.onSecondaryContainer.copy(alpha = 0.8f) else scheme.onSurfaceVariant,
+                        fontSize = 13.sp,
+                    )
+                }
+            }
+            if (selected) {
+                Spacer(Modifier.width(12.dp))
+                Box(
+                    modifier = Modifier.size(26.dp).clip(CircleShape).background(scheme.primary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Canvas(Modifier.size(13.dp)) {
+                        val path = Path().apply { moveTo(size.width * .17f, size.height * .5f); lineTo(size.width * .4f, size.height * .73f); lineTo(size.width * .85f, size.height * .24f) }
+                        drawPath(path, scheme.onPrimary, style = Stroke(2.2.dp.toPx(), cap = StrokeCap.Round))
+                    }
+                }
+            }
+        }
+        return
+    }
     val color = MiuixTheme.colorScheme.primary
     BasicComponent(title = presetName(p), summary = presetSummary(p), insideMargin = CompactPreferencePadding,
         onClick = select, endActions = {
@@ -364,7 +450,7 @@ internal fun presetSummary(p: DspPreset): String = when (p.id) {
         }
     }
     WindowDialog(pasteDialog, title = tr("paste_json", "粘贴 JSON 文本"), titleTextAlign = TextAlign.Start, onDismissRequest = { pasteDialog = false }) {
-        TextField(pasted, { pasted = it.take(PresetCodec.MAX_BYTES) }, modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp, max = 260.dp), label = tr("preset_json_text", "预设 JSON 文本"))
+        AuraTextField(pasted, { pasted = it.take(PresetCodec.MAX_BYTES) }, modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp, max = 260.dp), label = tr("preset_json_text", "预设 JSON 文本"))
         Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             GlassDialogButton({ pasteDialog = false }, Modifier.weight(1f)) { Text(tr("cancel", "取消")) }
             GlassDialogButton({ importing { pasted } }, Modifier.weight(1f), enabled = pasted.isNotBlank() && !busy) { Text(tr("import_apply", "导入并应用")) }

@@ -13,6 +13,7 @@ data class Appearance(
     val predictive: Boolean = true,
     val maxBackProgress: Float = .9f,
     val theme: String = "system",
+    val uiStyle: String = "hyper",
     val monet: Boolean = false,
     val color: String = "system",
     val customColor: Int = 0xFF7962D9.toInt(),
@@ -36,6 +37,7 @@ class AuraSettings(context: Context) {
         predictive = prefs.getBoolean("predictive", true),
         maxBackProgress = prefs.getFloat("backMaximum", .9f).coerceIn(.1f, 1f),
         theme = prefs.getString("theme", "system")!!,
+        uiStyle = normalizeUiStyle(prefs.getString("uiStyle", "hyper")),
         monet = prefs.getBoolean("monet", false), color = prefs.getString("color", "system")!!,
         customColor = prefs.getInt("customColor", 0xFF7962D9.toInt()),
         palette = prefs.getInt("palette", 0), colorSpec = prefs.getInt("colorSpec", 0),
@@ -47,16 +49,26 @@ class AuraSettings(context: Context) {
         blacklist = prefs.getStringSet("blacklist", emptySet())!!.toSet(),
     )
     fun update(transform: (Appearance) -> Appearance) {
-        val v = transform(value)
+        val v = transform(value).let { it.copy(uiStyle = normalizeUiStyle(it.uiStyle)) }
         prefs.edit().putString("navigation", v.navigation).putString("labels", v.labels)
             .putBoolean("predictive", v.predictive).putFloat("backMaximum", v.maxBackProgress)
-            .putString("theme", v.theme).putBoolean("monet", v.monet).putString("color", v.color)
+            .putString("theme", v.theme).putString("uiStyle", v.uiStyle).putBoolean("monet", v.monet).putString("color", v.color)
             .putInt("customColor", v.customColor).putInt("palette", v.palette).putInt("colorSpec", v.colorSpec)
             .putString("language", v.language).putBoolean("whitelist", v.whitelist)
             .putString("homeContent", v.homeContent)
             .putBoolean("durationFilter", v.durationFilter).putInt("minimumSeconds", v.minimumSeconds)
             .putStringSet("blacklist", v.blacklist).apply()
         value = v
+    }
+
+    companion object {
+        /** 将持久化或外部传入的界面风格值规范化为已支持的选项。 */
+        @JvmStatic
+        fun normalizeUiStyle(raw: String?): String = when (raw) {
+            "material" -> "material"
+            "one" -> "one"
+            else -> "hyper"
+        }
     }
 }
 

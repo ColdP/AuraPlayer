@@ -298,8 +298,13 @@
     "player_theme_color": "単色",
     "player_theme_fullscreen": "全画面",
     "player_theme_material": "Material",
+    "player_theme_one": "One",
     "player_material_background": "ページ背景",
     "player_material_color_mix": "Material カラーブレンド",
+    "player_glow_progress": "グロープログレスバー",
+    "player_glow_off": "オフ",
+    "player_glow_hyper": "Hyper",
+    "player_glow_one": "One",
     "playlist_add_failed": "追加できませんでした。プレイリストをタップして再試行してください",
     "playlist_name": "プレイリスト名",
     "playlists": "プレイリスト",
@@ -617,6 +622,12 @@
     "audio_info_sample_rate": "サンプリングレート",
     "audio_info_codec": "コーデック",
     "copy_all": "すべてコピー",
-    "playlist_search_hint": "プレイリスト内の曲・アーティスト・アルバムを検索"
+    "playlist_search_hint": "プレイリスト内の曲・アーティスト・アルバムを検索",
+    "interface_style": "インターフェーススタイル",
+    "style_hyper": "Hyper",
+    "style_material": "Material",
+    "style_one": "One",
+    "nav_material": "Material ナビゲーション",
+    "nav_one": "One UI ナビゲーション"
   }
 }

@@ -1,9 +1,9 @@
 Aura Player User Agreement
 
 Effective date: November 10, 2026
-Last revised: November 13, 2026
+Last revised: November 14, 2026
 
-Welcome to Aura Player ("the software"), an open-source local and NetEase Cloud Music player for Android 13 and above built with MIUIX and Media3. Before using the software, please read this Agreement, the Disclaimer, and the Privacy Policy to understand feature boundaries, copyright obligations, and how data is handled.
+Welcome to Aura Player ("the software"), an open-source local and NetEase Cloud Music player for Android 13 and above built with MIUIX and Media3, offering Hyper, Material, and One interface styles. Before using the software, please read this Agreement, the Disclaimer, and the Privacy Policy to understand feature boundaries, copyright obligations, and how data is handled.
 
 ## 1. Acceptance and Usage
 
@@ -27,7 +27,7 @@ Welcome to Aura Player ("the software"), an open-source local and NetEase Cloud 
 
 4.1 This software is distributed as a whole under the GNU AGPL-3.0-or-later license. You may copy, modify, and redistribute it in accordance with the license terms, including preserving copyright notices, retaining the license text, and providing corresponding source code. Full license details are available in LICENSE, NOTICE, and the Open-Source Notices page in the app.
 
-4.2 Third-party open-source components remain governed by their respective licenses and copyright notices. Trademarks and service names such as NetEase Cloud Music, QQ Music, Kugou, Kuwo, Apple Music, Xiaomi, and HyperOS belong to their respective owners and are referenced solely to describe compatibility or design inspiration, implying no official endorsement or affiliation.
+4.2 Third-party open-source components remain governed by their respective licenses and copyright notices. Trademarks and service names such as NetEase Cloud Music, QQ Music, Kugou, Kuwo, Apple Music, Xiaomi, HyperOS, Google Material Design, Samsung, and One UI belong to their respective owners and are referenced solely to describe compatibility, dynamic theming, or visual design inspiration, implying no official endorsement or affiliation.
 
 ## 5. Conduct and External Resources
 

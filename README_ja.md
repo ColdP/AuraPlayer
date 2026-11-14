@@ -52,7 +52,7 @@ Aura Player（パッケージ名 `btm.m.auraplayer`）は、Android 13（API 33�
 ### 再生画面、歌詞、歌詞共有
 
 - **Media3 再生とジェスチャー**：バックグラウンド再生とメディア通知、0.5–3 倍速再生、スリープタイマー、音量操作、ドラッグ並び替え可能な再生キュー、左右スワイプ曲送り、ミニプレイヤーから全画面への連続展開、下スワイプ折りたたみ、予測型「戻る」に対応しています。
-- **画面テーマ**：オーロラ、ぼかしオーロラ、ぼかし、単色、全画面テーマ、雪・雨エフェクト、曲切り替え時のカバーアニメーション（カード、カバー、ページめくり、スタック、縦／横回転）、歌詞表示中の画面オン維持、操作ボタンの自動非表示に対応しています。
+- **画面テーマ**：オーロラ、ぼかしオーロラ、ぼかし、単色、全画面、Material テーマ、雪・雨エフェクト、曲切り替え時のカバーアニメーション（カード、カバー、ページめくり、スタック、縦／横回転）、歌詞表示中の画面オン維持、操作ボタンの自動非表示に対応しています。
 - **マルチソース歌詞**：NetEase、QQ Music、Kuwo、Kugou、LrcLib、AMLL、TTML Hub から歌詞を取得し、字単位同期、翻訳、発音、デュエット配置、端のぼかしフェードシェーダー、タップシーク、3 秒後の自動フォーカス復帰に対応しています。
 - **歌詞共有スタジオ**：多彩なカードテンプレート（Aura Mesh、Cinema、Paper、Polaroid、Vinyl、Swiss など）を備え、ライト／ダーク切替、フォント、背景、フィルター、行間、角丸を調整して画像保存・共有できます。
 
@@ -64,8 +64,8 @@ Aura Player（パッケージ名 `btm.m.auraplayer`）は、Android 13（API 33�
 
 ### 外観カスタマイズと多言語
 
-- MIUIX 0.9.4 と Backdrop を採用し、ライト・ダーク・システム連動テーマ、Monet 動的配色（2021 / 2025 仕様、各種パレット、カスタムカラー）に対応しています。
-- HyperOS フローティング、HarmonyOS フローティング、液体ガラスの下部ナビゲーションを選択でき、ぼかし、不透明度、屈折、ハイライト、色分散などを調整できます。
+- MIUIX 0.9.4、Material 3 Expressive、OneUI_Kit に基づく **Hyper / Material / One** の 3 つのインターフェーススタイルと、ライト・ダーク・システム連動テーマ、Monet 動的配色（2021 / 2025 仕様、One UI CIELAB セマンティック配色、各種パレット、カスタムカラー）に対応しています。
+- HyperOS フローティング、HarmonyOS フローティング、液体ガラス、Material、One UI の下部ナビゲーションを選択でき、ガラス系スタイルではぼかし、不透明度、屈折、ハイライト、色分散などを調整できます。
 - 簡体字中国語、English、日本語の UI と三言語の法的文書（利用規約、免責事項、プライバシーポリシー）を内蔵し、[languages/example.json](languages/example.json) を用いて翻訳を拡張できます。
 
 ## 互換性と動作要件
@@ -141,7 +141,7 @@ Issue や Pull Request を歓迎します。参加前に [日本語コントリ�
 
 - UI スタイル、ガラスコンポーネント、ナビゲーションアニメーション、アプリ情報／寄付画面レイアウト：[HyperChanger](https://github.com/ColdP/HyperChanger)（AGPL-3.0-or-later）。
 - ホーム構成と MediaStore ソート処理の参考・移植：[Retro Music](https://github.com/RetroMusicPlayer/RetroMusicPlayer)（GPL-3.0-or-later）。
-- UI コンポーネントとガラス描画：[MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）および [Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0）；プレイリストタイトルバーの検索コンポーネントは [COUI-Kit](https://github.com/ItosEO/COUI-Kit)（MPL-2.0）を使用しています。
+- UI コンポーネントと各種スタイル表現：[MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）、[Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0）；プレイリストタイトルバーの検索コンポーネントは [COUI-Kit](https://github.com/ItosEO/COUI-Kit)（MPL-2.0）、`One` スタイルおよびスイッチ・シークバー（`MonetTones`、`OneUiPalette`、`BoSwitchView`、`DragOnlySeekBar`）は `OneUI_Kit`（MIT、`OneUIProject/oneui-design` および `oneui-core` 由来）を使用しています。
 - 歌詞の取得・照合・描画：[HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（AGPL-3.0）、[HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced)（GPL-3.0 / Apache-2.0）、[Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics)（Apache-2.0）。
 - その他の主な依存ライブラリ：[Media3](https://developer.android.com/media/media3)、[Coil](https://github.com/coil-kt/coil)、[OkHttp](https://github.com/square/okhttp)、[jaudiotagger](https://github.com/Adonai/jaudiotagger-android)（LGPL-2.1）、[MaterialKolor](https://github.com/jordond/MaterialKolor)（MIT）、[ZXing](https://github.com/zxing/zxing)（Apache-2.0）、[NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT）。
 

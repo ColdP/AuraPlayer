@@ -298,8 +298,13 @@
     "player_theme_color": "Color",
     "player_theme_fullscreen": "Full screen",
     "player_theme_material": "Material",
+    "player_theme_one": "One",
     "player_material_background": "Page background",
     "player_material_color_mix": "Material color blend",
+    "player_glow_progress": "Glowing progress bar",
+    "player_glow_off": "Off",
+    "player_glow_hyper": "Hyper",
+    "player_glow_one": "One",
     "playlist_add_failed": "Could not add the song. Tap a playlist to retry",
     "playlist_name": "Playlist name",
     "playlists": "Playlists",
@@ -617,6 +622,12 @@
     "audio_info_sample_rate": "Sample rate",
     "audio_info_codec": "Codec",
     "copy_all": "Copy all",
-    "playlist_search_hint": "Search songs, artists or albums"
+    "playlist_search_hint": "Search songs, artists or albums",
+    "interface_style": "Interface style",
+    "style_hyper": "Hyper",
+    "style_material": "Material",
+    "style_one": "One",
+    "nav_material": "Material navigation",
+    "nav_one": "One UI navigation"
   }
 }

@@ -96,6 +96,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastCoerceIn
 import androidx.compose.ui.util.fastRoundToInt
 import androidx.compose.ui.util.lerp
+import btm.m.auraplayer.ui.MaterialExpressiveNavigationBar
 import btm.m.auraplayer.ui.navigation.LabelMode
 import btm.m.auraplayer.ui.navigation.NavigationStyle
 import btm.m.auraplayer.ui.navigation.NavigationScaleSettings
@@ -238,6 +239,43 @@ internal fun CustomNavigation(
     val backdrop = requireNotNull(backdropOverride)
     val density = LocalDensity.current
     if (scale.widthFactor == 0f || scale.heightFactor == 0f) return@CompositionLocalProvider
+    if (style == NavigationStyle.MATERIAL || style == NavigationStyle.ONE) {
+        Box(Modifier.fillMaxSize()) {
+            if (concealHostBottomBar) {
+                HostBottomBarConcealment(backdrop, hostIsDarkTheme, density)
+            }
+            val navModifier = Modifier
+                .align(Alignment.BottomCenter)
+                .floatingNavigationWidth(0.53f * 0.82f, scale.widthFactor)
+                .navigationBarsPadding()
+                .padding(bottom = 8.dp * 0.82f)
+                .height(72.dp * 0.82f * scale.heightFactor)
+            if (style == NavigationStyle.ONE) {
+                btm.m.auraplayer.ui.OneUiNavigationBar(
+                    tabs = tabs,
+                    selectedIndex = selectedIndex,
+                    showIcons = effectiveMode != LabelMode.TEXT_ONLY,
+                    showLabels = effectiveMode != LabelMode.ICON_ONLY,
+                    isDarkTheme = hostIsDarkTheme,
+                    tabImageVector = tabImageVector,
+                    tabIconContent = tabIconContent,
+                    modifier = navModifier,
+                )
+            } else {
+                MaterialExpressiveNavigationBar(
+                    tabs = tabs,
+                    selectedIndex = selectedIndex,
+                    showIcons = effectiveMode != LabelMode.TEXT_ONLY,
+                    showLabels = effectiveMode != LabelMode.ICON_ONLY,
+                    isDarkTheme = hostIsDarkTheme,
+                    tabImageVector = tabImageVector,
+                    tabIconContent = tabIconContent,
+                    modifier = navModifier,
+                )
+            }
+        }
+        return@CompositionLocalProvider
+    }
     if (style != NavigationStyle.LIQUID_GLASS) {
         Box(Modifier.fillMaxSize()) {
             if (concealHostBottomBar && style != NavigationStyle.HYPER_OS_FLOATING) {
@@ -503,6 +541,16 @@ private fun TrailingActionButton(
             Color(0xFF242424).copy(alpha = 0.88f)
         } else {
             Color(0xFFF5F5F5).copy(alpha = 0.82f)
+        }
+        NavigationStyle.MATERIAL -> if (isDarkTheme) {
+            Color(0xFF282430)
+        } else {
+            Color(0xFFECE6F0)
+        }
+        NavigationStyle.ONE -> if (isDarkTheme) {
+            Color(0xFF1B1B1B)
+        } else {
+            Color(0xFFFFFFFF)
         }
     }
     val actionInteractionSource = remember { MutableInteractionSource() }

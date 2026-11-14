@@ -52,7 +52,7 @@ The source version is defined by `versionName` in [app/build.gradle.kts](app/bui
 ### Now Playing, Lyrics, and Lyric Sharing
 
 - **Media3 Playback and Gestures**: Background playback with media notifications, 0.5–3x playback speed, sleep timer, volume controls, drag-to-reorder queue, horizontal swipe track switching, mini-player to full-screen continuous morphing, swipe-down collapse, and predictive back.
-- **Player Appearance**: Aurora, Blurred Aurora, Blur, Solid Color, and Full-Screen themes; snow and rain effects; multiple cover transitions (Card, Cover, Page Turn, Stack, Vertical/Horizontal Flip); keep-screen-on in lyrics mode; and auto-hiding immersive controls.
+- **Player Appearance**: Aurora, Blurred Aurora, Blur, Solid Color, Full-Screen, and Material themes; snow and rain effects; multiple cover transitions (Card, Cover, Page Turn, Stack, Vertical/Horizontal Flip); keep-screen-on in lyrics mode; and auto-hiding immersive controls.
 - **Multi-Source Lyrics**: Fetches from NetEase, QQ Music, Kuwo, Kugou, LrcLib, AMLL, and TTML Hub; supports word-by-word timing, translations, pronunciation, duet alignment, edge fade/blur shader, tap-to-seek, and 3-second browse focus auto-return.
 - **Lyric Share Studio**: Multiple card templates (Aura Mesh, Cinema, Paper, Polaroid, Vinyl, Swiss, etc.) with customizable light/dark mode, fonts, backgrounds, filters, line spacing, corner radius, and image export/sharing.
 
@@ -64,8 +64,8 @@ The source version is defined by `versionName` in [app/build.gradle.kts](app/bui
 
 ### Visual Customization and Localization
 
-- Built with MIUIX 0.9.4 and Backdrop: light, dark, and system themes, plus Monet color generation (Classic 2021 / Expressive 2025 specs, multiple palettes, and custom colors).
-- Floating HyperOS, floating HarmonyOS, and Liquid Glass bottom navigation styles with customizable blur, opacity, refraction, highlight, and dispersion parameters.
+- Three interface styles (**Hyper**, **Material**, and **One**) built across MIUIX 0.9.4, Material 3 Expressive, and OneUI_Kit; light, dark, and system themes plus Monet color generation (Classic 2021 / Expressive 2025 specs, One UI CIELAB semantic tones, multiple palettes, and custom colors).
+- Floating HyperOS, floating HarmonyOS, Liquid Glass, Material, and One UI bottom navigation styles, with customizable blur, opacity, refraction, highlight, and dispersion parameters for glass styles.
 - Built-in Simplified Chinese, English, and Japanese interfaces and localized legal documents (User Agreement, Disclaimer, Privacy Policy), extensible via [languages/example.json](languages/example.json).
 
 ## Compatibility and Requirements
@@ -141,7 +141,7 @@ This project is distributed under the [GNU AGPL-3.0-or-later](LICENSE) license. 
 
 - UI styling, glass components, navigation motion, and About/Donate layouts from [HyperChanger](https://github.com/ColdP/HyperChanger) (AGPL-3.0-or-later).
 - Home structure and MediaStore sorting adapted from [Retro Music](https://github.com/RetroMusicPlayer/RetroMusicPlayer) (GPL-3.0-or-later).
-- UI widgets and glass rendering powered by [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix) (Apache-2.0) and [Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass) (Apache-2.0); playlist title-bar search uses [COUI-Kit](https://github.com/ItosEO/COUI-Kit) (MPL-2.0).
+- UI widgets and visual systems powered by [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix) (Apache-2.0) and [Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass) (Apache-2.0); playlist title-bar search uses [COUI-Kit](https://github.com/ItosEO/COUI-Kit) (MPL-2.0); the `One` interface style and native interactive widgets (`MonetTones`, `OneUiPalette`, `BoSwitchView`, `DragOnlySeekBar`) adapt `OneUI_Kit` (MIT, originating from `OneUIProject/oneui-design` & `oneui-core`).
 - Lyric fetching, matching, and rendering from [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) (AGPL-3.0), [HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced) (GPL-3.0 / Apache-2.0), and [Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics) (Apache-2.0).
 - Additional dependencies: [Media3](https://developer.android.com/media/media3), [Coil](https://github.com/coil-kt/coil), [OkHttp](https://github.com/square/okhttp), [jaudiotagger](https://github.com/Adonai/jaudiotagger-android) (LGPL-2.1), [MaterialKolor](https://github.com/jordond/MaterialKolor) (MIT), [ZXing](https://github.com/zxing/zxing) (Apache-2.0), and [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) (MIT).
 

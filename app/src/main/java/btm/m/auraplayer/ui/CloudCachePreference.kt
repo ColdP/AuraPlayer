@@ -46,8 +46,7 @@ internal fun CloudCachePreference(model: AuraViewModel) {
                 fun toggle() { selected = if (category in selected) selected - category else selected + category }
                 BasicComponent(title = label, summary = size(sizes?.get(category) ?: 0L),
                     enabled = !clearing, onClick = { toggle() }, endActions = {
-                        Checkbox(state = androidx.compose.ui.state.ToggleableState(category in selected),
-                            enabled = !clearing, onClick = { toggle() })
+                        AuraCheckbox(checked = category in selected, enabled = !clearing, onCheckedChange = { toggle() })
                     })
             }
         }

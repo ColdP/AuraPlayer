@@ -52,18 +52,43 @@ internal fun SeamlessCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val geometry = remember { SeamlessCardGeometry() }
-    val effectiveCornerRadius = cornerRadius
+    val uiStyle = LocalAppUiStyle.current
+    val materialUi = uiStyle == AppUiStyle.MATERIAL
+    val oneUi = uiStyle == AppUiStyle.ONE
+    val isDefaultRadius = cornerRadius == CardDefaults.CornerRadius || cornerRadius == 22.5.dp
+    val effectiveCornerRadius = when {
+        oneUi && isDefaultRadius -> OneUiCardRadius
+        materialUi && isDefaultRadius -> 22.dp
+        else -> cornerRadius
+    }
     geometry.radius = with(LocalDensity.current) { effectiveCornerRadius.toPx() }
     geometry.bottomPaddingPx = with(LocalDensity.current) { insideMargin.calculateBottomPadding().toPx() }
     geometry.color = colors.color
-    geometry.squircle = isSquircleEnabled()
+    geometry.squircle = uiStyle == AppUiStyle.HYPER && isSquircleEnabled()
     CompositionLocalProvider(LocalSeamlessCard provides geometry) {
         val tracked = modifier.onGloballyPositioned { geometry.coordinates = it }
-        if (onClick == null && onLongPress == null && pressFeedbackType == PressFeedbackType.None &&
+        if (materialUi && insideMargin == PaddingValues(0.dp) &&
+            onClick == null && onLongPress == null && pressFeedbackType == PressFeedbackType.None &&
             !showIndication && !holdDownState) {
-            MiuixCard(tracked, cornerRadius, insideMargin, colors, content)
+            MaterialExpressiveSegmentedColumn(
+                modifier = tracked,
+                containerColor = colors.color,
+                content = content,
+            )
+        } else if (oneUi && insideMargin == PaddingValues(0.dp) &&
+            onClick == null && onLongPress == null && pressFeedbackType == PressFeedbackType.None &&
+            !showIndication && !holdDownState) {
+            OneUiCardColumn(
+                modifier = tracked,
+                containerColor = colors.color,
+                cornerRadius = effectiveCornerRadius,
+                content = content,
+            )
+        } else if (onClick == null && onLongPress == null && pressFeedbackType == PressFeedbackType.None &&
+            !showIndication && !holdDownState) {
+            MiuixCard(tracked, effectiveCornerRadius, insideMargin, colors, content)
         } else {
-            MiuixCard(tracked, cornerRadius, insideMargin, colors, pressFeedbackType, showIndication,
+            MiuixCard(tracked, effectiveCornerRadius, insideMargin, colors, pressFeedbackType, showIndication,
                 holdDownState, onClick, onLongPress, content)
         }
     }

@@ -34,11 +34,21 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
         item {
             Group(tr("appearance", "外观")) {
                 Preference(tr("theme_color", "主题与颜色")) { open("theme") }
+                val navOptions = listOf(
+                    tr("nav_hyper", "HyperOS 悬浮导航栏"),
+                    tr("nav_harmony", "HarmonyOS 悬浮导航栏"),
+                    tr("nav_liquid", "液态玻璃导航栏"),
+                    tr("nav_material", "Material 导航栏"),
+                    tr("nav_one", "One UI 导航栏"),
+                )
+                val navValues = listOf("hyper_os_floating", "harmony_os_floating", "liquid_glass", "material", "one")
                 GlassDropdownPreference(tr("navigation_style", "底部导航栏样式"),
-                    listOf(tr("nav_hyper", "HyperOS 悬浮导航栏"), tr("nav_harmony", "HarmonyOS 悬浮导航栏"), tr("nav_liquid", "液态玻璃导航栏")),
-                    listOf("hyper_os_floating", "harmony_os_floating", "liquid_glass").indexOf(value.navigation).coerceAtLeast(0),
-                    backdrop = LocalToolbarBackdrop.current) { index -> model.updateSettings { it.copy(navigation = listOf("hyper_os_floating", "harmony_os_floating", "liquid_glass")[index]) } }
-                Preference(tr("nav_material_title", "底部导航栏材质参数调整")) { open("navigation_material") }
+                    navOptions,
+                    navValues.indexOf(value.navigation).coerceAtLeast(0),
+                    backdrop = LocalToolbarBackdrop.current) { index -> model.updateSettings { it.copy(navigation = navValues[index]) } }
+                BlurAnimatedVisibility(visible = value.navigation !in setOf("material", "one"), label = "nav-material-setting") {
+                    Preference(tr("nav_material_title", "底部导航栏材质参数调整")) { open("navigation_material") }
+                }
                 GlassDropdownPreference(tr("navigation_labels", "底部导航栏标签显示方式"),
                     listOf(tr("icons_and_text", "图标和文本"), tr("icons_only", "仅图标"), tr("text_only", "仅文本")),
                     listOf("icon_and_text", "icon_only", "text_only").indexOf(value.labels).coerceAtLeast(0), backdrop = LocalToolbarBackdrop.current) { index ->
@@ -148,6 +158,12 @@ fun ThemePage(model: AuraViewModel, padding: PaddingValues) {
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Group(tr("theme", "主题")) {
+                val styleOptions = listOf(tr("style_hyper", "Hyper"), tr("style_material", "Material"), tr("style_one", "One"))
+                val styleValues = listOf("hyper", "material", "one")
+                GlassDropdownPreference(tr("interface_style", "界面风格"), styleOptions,
+                    styleValues.indexOf(value.uiStyle).coerceAtLeast(0), backdrop = LocalToolbarBackdrop.current) { index ->
+                    model.updateSettings { it.copy(uiStyle = styleValues[index]) }
+                }
                 GlassDropdownPreference(tr("theme_mode", "主题模式"), listOf(tr("follow_system", "跟随系统"), tr("light_mode", "浅色模式"), tr("dark_mode", "深色模式")),
                     listOf("system", "light", "dark").indexOf(value.theme).coerceAtLeast(0), backdrop = LocalToolbarBackdrop.current) { index ->
                     model.updateSettings { it.copy(theme = listOf("system", "light", "dark")[index]) }
@@ -227,15 +243,15 @@ fun LoginPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Un
                 Preference(tr("logout", "退出登录")) { confirmLogout = true }
             } else if (model.app.endpoint.isNotBlank()) Group(tr("phone_login", "手机号验证码登录")) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    TextField(country, { country = it.filter(Char::isDigit).take(4) }, label = tr("country_code", "国际区号"), singleLine = true,
+                    AuraTextField(country, { country = it.filter(Char::isDigit).take(4) }, label = tr("country_code", "国际区号"), singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth())
-                    TextField(phone, { phone = it.filter(Char::isDigit).take(20) }, label = tr("phone", "手机号"), singleLine = true,
+                    AuraTextField(phone, { phone = it.filter(Char::isDigit).take(20) }, label = tr("phone", "手机号"), singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth())
                     GlassDialogButton({ model.sendCaptcha(phone, country) }, Modifier.fillMaxWidth(),
                         enabled = model.smsRemaining == 0 && !model.cloudBusy && phone.length >= 5 && country.isNotBlank() && model.app.endpoint.isNotBlank()) {
                         Text(if (model.smsRemaining > 0) "${model.smsRemaining}s" else tr("send_captcha", "获取验证码"))
                     }
-                    TextField(captcha, { captcha = it.filter(Char::isDigit).take(8) }, label = tr("captcha", "验证码"), singleLine = true,
+                    AuraTextField(captcha, { captcha = it.filter(Char::isDigit).take(8) }, label = tr("captcha", "验证码"), singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), modifier = Modifier.fillMaxWidth())
                     GlassDialogButton({ model.login(phone, country, captcha); captcha = "" }, Modifier.fillMaxWidth(),
                         enabled = !model.cloudBusy && phone.length >= 5 && captcha.length >= 4 && country.isNotBlank() && model.app.endpoint.isNotBlank(),
@@ -245,10 +261,8 @@ fun LoginPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Un
         }
         item {
             SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
-                Column {
-                    Preference(tr("downloaded_music", "已下载的音乐"), onClick = { open("downloads") })
-                    CloudCachePreference(model)
-                }
+                Preference(tr("downloaded_music", "已下载的音乐"), onClick = { open("downloads") })
+                CloudCachePreference(model)
             }
         }
         item {
@@ -262,7 +276,7 @@ fun LoginPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Un
                     if (model.app.endpoint.isNotBlank()) Preference(tr("use_official", "使用网易云官方连接")) {
                         model.useOfficialService(); endpoint = ""; advanced = false
                     }
-                    TextField(endpoint, { endpoint = it }, label = tr("api_address", "网易云 API 服务地址"), singleLine = true,
+                    AuraTextField(endpoint, { endpoint = it }, label = tr("api_address", "网易云 API 服务地址"), singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth())
                     GlassDialogButton({ model.configureApi(endpoint) }, Modifier.fillMaxWidth(), enabled = endpoint.isNotBlank() && !model.cloudBusy) { Text(tr("save_address", "保存服务地址")) }
                     Preference(tr("api_project", "查看 API 开源项目与部署说明")) { openUrl(context, "https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced") }

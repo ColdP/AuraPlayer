@@ -40,6 +40,7 @@ internal fun PlayerThemeBackground(
     compactProgress: Float,
     animate: Boolean,
     expressive: PlayerExpressiveColors? = null,
+    oneUi: PlayerOneUiColors? = null,
     modifier: Modifier = Modifier,
 ) {
     val usesFlowingArt = config.theme == PlayerTheme.AURORA_BLUR ||
@@ -90,10 +91,11 @@ internal fun PlayerThemeBackground(
     Box(modifier.clipToBounds()) {
         Crossfade(config.theme to config.materialBackground, animationSpec = tween(380), label = "playerTheme") { (theme, materialBg) ->
             val materialMode = theme == PlayerTheme.MATERIAL
-            val baseColor = if (materialMode && materialBg == MaterialPlayerBackground.MATERIAL && expressive != null) {
-                expressive.surface
-            } else {
-                Color(palette.a2.tone(14))
+            val oneUiMode = theme == PlayerTheme.ONE && oneUi != null
+            val baseColor = when {
+                materialMode && materialBg == MaterialPlayerBackground.MATERIAL && expressive != null -> expressive.surface
+                oneUiMode -> oneUi.background
+                else -> Color(palette.a2.tone(14))
             }
             Box(Modifier.fillMaxSize().background(baseColor)) {
                 val showAurora = theme == PlayerTheme.AURORA ||
@@ -105,6 +107,9 @@ internal fun PlayerThemeBackground(
                     (materialMode && (materialBg == MaterialPlayerBackground.BLUR || materialBg == MaterialPlayerBackground.AURORA_BLUR))
                 if (materialMode && materialBg == MaterialPlayerBackground.MATERIAL && expressive != null) {
                     MaterialExpressiveSurfaceWash(expressive, phase, washStrength = 1f - materialMix * .92f, Modifier.fillMaxSize())
+                }
+                if (oneUiMode) {
+                    OneUiSurfaceWash(oneUi, Modifier.fillMaxSize())
                 }
                 if (showAurora) {
                     PlayerAmbientBackground(palette, Modifier.fillMaxSize(), animate)
@@ -190,6 +195,33 @@ private fun MaterialExpressiveSurfaceWash(colors: PlayerExpressiveColors, phase:
             ),
             radius = size.width * .68f,
             center = midCenter,
+        )
+    }
+}
+
+@Composable
+private fun OneUiSurfaceWash(colors: PlayerOneUiColors, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        drawRect(colors.background)
+        val topCenter = Offset(size.width * .50f, size.height * .26f)
+        val bottomCenter = Offset(size.width * .52f, size.height * .82f)
+        drawCircle(
+            brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                listOf(colors.accent.copy(alpha = if (colors.dark) .18f else .12f), Color.Transparent),
+                center = topCenter,
+                radius = size.width * .92f,
+            ),
+            radius = size.width * .92f,
+            center = topCenter,
+        )
+        drawCircle(
+            brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                listOf(colors.chip.copy(alpha = if (colors.dark) .22f else .16f), Color.Transparent),
+                center = bottomCenter,
+                radius = size.width * .86f,
+            ),
+            radius = size.width * .86f,
+            center = bottomCenter,
         )
     }
 }

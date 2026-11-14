@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import btm.m.auraplayer.ui.navigation.DampedDragAnimation
 import btm.m.auraplayer.ui.navigation.InteractiveHighlight
@@ -27,6 +28,8 @@ internal fun InteractiveToolbarGlass(
     shape: Shape = CircleShape,
     glassAlpha: Float = 1f,
     opticalStrength: Float = 1f,
+    blurRadius: Dp = TOOLBAR_GLASS_BLUR_RADIUS,
+    refractionScale: Float = 1f,
     onClick: () -> Unit,
     content: @Composable BoxScope.() -> Unit,
 ) {
@@ -48,10 +51,11 @@ internal fun InteractiveToolbarGlass(
             .then(if (backdrop == null) Modifier.background(tint, shape) else Modifier.drawBackdrop(
                 backdrop = backdrop, shape = { shape },
                 effects = {
-                    vibrancy(); blur(TOOLBAR_GLASS_BLUR_RADIUS.toPx())
+                    vibrancy(); blur(blurRadius.toPx())
                     lens((16.dp + 4.dp * drag.pressProgress).toPx(),
-                        (32.dp + 8.dp * drag.pressProgress).toPx() * opticalStrength,
-                        depthEffect = true, chromaticAberration = opticalStrength >= .75f)
+                        (32.dp + 8.dp * drag.pressProgress).toPx() * opticalStrength * refractionScale,
+                        depthEffect = true,
+                        chromaticAberration = opticalStrength >= .75f && refractionScale >= .75f)
                 },
                 highlight = { toolbarGlassHighlight(drag.pressProgress).let { it.copy(alpha = it.alpha * opticalStrength) } },
                 shadow = { Shadow.Default.copy(radius = 5.dp, color = Color.Black, alpha = .24f) },

@@ -1,11 +1,20 @@
 package btm.m.auraplayer.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -90,6 +99,17 @@ internal fun resolveFloatingGlassMaterialSpec(
 
 @Composable
 fun Group(title: String, content: @Composable ColumnScope.() -> Unit) {
+    when (LocalAppUiStyle.current) {
+        AppUiStyle.MATERIAL -> {
+            MaterialExpressiveGroup(title, content)
+            return
+        }
+        AppUiStyle.ONE -> {
+            OneUiGroup(title, content)
+            return
+        }
+        AppUiStyle.HYPER -> Unit
+    }
     Column(Modifier.fillMaxWidth()) {
         SmallTitle(title, insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp))
         SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp), content = content)
@@ -98,12 +118,49 @@ fun Group(title: String, content: @Composable ColumnScope.() -> Unit) {
 
 @Composable
 fun Preference(title: String, summary: String? = null, enabled: Boolean = true, onClick: () -> Unit) {
+    when (LocalAppUiStyle.current) {
+        AppUiStyle.MATERIAL -> {
+            MaterialExpressivePreferenceRow(title = title, summary = summary, enabled = enabled, onClick = onClick)
+            return
+        }
+        AppUiStyle.ONE -> {
+            OneUiPreferenceRow(title = title, summary = summary, enabled = enabled, onClick = onClick)
+            return
+        }
+        AppUiStyle.HYPER -> Unit
+    }
     top.yukonga.miuix.kmp.preference.ArrowPreference(title = title, summary = summary, enabled = enabled, onClick = onClick, insideMargin = CompactPreferencePadding)
 }
 
 @Composable
 fun SwitchPreference(title: String, summary: String? = null, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
+    when (LocalAppUiStyle.current) {
+        AppUiStyle.MATERIAL -> {
+            MaterialExpressiveSwitchPreference(title = title, summary = summary, checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+            return
+        }
+        AppUiStyle.ONE -> {
+            OneUiSwitchPreference(title = title, summary = summary, checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+            return
+        }
+        AppUiStyle.HYPER -> Unit
+    }
     top.yukonga.miuix.kmp.preference.SwitchPreference(checked = checked, onCheckedChange = onCheckedChange, title = title, summary = summary, enabled = enabled, insideMargin = CompactPreferencePadding)
+}
+
+@Composable
+fun BlurAnimatedVisibility(visible: Boolean, label: String, content: @Composable () -> Unit) {
+    val transition = updateTransition(visible, label = label)
+    val blur by transition.animateFloat(transitionSpec = { tween(220) }, label = "blur") { if (it) 0f else 8f }
+    transition.AnimatedVisibility(
+        visible = { it },
+        enter = fadeIn(tween(220)) + expandVertically(tween(220)),
+        exit = fadeOut(tween(220)) + shrinkVertically(tween(220)),
+    ) {
+        Box(Modifier.blur(blur.dp)) {
+            content()
+        }
+    }
 }
 
 @Composable

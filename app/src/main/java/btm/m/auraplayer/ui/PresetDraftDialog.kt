@@ -23,7 +23,7 @@ import top.yukonga.miuix.kmp.basic.*
         transfer = mode; onDismiss()
     }
     WindowDialog(show, title = tr("unsaved_preset", "未保存的预设"), titleTextAlign = TextAlign.Start, onDismissRequest = onDismiss) {
-        TextField(name, { name = it.take(80) }, label = tr("preset_name", "预设名称"), singleLine = true, modifier = Modifier.fillMaxWidth())
+        AuraTextField(name, { name = it.take(80) }, label = tr("preset_name", "预设名称"), singleLine = true, modifier = Modifier.fillMaxWidth())
         GlassDialogButton({
             if (runCatching { store.saveDraft(name) }.isSuccess) onSaved()
             else Toast.makeText(context, tr("preset_library_full", "预设库已满，请先删除部分自存预设"), Toast.LENGTH_LONG).show()

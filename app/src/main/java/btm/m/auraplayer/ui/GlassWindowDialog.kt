@@ -42,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -206,8 +207,19 @@ fun WindowDialog(
             WindowInsets.captionBar.asPaddingValues().calculateTopPadding(),
             WindowInsets.displayCutout.asPaddingValues().calculateTopPadding(),
         )
-        val dialogShape = RoundedCornerShape(40.dp)
-        val contentAlignment = if (isLargeScreen) Alignment.Center else Alignment.BottomCenter
+        val uiStyle = LocalAppUiStyle.current
+        val materialUi = uiStyle == AppUiStyle.MATERIAL
+        val oneUi = uiStyle == AppUiStyle.ONE
+        val expressiveScheme = if (materialUi) rememberActiveExpressiveScheme() else null
+        val onePalette = if (oneUi) rememberActiveOneUiPalette() else null
+        val dialogShape = RoundedCornerShape(
+            when {
+                oneUi -> 26.dp
+                materialUi -> 28.dp
+                else -> 40.dp
+            }
+        )
+        val contentAlignment = if (isLargeScreen || materialUi) Alignment.Center else Alignment.BottomCenter
         val imeBottomSafetyOffsetPx = if (imeInsets.getBottom(density) > 0) {
             with(density) {
                 (windowInfo.containerDpSize.height * imeBottomSafetyFraction.coerceIn(0f, 1f)).toPx()
@@ -218,14 +230,14 @@ fun WindowDialog(
         val contentModifier = modifier
             .widthIn(max = DialogDefaults.MaxWidth)
             .heightIn(
-                max = if (isLargeScreen) windowInfo.containerDpSize.height * (2f / 3f)
+                max = if (isLargeScreen || materialUi) windowInfo.containerDpSize.height * (2f / 3f)
                 else androidx.compose.ui.unit.Dp.Unspecified,
             )
             .onGloballyPositioned { dialogHeightPx.intValue = it.size.height }
             .graphicsLayer {
                 val progress = animationProgress.value
-                if (isLargeScreen) {
-                    val scale = 0.8f + 0.2f * progress
+                if (isLargeScreen || materialUi) {
+                    val scale = (if (materialUi) 0.90f else 0.8f) + (if (materialUi) 0.10f else 0.2f) * progress
                     scaleX = scale
                     scaleY = scale
                     alpha = progress
@@ -246,26 +258,41 @@ fun WindowDialog(
                 }
             }
             .pointerInput(Unit) { detectTapGestures { /* Consume taps inside the dialog. */ } }
-            .clip(dialogShape)
             .then(
-                if (activeBackdrop != null) {
-                    Modifier.drawBackdrop(
-                        backdrop = activeBackdrop,
-                        shape = { dialogShape },
-                        effects = {
-                            vibrancy()
-                            blur(8.dp.toPx())
-                            lens(16.dp.toPx(), 16.dp.toPx(), chromaticAberration = true)
-                        },
-                        highlight = {
-                            Highlight.Default.copy(alpha = .70f)
-                        },
-                    )
-                } else Modifier
-            )
-            .background(
-                color = backgroundColor.copy(alpha = 0.87f),
-                shape = dialogShape,
+                if (materialUi && expressiveScheme != null) {
+                    Modifier
+                        .shadow(16.dp, dialogShape, clip = false)
+                        .clip(dialogShape)
+                        .background(expressiveScheme.surfaceContainerHigh, dialogShape)
+                } else if (oneUi && onePalette != null) {
+                    Modifier
+                        .shadow(14.dp, dialogShape, clip = false)
+                        .clip(dialogShape)
+                        .background(Color(onePalette.card), dialogShape)
+                } else {
+                    Modifier
+                        .clip(dialogShape)
+                        .then(
+                            if (activeBackdrop != null) {
+                                Modifier.drawBackdrop(
+                                    backdrop = activeBackdrop,
+                                    shape = { dialogShape },
+                                    effects = {
+                                        vibrancy()
+                                        blur(8.dp.toPx())
+                                        lens(16.dp.toPx(), 16.dp.toPx(), chromaticAberration = true)
+                                    },
+                                    highlight = {
+                                        Highlight.Default.copy(alpha = .70f)
+                                    },
+                                )
+                            } else Modifier
+                        )
+                        .background(
+                            color = backgroundColor.copy(alpha = 0.87f),
+                            shape = dialogShape,
+                        )
+                }
             )
             .padding(horizontal = insideMargin.width, vertical = insideMargin.height)
 
@@ -324,6 +351,33 @@ fun GlassDialogButton(
     colors: ButtonColors = ButtonDefaults.buttonColors(),
     content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
 ) {
+    when (LocalAppUiStyle.current) {
+        AppUiStyle.MATERIAL -> {
+            val isPrimary = colors == ButtonDefaults.buttonColorsPrimary()
+            MaterialExpressiveButton(
+                onClick = onClick,
+                modifier = modifier,
+                enabled = enabled,
+                primary = isPrimary,
+                colors = if (isPrimary || colors == ButtonDefaults.buttonColors()) null else colors,
+                content = content,
+            )
+            return
+        }
+        AppUiStyle.ONE -> {
+            val isPrimary = colors == ButtonDefaults.buttonColorsPrimary()
+            OneUiButton(
+                onClick = onClick,
+                modifier = modifier,
+                enabled = enabled,
+                primary = isPrimary,
+                colors = if (isPrimary || colors == ButtonDefaults.buttonColors()) null else colors,
+                content = content,
+            )
+            return
+        }
+        AppUiStyle.HYPER -> Unit
+    }
     top.yukonga.miuix.kmp.basic.Button(
         onClick = onClick,
         modifier = modifier,

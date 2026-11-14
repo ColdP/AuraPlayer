@@ -5,7 +5,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 
-enum class PlayerTheme { AURORA, AURORA_BLUR, BLUR, COLOR, FULLSCREEN, MATERIAL }
+enum class PlayerTheme { AURORA, AURORA_BLUR, BLUR, COLOR, FULLSCREEN, MATERIAL, ONE }
+enum class GlowProgressStyle { OFF, HYPER, ONE }
 enum class MaterialPlayerBackground { MATERIAL, BLUR, AURORA, AURORA_BLUR }
 enum class PlayerWeather { NONE, SNOW, RAIN }
 enum class CoverAnimation { DEFAULT, CARD, BLUR, COVER, PAGE, STACK, VERTICAL_FLIP, HORIZONTAL_FLIP }
@@ -25,6 +26,7 @@ data class NowPlayingConfig(
     val fullscreenGlass: Boolean = true,
     val materialBackground: MaterialPlayerBackground = MaterialPlayerBackground.MATERIAL,
     val materialColorMix: Int = 50,
+    val glowProgress: GlowProgressStyle = GlowProgressStyle.OFF,
 ) {
     val usesArtworkBackground: Boolean
         get() = theme == PlayerTheme.AURORA_BLUR ||
@@ -66,7 +68,7 @@ internal object NowPlayingCodec {
         put("showAudioInfo", c.showAudioInfo); put("swipeTracks", c.swipeTracks)
         put("immersiveLyrics", c.immersiveLyrics); put("immersiveSeconds", c.immersiveSeconds)
         put("fullscreenGlass", c.fullscreenGlass); put("materialBackground", c.materialBackground.name)
-        put("materialColorMix", c.materialColorMix)
+        put("materialColorMix", c.materialColorMix); put("glowProgress", c.glowProgress.name)
     }.toString()
     fun decode(raw: String): NowPlayingConfig = runCatching {
         val j = JSONObject(raw); val defaults = NowPlayingConfig()
@@ -85,6 +87,7 @@ internal object NowPlayingCodec {
             fullscreenGlass = j.optBoolean("fullscreenGlass", defaults.fullscreenGlass),
             materialBackground = MaterialPlayerBackground.entries.firstOrNull { it.name == j.optString("materialBackground") } ?: defaults.materialBackground,
             materialColorMix = j.optInt("materialColorMix", defaults.materialColorMix).coerceIn(0, 100),
+            glowProgress = GlowProgressStyle.entries.firstOrNull { it.name == j.optString("glowProgress") } ?: defaults.glowProgress,
         )
     }.getOrDefault(NowPlayingConfig())
 }

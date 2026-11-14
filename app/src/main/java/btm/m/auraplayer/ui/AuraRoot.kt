@@ -91,7 +91,15 @@ fun AuraRoot(model: AuraViewModel) {
         ThemeController(mode, keyColor = seed?.let(::Color), paletteStyle = paletteStyles[settings.palette.coerceIn(paletteStyles.indices)],
             colorSpec = if (settings.colorSpec == 0) ThemeColorSpec.Spec2021 else ThemeColorSpec.Spec2025)
     }
-    MiuixTheme(controller = controller, textStyles = remember { auraTextStyles() }) {
+    AuraUiTheme(
+        themeMode = settings.theme,
+        uiStyle = settings.uiStyle,
+        monet = settings.monet,
+        seed = seed,
+        useSystemSeed = settings.color == "system",
+        controller = controller,
+        textStyles = remember { auraTextStyles() },
+    ) {
         ProvideAuraCouiTheme(settings.monet) {
             AuraAdaptiveLayout { AuraShell(model) }
         }

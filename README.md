@@ -52,7 +52,7 @@ Aura Player（包名 `btm.m.auraplayer`）是一款面向 Android 13（API 33）
 ### 播放界面、歌词与歌词分享
 
 - **Media3 播放与手势**：支持后台播放与媒体通知、0.5–3 倍速、定时关闭、音量控制、拖动排序队列、左右滑切歌、迷你播放器与全屏连续展开/下滑收起及预测性返回。
-- **播放器外观**：支持极光、模糊极光、模糊、单色与全屏主题，提供雪/雨氛围特效、多种切歌封面动效（卡片、封面、翻页、堆叠、垂直/水平翻转）、歌词常亮与沉浸式自动隐藏控件。
+- **播放器外观**：支持极光、模糊极光、模糊、单色、全屏与 Material 主题，提供雪/雨氛围特效、多种切歌封面动效（卡片、封面、翻页、堆叠、垂直/水平翻转）、歌词常亮与沉浸式自动隐藏控件。
 - **多源歌词**：集成网易云、QQ 音乐、酷我、酷狗、LrcLib、AMLL 与 TTML Hub 歌词；支持逐字、翻译、发音、对唱、边缘渐隐模糊、点击跳转与浏览焦点 3 秒自动回位。
 - **歌词分享工作室**：内置多款模板（Aura Mesh、Cinema、Paper、Polaroid、Vinyl、Swiss 等），可自定义明暗模式、字体、背景、滤镜、行距与圆角并导出保存或分享图片。
 
@@ -64,8 +64,8 @@ Aura Player（包名 `btm.m.auraplayer`）是一款面向 Android 13（API 33）
 
 ### 外观定制与多语言
 
-- 基于 MIUIX 0.9.4 与 Backdrop 构建：支持浅色、深色、跟随系统、Monet 动态取色（经典 2021 / 表现力 2025 规范、多种调色板及自定义颜色）。
-- 支持 HyperOS 悬浮、HarmonyOS 悬浮与液态玻璃底部导航样式，并可自定义模糊、不透明度、折射、高光、色散等材质参数。
+- 支持 **Hyper / Material / One** 三套界面风格，基于 MIUIX 0.9.4、Material 3 Expressive 规范及 OneUI_Kit 构建；支持浅色、深色、跟随系统、Monet 动态取色（经典 2021 / 表现力 2025 规范、多种调色板、One UI CIELAB 语义色与自定义颜色）。
+- 支持 HyperOS 悬浮、HarmonyOS 悬浮、液态玻璃、Material 与 One UI 底部导航样式；玻璃风格支持自定义模糊、不透明度、折射、高光与色散等材质参数。
 - 内置简体中文、English、日本語三语界面及完整多语言法律文档（用户协议、免责声明、隐私政策），可参考 [languages/example.json](languages/example.json) 扩展翻译。
 
 ## 兼容性与要求
@@ -141,7 +141,7 @@ Aura-Player/
 
 - 界面风格、玻璃组件、导航动画及关于/捐赠页面布局来源：[HyperChanger](https://github.com/ColdP/HyperChanger)（AGPL-3.0-or-later）。
 - 首页结构与 MediaStore 排序逻辑适配自 [Retro Music](https://github.com/RetroMusicPlayer/RetroMusicPlayer)（GPL-3.0-or-later）。
-- 控件与模糊基础基于 [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）、[Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0），歌单标题栏搜索组件使用 [COUI-Kit](https://github.com/ItosEO/COUI-Kit)（MPL-2.0）。
+- 控件与风格组件基于 [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）、[Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0），歌单标题栏搜索组件使用 [COUI-Kit](https://github.com/ItosEO/COUI-Kit)（MPL-2.0），`One` 界面风格与交互控件（`MonetTones`、`OneUiPalette`、`BoSwitchView`、`DragOnlySeekBar`）移植自 `OneUI_Kit`（MIT，源自 `OneUIProject/oneui-design` 与 `oneui-core`）。
 - 歌词解析、匹配与渲染来源：[HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（AGPL-3.0）、[HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced)（GPL-3.0 / Apache-2.0）与 [Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics)（Apache-2.0）。
 - 其他核心依赖：[Media3](https://developer.android.com/media/media3)、[Coil](https://github.com/coil-kt/coil)、[OkHttp](https://github.com/square/okhttp)、[jaudiotagger](https://github.com/Adonai/jaudiotagger-android)（LGPL-2.1）、[MaterialKolor](https://github.com/jordond/MaterialKolor)（MIT）、[ZXing](https://github.com/zxing/zxing)（Apache-2.0）及 [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT）。
 

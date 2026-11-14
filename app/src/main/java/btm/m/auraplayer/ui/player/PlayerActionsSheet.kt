@@ -33,6 +33,9 @@ import java.util.Locale
 internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdrop: com.kyant.backdrop.Backdrop,
                                 dismiss: () -> Unit, openPage: (String) -> Unit, closePlayer: () -> Unit,
                                 onBusy: (Boolean) -> Unit, expressive: PlayerExpressiveColors? = null) {
+    val effectiveExpressive = expressive ?: if (LocalAppUiStyle.current == AppUiStyle.MATERIAL) {
+        LocalAuraExpressiveScheme.current?.toPlayerExpressiveColors()
+    } else null
     val song = model.current ?: return
     val effects = (LocalContext.current.applicationContext as AuraApplication).effects
     val effectsState by effects.state.collectAsState()
@@ -48,45 +51,49 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
     val titleColors = BasicComponentColors(foreground, foreground.copy(alpha = .35f))
     val summaryColors = BasicComponentColors(foreground.copy(alpha = .68f), foreground.copy(alpha = .3f))
     @Composable fun leading(icon: ImageVector) { Image(icon, null, Modifier.padding(end = 14.dp).size(24.dp), colorFilter = ColorFilter.tint(foreground)) }
+    val isOneUi = effectiveExpressive == null && LocalAppUiStyle.current == AppUiStyle.ONE
     @Composable fun action(icon: ImageVector, title: String, summary: String? = null, enabled: Boolean = true,
                             position: SheetItemPosition = SheetItemPosition.SINGLE, click: () -> Unit) {
-        if (expressive != null) {
-            SheetActionRow(icon, title, summary, enabled, expressive = expressive, position = position, onClick = click)
+        if (effectiveExpressive != null || isOneUi) {
+            SheetActionRow(icon, title, summary, enabled, expressive = effectiveExpressive, position = position, onClick = click)
         } else {
             ArrowPreference(title, summary = summary, titleColor = titleColors, summaryColor = summaryColors,
                 startAction = { leading(icon) }, insideMargin = PaddingValues(horizontal = 20.dp, vertical = 12.dp), enabled = enabled, onClick = click)
         }
     }
     @Composable fun divider() {
-        if (expressive == null) HorizontalDivider(Modifier.padding(horizontal = 20.dp, vertical = 5.dp), color = foreground.copy(alpha = .13f))
-        else Spacer(Modifier.height(10.dp))
+        when {
+            isOneUi -> HorizontalDivider(Modifier.padding(horizontal = 20.dp, vertical = 5.dp), thickness = 0.75.dp, color = Color(rememberActiveOneUiPalette().divider))
+            effectiveExpressive == null -> HorizontalDivider(Modifier.padding(horizontal = 20.dp, vertical = 5.dp), color = foreground.copy(alpha = .13f))
+            else -> Spacer(Modifier.height(10.dp))
+        }
     }
-    val sheetModifier = if (expressive != null) {
+    val sheetModifier = if (effectiveExpressive != null) {
         val sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
-        Modifier.clip(sheetShape).background(expressive.surfaceContainerLow, sheetShape)
+        Modifier.clip(sheetShape).background(effectiveExpressive.surfaceContainerLow, sheetShape)
     } else {
         Modifier.neutralSheetMaterial(menuBackdrop)
     }
     OverlayBottomSheet(show = show, onDismissRequest = dismiss, backgroundColor = Color.Transparent,
         modifier = sheetModifier,
         insideMargin = DpSize(0.dp, 0.dp),
-        dragHandleColor = expressive?.dragHandleColor ?: foreground.copy(alpha = .45f)) {
+        dragHandleColor = effectiveExpressive?.dragHandleColor ?: foreground.copy(alpha = .45f)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 12.dp)) {
-            if (expressive != null) {
+            if (effectiveExpressive != null) {
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 6.dp)
                         .clip(RoundedCornerShape(24.dp))
-                        .background(expressive.surfaceContainerHigh)
+                        .background(effectiveExpressive.surfaceContainerHigh)
                         .padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Artwork(song.artwork, Modifier.size(56.dp), cornerRadius = 16.dp)
                     Column(Modifier.weight(1f).padding(start = 14.dp)) {
-                        Text(song.title, color = expressive.onSurface, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(song.title, color = effectiveExpressive.onSurface, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(listOf(song.artist, song.album).filter { it.isNotBlank() }.joinToString(" · "),
-                            color = expressive.secondaryInk, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            color = effectiveExpressive.secondaryInk, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                 }
             } else {
@@ -100,10 +107,10 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
                 }
             }
             divider()
-            val group1Modifier = if (expressive != null) Modifier.fillMaxWidth().padding(horizontal = 16.dp) else Modifier.fillMaxWidth()
-            Column(group1Modifier, verticalArrangement = Arrangement.spacedBy(if (expressive != null) 2.dp else 0.dp)) {
+            val group1Modifier = if (effectiveExpressive != null) Modifier.fillMaxWidth().padding(horizontal = 16.dp) else Modifier.fillMaxWidth()
+            Column(group1Modifier, verticalArrangement = Arrangement.spacedBy(if (effectiveExpressive != null) 2.dp else 0.dp)) {
                 if (song.cloud) {
-                    SongDownloadPreference(model, song, show, menuBackdrop, expressive = expressive, position = SheetItemPosition.TOP)
+                    SongDownloadPreference(model, song, show, menuBackdrop, expressive = effectiveExpressive, position = SheetItemPosition.TOP)
                     val current = model.streamInfo?.let { stream -> levels.firstOrNull { it.quality.level == stream.level } }
                         ?: levels.firstOrNull { it.quality == model.quality }
                     val summary = current?.let { cloudQualityText(it, model.streamInfo?.takeIf { s -> s.level == it.quality.level }, model.audioFormat) }
@@ -114,7 +121,7 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
                             if (model.qualityError) add(DropdownItem(tr("quality_retry", "获取音质失败，点击重试"), onClick = model::refreshQualities))
                             addAll(qualityDropdownItems(levels, current?.quality ?: model.quality, { cloudQualityText(it) }) { model.selectQuality(it.quality) })
                             if (isEmpty()) add(DropdownItem(if (model.qualityLoading) tr("loading", "加载中…") else tr("quality_unavailable", "此歌曲暂无可用音质"), enabled = false))
-                        }), expressive = expressive, position = SheetItemPosition.MIDDLE)
+                        }), expressive = effectiveExpressive, position = SheetItemPosition.MIDDLE)
                 }
                 action(MiuixIcons.Regular.VolumeUp, tr("audio_effects", "音效"), presetName(effectsState.current),
                     position = if (song.cloud) SheetItemPosition.BOTTOM else SheetItemPosition.SINGLE) { dismiss(); closePlayer(); openPage("audio_effects") }
@@ -130,7 +137,7 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
                 }
             }
             divider()
-            Column(group1Modifier, verticalArrangement = Arrangement.spacedBy(if (expressive != null) 2.dp else 0.dp)) {
+            Column(group1Modifier, verticalArrangement = Arrangement.spacedBy(if (effectiveExpressive != null) 2.dp else 0.dp)) {
                 action(MiuixIcons.Regular.Album, tr("album", "专辑"), song.album, !song.cloud || song.albumId > 0, position = SheetItemPosition.TOP) {
                     openCollectionFromSheet { model.openSongAlbum(song) }
                 }
@@ -141,7 +148,7 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
                             DropdownItem(artist.name, enabled = !song.cloud || artist.id > 0,
                                 icon = { modifier -> Artwork(artist.artwork, modifier.size(30.dp), circular = true) },
                                 onClick = { openCollectionFromSheet { model.openSongArtist(song, artist) } })
-                        }), expressive = expressive, position = artistPos)
+                        }), expressive = effectiveExpressive, position = artistPos)
                 } else action(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, !song.cloud || song.artistId > 0, position = artistPos) {
                     openCollectionFromSheet { model.openSongArtist(song) }
                 }
@@ -155,7 +162,7 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
                 }
             }
             divider()
-            Column(group1Modifier, verticalArrangement = Arrangement.spacedBy(if (expressive != null) 2.dp else 0.dp)) {
+            Column(group1Modifier, verticalArrangement = Arrangement.spacedBy(if (effectiveExpressive != null) 2.dp else 0.dp)) {
                 SheetDropdown(MiuixIcons.Regular.Timer, tr("sleep_timer", "定时关闭"),
                     if (model.sleepRemaining > 0) timerText(model.sleepRemaining) else tr("timer_off", "未开启"), menuBackdrop,
                     DropdownEntry(listOf(DropdownItem(tr("cancel_timer", "取消定时关闭"), selected = model.sleepRemaining == 0L, onClick = { model.setSleepTimer(0) })) +
@@ -163,11 +170,11 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
                             DropdownItem("$minutes ${tr("minutes", "分钟")}",
                                 selected = model.sleepRemaining > 0 && model.playbackPreferences.sleepMinutes == minutes,
                                 onClick = { model.setSleepTimer(minutes) })
-                        }), expressive = expressive, position = SheetItemPosition.TOP)
+                        }), expressive = effectiveExpressive, position = SheetItemPosition.TOP)
                 val speeds = listOf(.5f, .75f, 1f, 1.5f, 2f, 3f)
                 SheetDropdown(MiuixIcons.Regular.SearchDevice, tr("playback_speed", "倍速播放"), speedText(model.playbackSpeed), menuBackdrop,
                     DropdownEntry(speeds.map { speed -> DropdownItem(speedText(speed), selected = speed == model.playbackSpeed, onClick = { model.changePlaybackSpeed(speed) }) }),
-                    expressive = expressive, position = SheetItemPosition.BOTTOM)
+                    expressive = effectiveExpressive, position = SheetItemPosition.BOTTOM)
             }
         }
     }

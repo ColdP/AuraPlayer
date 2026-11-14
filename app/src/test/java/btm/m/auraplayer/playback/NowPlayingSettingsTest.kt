@@ -10,6 +10,7 @@ class NowPlayingSettingsTest {
         assertEquals(expected, NowPlayingCodec.decode("not json"))
         assertEquals(PlayerTheme.AURORA, expected.theme)
         assertEquals(MaterialPlayerBackground.MATERIAL, expected.materialBackground)
+        assertEquals(GlowProgressStyle.OFF, expected.glowProgress)
         assertEquals(50, expected.materialColorMix)
         assertTrue(expected.showVolume && expected.showAudioInfo && expected.swipeTracks)
         assertFalse(expected.immersiveLyrics || expected.keepLyricsAwake)
@@ -17,12 +18,12 @@ class NowPlayingSettingsTest {
     }
 
     @Test fun everyThemeAnimationAndToggleSurvivesRestart() {
-        for (theme in PlayerTheme.entries) for (bg in MaterialPlayerBackground.entries) for (animation in CoverAnimation.entries) for (weather in PlayerWeather.entries) {
+        for (theme in PlayerTheme.entries) for (bg in MaterialPlayerBackground.entries) for (glow in GlowProgressStyle.entries) for (animation in CoverAnimation.entries) for (weather in PlayerWeather.entries) {
             val config = NowPlayingConfig(theme, -32, weather, animation,
                 showVolume = false, openFromNotification = false, keepLyricsAwake = true,
                 showAudioInfo = false, swipeTracks = false,
                 immersiveLyrics = true, immersiveSeconds = 27, fullscreenGlass = false,
-                materialBackground = bg, materialColorMix = 78)
+                materialBackground = bg, materialColorMix = 78, glowProgress = glow)
             assertEquals(config, NowPlayingCodec.decode(NowPlayingCodec.encode(config)))
         }
     }
@@ -36,9 +37,10 @@ class NowPlayingSettingsTest {
     }
 
     @Test fun unknownEnumsFallBackIndividuallyAndSlidersClampToRequestedRanges() {
-        val config = NowPlayingCodec.decode("""{"theme":"future","materialBackground":"future","weather":"future","coverAnimation":"future","blur":999,"immersiveSeconds":99,"materialColorMix":150,"showVolume":false}""")
+        val config = NowPlayingCodec.decode("""{"theme":"future","materialBackground":"future","glowProgress":"future","weather":"future","coverAnimation":"future","blur":999,"immersiveSeconds":99,"materialColorMix":150,"showVolume":false}""")
         assertEquals(PlayerTheme.AURORA, config.theme)
         assertEquals(MaterialPlayerBackground.MATERIAL, config.materialBackground)
+        assertEquals(GlowProgressStyle.OFF, config.glowProgress)
         assertEquals(PlayerWeather.NONE, config.weather)
         assertEquals(CoverAnimation.DEFAULT, config.coverAnimation)
         assertEquals(96, config.blur); assertEquals(30, config.immersiveSeconds); assertEquals(100, config.materialColorMix)

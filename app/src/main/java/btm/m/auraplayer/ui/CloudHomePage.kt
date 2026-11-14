@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -94,6 +95,33 @@ internal fun CloudHomePage(model: AuraViewModel, padding: PaddingValues, login: 
 
 @Composable
 private fun CloudHomeHeader(title: String, arrow: Boolean = false, onClick: () -> Unit = {}) {
+    if (LocalAppUiStyle.current == AppUiStyle.ONE) {
+        val palette = rememberActiveOneUiPalette()
+        Row(
+            Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp).clip(RoundedCornerShape(14.dp)).clickable(enabled = arrow, onClick = onClick).padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, Modifier.weight(1f), color = Color(palette.text), fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            if (arrow) Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(20.dp), colorFilter = ColorFilter.tint(Color(palette.accentDeep)))
+        }
+        return
+    }
+    if (LocalAppUiStyle.current == AppUiStyle.MATERIAL) {
+        val scheme = rememberActiveExpressiveScheme()
+        Row(
+            Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp).clip(RoundedCornerShape(14.dp)).clickable(enabled = arrow, onClick = onClick).padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, Modifier.weight(1f), color = scheme.onSurface, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            if (arrow) Box(
+                modifier = Modifier.size(30.dp).clip(CircleShape).background(scheme.secondaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(16.dp), colorFilter = ColorFilter.tint(scheme.onSecondaryContainer))
+            }
+        }
+        return
+    }
     Row(Modifier.fillMaxWidth().padding(top = 2.dp).clickable(onClick = onClick), verticalAlignment = Alignment.CenterVertically) {
         Text(title, Modifier.weight(1f), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
         if (arrow) Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary))

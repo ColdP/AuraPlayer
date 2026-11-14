@@ -10,7 +10,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -355,6 +357,34 @@ internal fun SearchRoundButton(
     motionBlur: Dp = 0.dp,
     onClick: () -> Unit,
 ) {
+    val useOneSurface = navigationStyle == "one" || LocalAppUiStyle.current == AppUiStyle.ONE
+    if (iconRes == null && useOneSurface) {
+        OneUiSearchButton(
+            size = size,
+            primary = primary,
+            closeProgress = closeProgress,
+            icon = icon,
+            modifier = modifier,
+            enabled = enabled,
+            motionAlpha = motionAlpha,
+            onClick = onClick,
+        )
+        return
+    }
+    val useMaterialSurface = navigationStyle == "material" || LocalAppUiStyle.current == AppUiStyle.MATERIAL
+    if (iconRes == null && useMaterialSurface) {
+        MaterialExpressiveSearchButton(
+            size = size,
+            primary = primary,
+            closeProgress = closeProgress,
+            icon = icon,
+            modifier = modifier,
+            enabled = enabled,
+            motionAlpha = motionAlpha,
+            onClick = onClick,
+        )
+        return
+    }
     val material = rememberModuleNavigationMaterial(navigationStyle)
     val colorStyle = LocalAppInterfaceStyle.current == AppInterfaceStyle.COLOR
     val dark = MiuixTheme.colorScheme.surface.luminance() < .5f
@@ -456,6 +486,11 @@ private fun Modifier.searchGlass(
     dark: Boolean,
     colorStyle: Boolean,
 ): Modifier {
+    if (navigationStyle == "material") {
+        val tone = if (dark) Color(0xFF282430) else Color(0xFFECE6F0)
+        return shadow(6.dp, shape, clip = false, ambientColor = Color.Black.copy(alpha = if (dark) .4f else .15f), spotColor = Color.Black.copy(alpha = if (dark) .4f else .15f))
+            .background(tone, shape)
+    }
     val spec = resolveFloatingGlassMaterialSpec(navigationStyle, material, dark, colorStyle)
     val tint = surfaceColor.copy(alpha = spec.surfaceAlpha)
     return if (isRuntimeShaderSupported()) drawBackdrop(
@@ -485,6 +520,32 @@ private fun SearchGlassCard(
     colorStyle: Boolean,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    if (navigationStyle == "one" || LocalAppUiStyle.current == AppUiStyle.ONE) {
+        val palette = rememberActiveOneUiPalette()
+        val oneShape = RoundedCornerShape(OneUiCardRadius)
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(BorderStroke(0.75.dp, Color(palette.divider)), oneShape),
+            cornerRadius = OneUiCardRadius,
+            colors = CardDefaults.defaultColors(color = Color(palette.card)),
+            content = content,
+        )
+        return
+    }
+    if (navigationStyle == "material" || LocalAppUiStyle.current == AppUiStyle.MATERIAL) {
+        val scheme = rememberActiveExpressiveScheme()
+        val m3Shape = RoundedCornerShape(24.dp)
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = .28f)), m3Shape),
+            cornerRadius = 24.dp,
+            colors = CardDefaults.defaultColors(color = scheme.surfaceContainerLow),
+            content = content,
+        )
+        return
+    }
     val shape = RoundedCornerShape(22.5.dp)
     val scope = rememberCoroutineScope()
     val highlight = remember(scope) { InteractiveHighlight(scope) { size, offset ->
