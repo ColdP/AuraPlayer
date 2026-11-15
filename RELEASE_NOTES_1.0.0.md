@@ -29,4 +29,6 @@
 
 感谢每一位关注、测试与支持 Aura Player 的用户！
 
-> 签名 Release APK 的 SHA-256 校验值将在发布归档时随 GitHub Release 一并公布。
+**APK SHA-256**
+
+`8C59DC46E3D3B2F1992C02E048CA2BBA99B564728034A64201E67E74BB4A4797`
