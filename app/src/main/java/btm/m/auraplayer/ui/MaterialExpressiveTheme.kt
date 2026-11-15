@@ -866,12 +866,14 @@ internal fun MaterialExpressiveIconButton(
     modifier: Modifier = Modifier,
     tonal: Boolean = true,
     tint: Color? = null,
+    buttonSize: Dp = 42.dp,
+    iconSize: Dp = 21.dp,
 ) {
     val scheme = rememberActiveExpressiveScheme()
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val corner by animateDpAsState(
-        targetValue = if (pressed) 12.dp else 21.dp,
+        targetValue = if (pressed) (buttonSize * 0.285f).coerceAtLeast(10.dp) else buttonSize / 2f,
         animationSpec = m3ExpressiveSpatialSpring(),
         label = "m3eIconBtnCorner",
     )
@@ -880,7 +882,7 @@ internal fun MaterialExpressiveIconButton(
     val iconColor = tint ?: scheme.onSurface
     Box(
         modifier = modifier
-            .size(42.dp)
+            .size(buttonSize)
             .clip(shape)
             .background(container, shape)
             .clickable(interactionSource = interactionSource, indication = androidx.compose.foundation.LocalIndication.current, role = Role.Button, onClick = onClick),
@@ -889,7 +891,7 @@ internal fun MaterialExpressiveIconButton(
         Image(
             imageVector = icon,
             contentDescription = description,
-            modifier = Modifier.size(21.dp),
+            modifier = Modifier.size(iconSize),
             colorFilter = ColorFilter.tint(iconColor),
         )
     }

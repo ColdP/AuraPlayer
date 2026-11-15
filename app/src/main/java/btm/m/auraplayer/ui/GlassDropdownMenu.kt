@@ -137,6 +137,39 @@ fun GlassDropdownPreference(
     )
 }
 
+@Composable
+fun GlassMultiSelectDropdownPreference(
+    title: String,
+    items: List<String>,
+    selectedIndices: Set<Int>,
+    summaryText: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    backdrop: Backdrop? = null,
+    showValueOnEnd: Boolean = false,
+    onToggleIndex: (Int) -> Unit,
+) {
+    GlassDropdownMenu(
+        entry = DropdownEntry(
+            items = items.mapIndexed { index, text ->
+                DropdownItem(
+                    text = text,
+                    selected = index in selectedIndices,
+                    enabled = true,
+                    onClick = { onToggleIndex(index) },
+                )
+            },
+        ),
+        title = title,
+        modifier = modifier,
+        enabled = enabled,
+        backdrop = backdrop,
+        showValueOnEnd = showValueOnEnd,
+        dismissOnItemClick = false,
+        summaryOverride = summaryText,
+    )
+}
+
 private val MaterialExpandMoreIcon: ImageVector by lazy {
     ImageVector.Builder("M3ExpandMore", 24.dp, 24.dp, 24f, 24f).apply {
         path(fill = SolidColor(Color.Black)) {
@@ -160,12 +193,14 @@ fun GlassDropdownMenu(
     backdrop: Backdrop? = null,
     maxHeight: Dp? = null,
     showValueOnEnd: Boolean = false,
+    dismissOnItemClick: Boolean = true,
+    summaryOverride: String? = null,
 ) {
     val expanded = remember { mutableStateOf(false) }
     val entries = remember(entry) { listOf(entry) }
     val available = enabled && entry.items.isNotEmpty()
     val colors = glassDropdownColors()
-    val selectedSummary = entry.items.firstOrNull { it.selected }?.text
+    val selectedSummary = summaryOverride ?: entry.items.firstOrNull { it.selected }?.text
     val uiStyle = LocalAppUiStyle.current
 
     Box(modifier) {
@@ -301,6 +336,7 @@ fun GlassDropdownMenu(
             maxHeight = maxHeight,
             dropdownColors = colors,
             backdrop = backdrop,
+            dismissOnItemClick = dismissOnItemClick,
         )
     }
 }
@@ -345,10 +381,24 @@ fun GlassIconDropdownMenu(
 }
 
 @Composable
-private fun glassDropdownColors(): DropdownColors = DropdownDefaults.dropdownColors(
-    containerColor = Color.Transparent,
-    selectedContainerColor = Color.Transparent,
-)
+internal fun glassDropdownColors(): DropdownColors {
+    if (LocalAppUiStyle.current == AppUiStyle.ONE) {
+        val palette = rememberActiveOneUiPalette()
+        return DropdownDefaults.dropdownColors(
+            contentColor = Color(palette.text),
+            summaryColor = Color(palette.subText),
+            containerColor = Color.Transparent,
+            selectedContentColor = Color(palette.accentDeep),
+            selectedSummaryColor = Color(palette.accentDeep),
+            selectedContainerColor = Color.Transparent,
+            selectedIndicatorColor = Color(palette.accentDeep),
+        )
+    }
+    return DropdownDefaults.dropdownColors(
+        containerColor = Color.Transparent,
+        selectedContainerColor = Color.Transparent,
+    )
+}
 
 @Composable
 private fun GlassDropdownPopup(
@@ -361,6 +411,7 @@ private fun GlassDropdownPopup(
     alignment: PopupPositionProvider.Align = PopupPositionProvider.Align.End,
     horizontalOffset: Dp = GlassMenuHorizontalOffset,
     useAnchorVerticalPosition: Boolean = false,
+    dismissOnItemClick: Boolean = true,
 ) {
     val fraction = remember { Animatable(0f) }
     val alpha = remember { Animatable(0f) }
@@ -440,7 +491,7 @@ private fun GlassDropdownPopup(
                     ) {
                         GlassDropdownEntries(entries, dropdownColors) { entryIndex, itemIndex ->
                             entries[entryIndex].items[itemIndex].onClick?.invoke()
-                            currentDismiss()
+                            if (dismissOnItemClick) currentDismiss()
                         }
                     }
                 },
@@ -534,30 +585,6 @@ private fun GlassPopupSurface(
         }
         return
     }
-    if (uiStyle == AppUiStyle.ONE) {
-        val palette = rememberActiveOneUiPalette()
-        val oneShape = RoundedCornerShape(OneUiCardRadius)
-        Box(Modifier.onGloballyPositioned { onSizeChanged(it.size) }.padding(GlassMenuShadowPadding)) {
-            Box(
-                Modifier
-                    .sizeIn(minWidth = 200.dp)
-                    .graphicsLayer {
-                        val scale = .90f + .10f * fraction
-                        scaleX = scale
-                        scaleY = scale
-                        this.alpha = alpha
-                        transformOrigin = TransformOrigin(.5f, 0f)
-                    }
-                    .shadow(12.dp, oneShape, clip = false)
-                    .clip(oneShape)
-                    .background(Color(palette.card), oneShape)
-                    .border(BorderStroke(0.75.dp, Color(palette.divider)), oneShape),
-            ) {
-                content()
-            }
-        }
-        return
-    }
     val surface = MiuixTheme.colorScheme.surfaceContainer
     val isLightTheme = surface.luminance() > .5f
     val tint = (if (isLightTheme) Color(0xFFF8F8F8) else surface).copy(alpha = .80f)
@@ -606,78 +633,6 @@ private fun GlassDropdownEntries(
     colors: DropdownColors,
     onItemClick: (Int, Int) -> Unit,
 ) {
-    if (LocalAppUiStyle.current == AppUiStyle.ONE) {
-        val palette = rememberActiveOneUiPalette()
-        ListPopupColumn {
-            entries.forEachIndexed { entryIndex, entry ->
-                entry.items.forEachIndexed { itemIndex, item ->
-                    val enabled = entry.enabled && item.enabled
-                    val selected = item.selected
-                    val rowBg = if (selected) Color(palette.chip).copy(alpha = 0.55f) else Color.Transparent
-                    val rowFg = when {
-                        !enabled -> Color(palette.subText).copy(alpha = .45f)
-                        selected -> Color(palette.accentDeep)
-                        else -> Color(palette.text)
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .defaultMinSize(minHeight = 48.dp)
-                            .background(rowBg)
-                            .clickable(enabled = enabled) { onItemClick(entryIndex, itemIndex) }
-                            .padding(horizontal = 20.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        item.icon?.let { iconContent ->
-                            iconContent(Modifier.padding(end = 10.dp))
-                        }
-                        Text(
-                            text = item.text,
-                            color = rowFg,
-                            fontSize = 15.sp,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (selected) {
-                            Spacer(Modifier.width(12.dp))
-                            Canvas(Modifier.size(16.dp)) {
-                                val stroke = 2.dp.toPx()
-                                drawLine(
-                                    Color(palette.accentDeep),
-                                    Offset(size.width * .18f, size.height * .52f),
-                                    Offset(size.width * .42f, size.height * .76f),
-                                    strokeWidth = stroke,
-                                    cap = StrokeCap.Round,
-                                )
-                                drawLine(
-                                    Color(palette.accentDeep),
-                                    Offset(size.width * .42f, size.height * .76f),
-                                    Offset(size.width * .84f, size.height * .26f),
-                                    strokeWidth = stroke,
-                                    cap = StrokeCap.Round,
-                                )
-                            }
-                        }
-                    }
-                    if (itemIndex < entry.items.lastIndex) {
-                        HorizontalDivider(
-                            Modifier.padding(horizontal = 20.dp),
-                            thickness = 0.5.dp,
-                            color = Color(palette.divider),
-                        )
-                    }
-                }
-                if (entryIndex != entries.lastIndex) {
-                    HorizontalDivider(
-                        Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
-                        thickness = 1.dp,
-                        color = Color(palette.divider),
-                    )
-                }
-            }
-        }
-        return
-    }
     if (LocalAppUiStyle.current == AppUiStyle.MATERIAL) {
         val scheme = rememberActiveExpressiveScheme()
         val itemSurface = if (scheme.dark) scheme.surfaceContainerHighest else scheme.surfaceContainer

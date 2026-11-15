@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package btm.m.auraplayer.ui.player
 
+import btm.m.auraplayer.ui.AuraMoreHorizontalIcon
 import android.media.AudioManager
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.*
@@ -32,9 +34,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
+import btm.m.auraplayer.AuraApplication
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.R
+import btm.m.auraplayer.data.AppleMusicMotionCoverManager
 import btm.m.auraplayer.lyrics.PlayerLyricView
+import btm.m.auraplayer.lyrics.rememberSpatialGyroTilt
+import btm.m.auraplayer.spatialcover.SpatialCoverAssets
+import btm.m.auraplayer.spatialcover.SpatialCoverManager
+import btm.m.auraplayer.spatialcover.SpatialCoverRenderer
+import btm.m.auraplayer.spatialcover.SpatialCoverResolveState
+import btm.m.auraplayer.spatialcover.SpatialDepthModel
+import btm.m.auraplayer.spatialcover.SpatialMattingModel
 import btm.m.auraplayer.playback.StreamQuality
 import btm.m.auraplayer.playback.NowPlayingConfig
 import btm.m.auraplayer.playback.MaterialPlayerBackground
@@ -44,6 +55,8 @@ import btm.m.auraplayer.playback.CoverAnimation
 import btm.m.auraplayer.ui.*
 import btm.m.auraplayer.ui.GlassIconDropdownMenu
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.size.Precision
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.*
 import com.kyant.backdrop.drawBackdrop
@@ -64,6 +77,8 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.blur.ProgressiveBlur
+import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop as rememberMiuixBackdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop as miuixLayerBackdrop
 import kotlin.math.*
@@ -94,6 +109,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
     if (liveSong != null) retainedSong = liveSong
     val song = liveSong ?: retainedSong ?: return
     val appearance by model.app.nowPlaying.state.collectAsState()
+    val context = LocalContext.current
     val mixVisual by model.app.auraMix.visual.collectAsState()
     var foreground by remember { mutableStateOf(false) }
     LifecycleResumeEffect(Unit) {
@@ -161,16 +177,111 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
     val coverPalette = rememberPlayerMonetPalette(song.artwork)
     val isMaterialTheme = appearance.theme == PlayerTheme.MATERIAL
     val isOneTheme = appearance.theme == PlayerTheme.ONE
-    val isDarkScheme = !isMaterialTheme || dark || appearance.materialBackground != MaterialPlayerBackground.MATERIAL
+    val lyricThemeActiveOnScreen = appearance.lyricTheme != btm.m.auraplayer.playback.LyricTheme.BLUR && lyricsOpen && !queueOpen
+    val isDarkScheme = !isMaterialTheme || dark || appearance.materialBackground != MaterialPlayerBackground.MATERIAL || lyricThemeActiveOnScreen
     val coverSeed = rememberPlayerArtworkSeed(song.artwork)
     val expressive = rememberPlayerExpressiveColors(coverSeed, isDark = isDarkScheme)
     val activeExpressive = if (isMaterialTheme) expressive else null
-    val oneUiColors = rememberPlayerOneUiColors(coverSeed, isDark = dark)
+    val oneUiColors = rememberPlayerOneUiColors(coverSeed, isDark = dark || lyricThemeActiveOnScreen)
     val activeOneUi = if (isOneTheme) oneUiColors else null
     val shareActive = lyricShareTransition?.active == true
     val shareProgress = if (shareActive) lyricShareTransition.progress.coerceIn(0f, 1f) else 0f
     val shareBgAlpha = if (shareActive) 1f - lyricShareSmoothStep(0f, .86f, shareProgress) else 1f
     val shareBgBlur = if (shareActive) (shareProgress * 28f).dp else 0.dp
+    var amMotionFile by remember(song.key, appearance.appleMusicAnimatedCover) {
+        mutableStateOf(
+            if (appearance.appleMusicAnimatedCover) {
+                AppleMusicMotionCoverManager.peekCachedFile(context, song)
+            } else {
+                null
+            },
+        )
+    }
+    LaunchedEffect(
+        song.key,
+        song.title,
+        song.artist,
+        song.album,
+        song.albumArtist,
+        song.duration,
+        appearance.appleMusicAnimatedCover,
+    ) {
+        if (!appearance.appleMusicAnimatedCover || song.title.isBlank()) {
+            amMotionFile = null
+            return@LaunchedEffect
+        }
+        val cached = AppleMusicMotionCoverManager.peekCachedFile(context, song)
+        if (cached != null) {
+            amMotionFile = cached
+            return@LaunchedEffect
+        }
+        amMotionFile = null
+        kotlinx.coroutines.delay(350L)
+        amMotionFile = AppleMusicMotionCoverManager.resolve(
+            context = context,
+            song = song,
+            activePlayingPath = amMotionFile?.absolutePath,
+        )
+    }
+    val amMotionPath = if (appearance.appleMusicAnimatedCover && mixVisual == null) {
+        amMotionFile?.takeIf { it.isFile && it.length() > 0L }?.absolutePath
+    } else {
+        null
+    }
+    val spatialCoverEligible = shouldShowSpatialCoverButton(
+        spatialCoverEnabled = appearance.spatialCover,
+        appleMusicAnimatedCoverEnabled = appearance.appleMusicAnimatedCover,
+        motionVideoPath = amMotionPath,
+    )
+    val selectedDepthModel = SpatialDepthModel.byId(appearance.spatialCoverDepthModel)
+    val selectedMattingModel = SpatialMattingModel.byId(appearance.spatialCoverMattingModel)
+    var spatialCoverRequested by remember(song.key, spatialCoverEligible, selectedDepthModel, selectedMattingModel) {
+        mutableStateOf(false)
+    }
+    var spatialCoverState by remember(song.key, spatialCoverEligible, selectedDepthModel, selectedMattingModel) {
+        mutableStateOf<SpatialCoverResolveState>(SpatialCoverResolveState.Idle)
+    }
+    LaunchedEffect(song.artwork, spatialCoverEligible, selectedDepthModel, selectedMattingModel, spatialCoverRequested) {
+        if (!spatialCoverEligible || !spatialCoverRequested || song.artwork.isBlank()) {
+            spatialCoverState = SpatialCoverResolveState.Idle
+            return@LaunchedEffect
+        }
+        SpatialCoverManager.resolve(
+            context = context,
+            artworkUri = song.artwork,
+            depthModel = selectedDepthModel,
+            mattingModel = selectedMattingModel,
+            songTitle = song.title,
+            songArtist = song.artist,
+            songAlbum = song.album,
+            songAlbumArtist = song.albumArtist,
+            onState = { state ->
+                spatialCoverState = state
+                when (state) {
+                    is SpatialCoverResolveState.MissingModels -> {
+                        spatialCoverRequested = false
+                        Toast.makeText(
+                            context,
+                            tr("spatial_models_missing_toast", "请先下载 ONNX Runtime 运行库与空间模型"),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                        onOpenChange(false)
+                        openPage("spatial_cover_downloads")
+                    }
+                    is SpatialCoverResolveState.Failed -> {
+                        spatialCoverRequested = false
+                        Toast.makeText(context, state.message, Toast.LENGTH_SHORT).show()
+                    }
+                    else -> Unit
+                }
+            },
+        )
+    }
+    val spatialLyricsActive = appearance.spatialLyrics && open && foreground && lyricsOpen && !queueOpen && !shareActive
+    val spatialCoverActive = spatialCoverEligible && spatialCoverRequested &&
+        spatialCoverState is SpatialCoverResolveState.Ready && open && foreground && !compactOpen && !shareActive
+    val spatialActive = spatialLyricsActive || spatialCoverActive
+    val spatialTilt by rememberSpatialGyroTilt(enabled = spatialActive)
     val hostAlpha by animateFloatAsState(if (miniVisible || open) 1f else 0f, tween(280, easing = FastOutSlowInEasing), label = "playerHostVisibility")
     val chromeExitDistance = PlayerNavigationGeometry.barHeight +
         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp
@@ -268,14 +379,17 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
             Box(Modifier.wrapContentSize(Alignment.TopStart, unbounded = true).requiredSize(screenWidth, screenHeight)) {
                 Box(Modifier.fillMaxSize()) {
                     if (e > 0f) PlayerThemeBackground(song.artwork, coverPalette, appearance, lyricProgress.value.coerceIn(0f, 1f),
+                        animate = open && foreground && !gesturing && !shareActive,
+                        queueBlend = queueBlend.value.coerceIn(0f, 1f),
+                        spatialTilt = if (appearance.spatialLyrics) spatialTilt * lyricProgress.value.coerceIn(0f, 1f) else Offset.Zero,
                         expressive = activeExpressive,
                         oneUi = activeOneUi,
-                        animate = open && foreground && !gesturing && !shareActive,
                         modifier = Modifier.fillMaxSize().graphicsLayer { alpha = e * shareBgAlpha }.blur(shareBgBlur).layerBackdrop(playerBackdrop).miuixLayerBackdrop(miuixBackdrop))
                     FullPlayer(model, lyricProgress.value, expansion = e, miniColor = miniColor, miniSwipe = miniSwipeOffset.value + miniDrag.horizontalOffset,
                         miniWidth = miniWidth, miniHeight = miniHeight,
                         miniControlClearance = 110.dp - 50.dp * dock,
                         appearance = appearance, active = open && foreground && !shareActive, controlsUnobscured = !actionsBusy && !lyricMenuOpen && !shareActive,
+                        spatialTilt = spatialTilt,
                         mixVisual = mixVisual,
                         shareTransition = lyricShareTransition,
                         onExpand = { onOpenChange(true) }, onClose = { onOpenChange(false) },
@@ -290,6 +404,11 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                         oneUi = activeOneUi,
                         onLyricMenuExpanded = { lyricMenuOpen = it },
                         miuixBackdrop = miuixBackdrop, onMore = { actionsOpen = true },
+                        spatialCoverRequested = spatialCoverRequested,
+                        spatialCoverState = spatialCoverState,
+                        onToggleSpatialCover = { spatialCoverRequested = !spatialCoverRequested },
+                        motionVideoPath = amMotionPath,
+                        motionVideoAllowed = foreground && !shareActive,
                         onQueue = { queueOpen = !queueOpen; lyricsOpen = false },
                         openSharePage = { index, rowBounds, viewportBounds ->
                             if (!shareOpening) {
@@ -390,6 +509,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
 @Composable
 private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                        appearance: NowPlayingConfig, active: Boolean, controlsUnobscured: Boolean,
+                       spatialTilt: Offset = Offset.Zero,
                        mixVisual: btm.m.auraplayer.auramix.AuraMixVisualTransition?,
                        shareTransition: LyricShareTransitionState? = null,
                        miniColor: Color, miniSwipe: Float, miniWidth: Dp, miniHeight: Dp,
@@ -401,18 +521,32 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                        coverPalette: com.materialkolor.palettes.CorePalette,
                        onLyricMenuExpanded: (Boolean) -> Unit,
                        miuixBackdrop: top.yukonga.miuix.kmp.blur.Backdrop, onMore: () -> Unit,
+                       spatialCoverRequested: Boolean,
+                       spatialCoverState: SpatialCoverResolveState,
+                       onToggleSpatialCover: () -> Unit,
+                       motionVideoPath: String? = null,
+                       motionVideoAllowed: Boolean = false,
                        onQueue: () -> Unit, openSharePage: (Int, Rect?, Rect?) -> Unit,
                        expressive: PlayerExpressiveColors? = null,
                        oneUi: PlayerOneUiColors? = null) {
     val song = model.current ?: return
+    val context = LocalContext.current
+    val activity = context as? android.app.Activity
+    val isMultiWindow = activity?.isInMultiWindowMode == true
     val activeInk = expressive?.activeInk ?: oneUi?.text ?: Color.White
     val secondaryInk = expressive?.secondaryInk ?: oneUi?.subText ?: Color.White.copy(alpha = .85f)
     val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
     val p = progress.coerceIn(0f, 1f)
     val alpha = ((expansion - .12f) / .88f).coerceIn(0f, 1f)
+    val safeDrawing = WindowInsets.safeDrawing.asPaddingValues()
     val status = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val headerBottom = with(density) { (status + 48.dp * PlayerPaddingScale + 84.dp).toPx() }
+    val effectiveStatus = maxOf(status, safeDrawing.calculateTopPadding(), if (isMultiWindow) 24.dp else 0.dp)
+    val effectiveLeftInset = safeDrawing.calculateLeftPadding(layoutDirection)
+    val effectiveRightInset = safeDrawing.calculateRightPadding(layoutDirection)
+    val effectiveBottomInset = maxOf(nav, safeDrawing.calculateBottomPadding())
+    val headerBottom = with(density) { (effectiveStatus + 48.dp * PlayerPaddingScale + 84.dp).toPx() }
     var lastInteraction by remember { mutableLongStateOf(android.os.SystemClock.uptimeMillis()) }
     var touching by remember { mutableStateOf(false) }
     var touchPoint by remember { mutableStateOf(Offset.Zero) }
@@ -450,37 +584,113 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             enabled = expansion == 0f, onClick = onExpand)) {
         val w = maxWidth; val h = maxHeight
         val fullscreen = appearance.theme == PlayerTheme.FULLSCREEN
-        val fullCard = fullscreenPlayerCard(w, h, status, nav)
-        val normalMargin = w * .058f * PlayerPaddingScale
+        val landscape = isLandscapePlayerLayout(w, h)
+        val compactWindow = isCompactPlayerWindow(w, h, isMultiWindow)
+        val compactScale = if (compactWindow) (h.value / 640f).coerceIn(0.78f, 1.0f) else 1f
+        val (portraitColX, portraitColW) = portraitControlColumnRange(w, w * (if (compactWindow) .055f else .058f * PlayerPaddingScale))
+        val landscapeGeom = remember(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, appearance.showVolume) {
+            if (landscape) {
+                computeLandscapePlayerGeometry(
+                    width = w,
+                    height = h,
+                    leftInset = effectiveLeftInset,
+                    topInset = effectiveStatus,
+                    rightInset = effectiveRightInset,
+                    bottomInset = effectiveBottomInset,
+                    showVolume = appearance.showVolume,
+                )
+            } else null
+        }
+
+        // Portrait & compact freeform layout metrics
+        val portraitNav = effectiveBottomInset
+        val fullCard = fullscreenPlayerCard(w, h, effectiveStatus, portraitNav)
+        val normalMargin = w * (if (compactWindow) .055f else .058f * PlayerPaddingScale)
         fun controlSize(cardSize: Dp, normalSize: Dp): Dp = if (fullscreen) cardSize + (normalSize - cardSize) * p else normalSize
         val margin = controlSize(fullCard.left + 16.dp, normalMargin)
-        val coverY = maxOf(h * .142f, status + 44.dp * PlayerPaddingScale)
-        // Reserve the actual fixed controls height before sizing the cover on short screens.
-        val controlsHeight = if (appearance.showVolume) 250.dp else 206.dp
-        val seekCeiling = h - nav - controlsHeight - 10.dp
-        val titleGap = 20.dp * PlayerPaddingScale
-        val titleToSeek = 63.dp * PlayerPaddingScale
-        val coverSize = minOf(w - normalMargin * 2, (h - status - nav) * .46f,
-            (seekCeiling - coverY - titleGap - titleToSeek).coerceAtLeast(1.dp)).coerceAtLeast(1.dp)
-        // Subtracting equivalent Float expressions can produce a tiny negative Dp.
+        val coverY = if (compactWindow) {
+            effectiveStatus + 34.dp
+        } else {
+            maxOf(h * .142f, effectiveStatus + 44.dp * PlayerPaddingScale)
+        }
+        val baseControlsHeight = (if (appearance.showVolume) 244.dp else 200.dp) * compactScale
+        val seekCeiling = h - portraitNav - baseControlsHeight - 10.dp
+        val titleGap = (if (compactWindow) 12.dp else 20.dp * PlayerPaddingScale)
+        val titleToSeek = (if (compactWindow) 48.dp else 63.dp * PlayerPaddingScale)
+        val coverSize = if (landscapeGeom != null) {
+            landscapeGeom.heroCoverSize
+        } else {
+            minOf(
+                w - normalMargin * 2,
+                (h - effectiveStatus - portraitNav) * (if (compactWindow) .40f else .46f),
+                (seekCeiling - coverY - titleGap - titleToSeek).coerceAtLeast(1.dp),
+            ).coerceAtLeast(1.dp)
+        }
         val coverInset = playerCoverInset(w, coverSize, normalMargin)
         val coverX = normalMargin + coverInset
-        val normalTitleY = coverY + coverSize + titleGap
-        val small = minOf(64.dp, coverSize * .4f) * .86f
-        val smallY = status + 48.dp * PlayerPaddingScale
-        val smallX = 26.dp * PlayerPaddingScale
+        val immersiveCover = shouldUseImmersiveCover(
+            immersiveCoverSetting = appearance.immersiveCover,
+            appleMusicAnimatedCoverEnabled = appearance.appleMusicAnimatedCover,
+            appleMusicAnimatedCoverAvailable = !motionVideoPath.isNullOrBlank(),
+            fullscreen = fullscreen,
+            hasLandscapeGeometry = landscapeGeom != null,
+        )
+        val immGeom = if (immersiveCover) {
+            if (landscapeGeom != null) {
+                computeLandscapeImmersiveCoverGeometry(
+                    width = w,
+                    height = h,
+                    rightPaneX = landscapeGeom.rightPaneX,
+                    leftPaneWidth = landscapeGeom.leftPaneWidth,
+                )
+            } else {
+                computeImmersiveCoverGeometry(
+                    width = w,
+                    height = h,
+                    statusTop = effectiveStatus,
+                    seekCeiling = seekCeiling,
+                    titleToSeek = titleToSeek,
+                    compactWindow = compactWindow,
+                )
+            }
+        } else {
+            null
+        }
+        val normalTitleY = immGeom?.titleY ?: (coverY + coverSize + titleGap)
+        val small = if (landscapeGeom != null) {
+            landscapeGeom.lyricsCompactCoverSize
+        } else {
+            minOf(if (compactWindow) 48.dp else 64.dp, coverSize * .44f) * .86f
+        }
+        val smallY = effectiveStatus + (if (compactWindow) 14.dp else 48.dp * PlayerPaddingScale)
+        val smallX = if (compactWindow) normalMargin else 26.dp * PlayerPaddingScale
         val e = expansion.coerceIn(0f, 1f)
-        val normalSeekY = maxOf(normalTitleY + titleToSeek, h * .637f).coerceAtMost(seekCeiling)
+        val normalSeekY = immGeom?.seekY ?: maxOf(normalTitleY + titleToSeek, h * .637f).coerceAtMost(seekCeiling)
         val seekY = controlSize(fullCard.top + 64.dp, normalSeekY)
-        val titleY = if (fullscreen) fullCard.top + 14.dp else normalTitleY
-        val controlsScale = if (fullscreen) ((fullCard.height - 76.dp) / 180.dp).coerceIn(.5f, 1.12f) else 1f
+        val titleY = if (fullscreen && !landscape) fullCard.top + 14.dp else normalTitleY
+        val portraitControlsScale = if (fullscreen) {
+            ((fullCard.height - 76.dp) / 180.dp).coerceIn(.5f, 1.12f)
+        } else {
+            compactScale
+        }
+        var textHeight by remember { mutableIntStateOf(0) }
         val fullWidthPx = with(density) { w.toPx() }
-        if (fullscreen && alpha > 0f) {
-            val glassTop = fullCard.top
-            val cardLeftPx = with(density) { fullCard.left.toPx() }
+        val glassCardRect = when {
+            !fullscreen -> null
+            landscapeGeom != null -> FullscreenPlayerCard(
+                left = (landscapeGeom.rightPaneX - 16.dp).coerceAtLeast(landscapeGeom.leftPaneX + landscapeGeom.leftPaneWidth + 6.dp),
+                top = (landscapeGeom.controlStackTop - 16.dp).coerceAtLeast(landscapeGeom.usableTop),
+                width = (landscapeGeom.rightPaneWidth + 32.dp).coerceAtMost(w - landscapeGeom.rightPaneX + 12.dp),
+                height = (landscapeGeom.controlStackHeight + 32.dp).coerceAtMost(landscapeGeom.usableHeight + 16.dp),
+            )
+            else -> fullCard
+        }
+        if (glassCardRect != null && alpha > 0f) {
+            val glassTop = glassCardRect.top
+            val cardLeftPx = with(density) { glassCardRect.left.toPx() }
             val cardTopPx = with(density) { glassTop.toPx() }
-            val cardWidthPx = with(density) { fullCard.width.toPx() }
-            val cardHeightPx = with(density) { fullCard.height.toPx() }
+            val cardWidthPx = with(density) { glassCardRect.width.toPx() }
+            val cardHeightPx = with(density) { glassCardRect.height.toPx() }
             val localTouch = touchPoint - Offset(cardLeftPx, cardTopPx)
             val touchInside = touching && localTouch.x in 0f..cardWidthPx && localTouch.y in 0f..cardHeightPx
             val touchLight by animateFloatAsState(if (appearance.fullscreenGlass && touchInside) .19f else 0f,
@@ -491,7 +701,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 }, highlight = { Highlight.Default.copy(alpha = .60f) },
                 onDrawSurface = { drawRect(menuTint.copy(alpha = .18f)) })
             else Modifier.playerMenuMaterial(miuixBackdrop, menuTint, 30.dp)
-            Box(Modifier.offset(fullCard.left, glassTop).size(fullCard.width, fullCard.height)
+            Box(Modifier.offset(glassCardRect.left, glassTop).size(glassCardRect.width, glassCardRect.height)
                 .graphicsLayer { this.alpha = alpha * (1f - p) * shareChromeAlpha }.blur(shareChromeBlur)
                 .then(cardMaterial).clip(RoundedCornerShape(30.dp)).drawWithContent {
                     drawContent()
@@ -501,285 +711,508 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                             center = localTouch, radius = radius.coerceAtLeast(1f)))
                     }
                 })
-            if (p < .01f) Box(Modifier.fillMaxWidth().height(glassTop.coerceAtLeast(0.dp))
+            if (p < .01f && !landscape) Box(Modifier.fillMaxWidth().height(glassTop.coerceAtLeast(0.dp))
                 .playerTrackSwipe(appearance.swipeTracks && active, model::next, model::previous))
+        }
+        val showSmallLandscapeCover = p * controlsVisibility
+        val fullCoverSize = if (landscapeGeom != null) {
+            lerp(landscapeGeom.heroCoverSize, landscapeGeom.lyricsCompactCoverSize, showSmallLandscapeCover)
+        } else {
+            coverSize + (small - coverSize) * p
+        }
+        val targetCoverX = if (landscapeGeom != null) {
+            lerp(landscapeGeom.heroCoverX, landscapeGeom.lyricsCompactCoverX, showSmallLandscapeCover)
+        } else {
+            coverX + (smallX - coverX) * p
+        }
+        val targetCoverY = if (landscapeGeom != null) {
+            lerp(landscapeGeom.heroCoverY, landscapeGeom.lyricsCompactCoverY, showSmallLandscapeCover)
+        } else {
+            coverY + (smallY - coverY) * p
+        }
+        val miniScale = miniHeight / PlayerNavigationGeometry.miniHeight
+        val miniCoverSize = 44.dp * miniScale
+        val miniCoverX = 12.dp * miniScale
+        val miniCoverY = (miniHeight - miniCoverSize) / 2
+        val sharedClick = if (e < .5f) onExpand else if (queueOpen) onQueue else onLyrics
+        val miniShift = miniSwipe / density.density
+        val miniAlpha = (1f - abs(miniSwipe) / fullWidthPx.coerceAtLeast(1f) * .35f).coerceIn(.55f, 1f)
+        val baseCoverRadius = when {
+            expressive != null -> 28.dp
+            oneUi != null -> OneUiCardRadius
+            else -> 24.dp
+        }
+        val spatialCoverAllowed = shouldShowSpatialCoverButton(
+            spatialCoverEnabled = appearance.spatialCover,
+            appleMusicAnimatedCoverEnabled = appearance.appleMusicAnimatedCover,
+            motionVideoPath = motionVideoPath,
+        )
+        val spatialCoverRendering = spatialCoverAllowed && spatialCoverRequested && p < .99f && e > .25f
+        val effLyricsProgress = if (landscapeGeom != null) showSmallLandscapeCover else p
+        val motionOverlayAlpha = computeMotionCoverOverlayAlpha(
+            expansion = e,
+            lyricsProgress = effLyricsProgress,
+            mixActive = mixVisual != null,
+            spatialActive = spatialCoverRendering && spatialCoverState is SpatialCoverResolveState.Ready,
+        )
+        if (immGeom != null) {
+            val topLeftDisplayCorner = rememberBottomScreenCornerRadius(0.dp, android.view.RoundedCorner.POSITION_TOP_LEFT)
+            val topRightDisplayCorner = rememberBottomScreenCornerRadius(0.dp, android.view.RoundedCorner.POSITION_TOP_RIGHT)
+            val bottomLeftDisplayCorner = rememberBottomScreenCornerRadius(0.dp, android.view.RoundedCorner.POSITION_BOTTOM_LEFT)
+            val bottomRightDisplayCorner = rememberBottomScreenCornerRadius(0.dp, android.view.RoundedCorner.POSITION_BOTTOM_RIGHT)
+            val portraitTopCorner = when {
+                compactWindow -> minOf(topLeftDisplayCorner, bottomRightDisplayCorner).coerceAtLeast(18.dp)
+                topLeftDisplayCorner > 0.dp -> topLeftDisplayCorner
+                else -> bottomRightDisplayCorner
+            }
+            val landscapeLeftTopCorner = if (compactWindow) topLeftDisplayCorner.coerceAtLeast(18.dp) else topLeftDisplayCorner
+            val landscapeLeftBottomCorner = if (compactWindow) bottomLeftDisplayCorner.coerceAtLeast(18.dp) else bottomLeftDisplayCorner
+            val immCompactX = if (landscapeGeom != null) landscapeGeom.lyricsCompactCoverX else smallX
+            val immCompactY = if (landscapeGeom != null) landscapeGeom.lyricsCompactCoverY else smallY
+            val immTargetW = lerp(immGeom.coverWidth, small, effLyricsProgress)
+            val immTargetH = lerp(immGeom.coverHeight, small, effLyricsProgress)
+            val immTargetX = lerp(immGeom.coverX, immCompactX, effLyricsProgress)
+            val immTargetY = lerp(immGeom.coverY, immCompactY, effLyricsProgress)
+            val immCurW = lerp(miniCoverSize, immTargetW, e)
+            val immCurH = lerp(miniCoverSize, immTargetH, e)
+            val immCurX = lerp(miniCoverX, immTargetX, e)
+            val immCurY = lerp(miniCoverY, immTargetY, e)
+            val miniCorner = 13.dp * miniScale
+            val immCurTopStartRadius = lerp(
+                miniCorner,
+                lerp(if (landscapeGeom != null) landscapeLeftTopCorner else portraitTopCorner, 9.dp, effLyricsProgress),
+                e,
+            )
+            val immCurTopEndRadius = lerp(
+                miniCorner,
+                lerp(if (landscapeGeom != null) 0.dp else topRightDisplayCorner.takeIf { it > 0.dp } ?: portraitTopCorner, 9.dp, effLyricsProgress),
+                e,
+            )
+            val immCurBottomStartRadius = if (landscapeGeom != null) {
+                lerp(miniCorner, lerp(landscapeLeftBottomCorner, 9.dp, effLyricsProgress), e)
+            } else {
+                immersiveCoverBottomCornerRadius(miniCorner, 9.dp, e, effLyricsProgress)
+            }
+            val immCurBottomEndRadius = immersiveCoverBottomCornerRadius(miniCorner, 9.dp, e, effLyricsProgress)
+            val immFeather = (e * (1f - effLyricsProgress)).coerceIn(0f, 1f)
+            Cover(
+                uri = song.artwork,
+                modifier = Modifier
+                    .offset(immCurX, immCurY)
+                    .size(immCurW, immCurH)
+                    .graphicsLayer {
+                        translationX = miniShift
+                        this.alpha = miniAlpha * shareChromeAlpha
+                    }
+                    .blur(shareChromeBlur)
+                    .playerTrackSwipe(appearance.swipeTracks && active && p < .01f, model::next, model::previous),
+                radius = immCurTopStartRadius,
+                topEndRadius = immCurTopEndRadius,
+                bottomRadius = immCurBottomStartRadius,
+                bottomEndRadius = immCurBottomEndRadius,
+                onClick = { if (!shareActive) sharedClick() },
+                animation = appearance.coverAnimation,
+                animate = active && e > .99f,
+                transitionKey = song.key,
+                mixVisual = mixVisual,
+                placeholderTint = activeInk.copy(alpha = .3f),
+                spatialState = spatialCoverState,
+                spatialActive = spatialCoverRendering,
+                spatialTilt = spatialTilt,
+                immersiveFeather = immFeather,
+                immersiveHorizontal = landscapeGeom != null,
+                motionVideoPath = motionVideoPath,
+                motionPlaying = motionVideoAllowed && motionOverlayAlpha > 0.01f && mixVisual == null,
+                motionOverlayAlpha = motionOverlayAlpha,
+            )
+            val immScrimStrength = alpha * (1f - effLyricsProgress)
+            if (immScrimStrength > 0.001f) {
+                val scrimTone = when {
+                    expressive != null -> expressive.surface
+                    oneUi != null -> oneUi.background
+                    else -> Color(coverPalette.a2.tone(14))
+                }
+                if (landscapeGeom != null) {
+                    val scrimLeft = immGeom.coverWidth * 0.46f
+                    val scrimWidth = (immGeom.coverWidth - scrimLeft + 44.dp).coerceAtLeast(1.dp)
+                    Box(
+                        Modifier
+                            .offset(x = scrimLeft)
+                            .width(scrimWidth)
+                            .fillMaxHeight()
+                            .graphicsLayer {
+                                translationX = miniShift
+                                this.alpha = immScrimStrength * shareChromeAlpha
+                            }
+                            .blur(shareChromeBlur)
+                            .background(
+                                Brush.horizontalGradient(
+                                    0f to Color.Transparent,
+                                    0.40f to scrimTone.copy(alpha = 0.22f),
+                                    0.72f to scrimTone.copy(alpha = 0.44f),
+                                    1f to Color.Transparent,
+                                ),
+                            ),
+                    )
+                } else {
+                    val scrimTop = immGeom.coverHeight * 0.44f
+                    val scrimHeight = (immGeom.coverHeight - scrimTop + 44.dp).coerceAtLeast(1.dp)
+                    Box(
+                        Modifier
+                            .offset(y = scrimTop)
+                            .fillMaxWidth()
+                            .height(scrimHeight)
+                            .graphicsLayer {
+                                translationX = miniShift
+                                this.alpha = immScrimStrength * shareChromeAlpha
+                            }
+                            .blur(shareChromeBlur)
+                            .background(
+                                Brush.verticalGradient(
+                                    0f to Color.Transparent,
+                                    0.40f to scrimTone.copy(alpha = 0.22f),
+                                    0.72f to scrimTone.copy(alpha = 0.44f),
+                                    1f to Color.Transparent,
+                                ),
+                            ),
+                    )
+                }
+            }
+        } else {
+            val sharedSize = lerp(miniCoverSize, fullCoverSize, e)
+            val sharedX = lerp(miniCoverX, targetCoverX, e)
+            val sharedY = lerp(miniCoverY, targetCoverY, e)
+            val sharedScale = sharedSize / coverSize
+            val sharedRadius = lerp(13.dp * miniScale, baseCoverRadius + (9.dp - baseCoverRadius) * p, e)
+            Cover(
+                uri = song.artwork,
+                modifier = Modifier
+                    .offset(sharedX, sharedY)
+                    .size(coverSize)
+                    .graphicsLayer {
+                        transformOrigin = TransformOrigin(0f, 0f); scaleX = sharedScale; scaleY = sharedScale
+                        translationX = miniShift
+                        val portraitFullscreenHidden = fullscreen && !landscape
+                        this.alpha = miniAlpha * (if (portraitFullscreenHidden) 1f - e * (1f - p) else 1f) * shareChromeAlpha
+                    }
+                    .blur(shareChromeBlur)
+                    .playerTrackSwipe(appearance.swipeTracks && active && p < .01f && !fullscreen, model::next, model::previous),
+                radius = sharedRadius / sharedScale,
+                onClick = { if (!shareActive) sharedClick() },
+                animation = appearance.coverAnimation,
+                animate = active && e > .99f,
+                transitionKey = song.key,
+                mixVisual = mixVisual,
+                placeholderTint = activeInk.copy(alpha = .3f),
+                spatialState = spatialCoverState,
+                spatialActive = spatialCoverRendering,
+                spatialTilt = spatialTilt,
+                motionVideoPath = motionVideoPath,
+                motionPlaying = motionVideoAllowed && motionOverlayAlpha > 0.01f && mixVisual == null,
+                motionOverlayAlpha = motionOverlayAlpha,
+            )
         }
         // Only controls and secondary content blur/fade; artwork, metadata, and exiting lyrics transform independently.
         if (alpha > 0f) Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha * shareChromeAlpha }
             .blur(((1f - alpha) * 14f).dp + shareChromeBlur)) {
-        Box(Modifier.align(Alignment.TopCenter).offset(y = status + 12.dp * PlayerPaddingScale).size(104.dp, 32.dp)
-            .clip(RoundedCornerShape(50))
-            .semantics { contentDescription = tr("collapse_player", "收起播放器") }
-            .playerSurfaceClick(onClose), contentAlignment = Alignment.Center) {
-            when {
-                expressive != null -> Box(Modifier.width(48.dp).height(4.5.dp).clip(RoundedCornerShape(50)).background(expressive.dragHandleColor))
-                oneUi != null -> Box(Modifier.width(48.dp).height(4.5.dp).clip(RoundedCornerShape(50)).background(oneUi.track))
-                else -> Box(Modifier.width(80.dp).height(6.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = .36f)))
+            val handleAlpha = when {
+                landscape && immersive -> 0.48f
+                immGeom != null && p < 0.5f -> 0.48f + 0.52f * (p / 0.5f)
+                else -> 1f
             }
-        }
-        if (queueBlend > .001f && p > 0f) PlayerQueue(model, expressive = expressive, oneUi = oneUi, modifier = Modifier
-            .offset(y = smallY + small + 20.dp * PlayerPaddingScale)
-            .fillMaxWidth().height((seekY + 50.dp - smallY - small - 28.dp * PlayerPaddingScale).coerceAtLeast(1.dp))
-            .graphicsLayer { this.alpha = p * queueBlend; translationY = (1f - p) * 24.dp.toPx() }
-            .blur(((1f - p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp).padding(horizontal = smallX))
-        if (controlsVisibility > .001f) Column(Modifier.offset(y = seekY).fillMaxWidth()
-            .graphicsLayer { this.alpha = controlsVisibility }
-            .blur(((1f - controlsVisibility) * 14f).dp, BlurredEdgeTreatment.Unbounded)
-            .height(controlSize((fullCard.height - 76.dp).coerceAtLeast(1.dp),
-                (h - normalSeekY - nav - 10.dp).coerceAtLeast(controlsHeight))).padding(horizontal = margin)) {
-            var scrub by remember(song.key) { mutableStateOf<Float?>(null) }
-            val value = scrub ?: if (model.duration > 0) model.position.toFloat() / model.duration else 0f
-            val sliderNormalHeight = when (appearance.glowProgress) {
-                GlowProgressStyle.ONE -> 36.dp
-                GlowProgressStyle.HYPER -> 30.dp
-                GlowProgressStyle.OFF -> 24.dp
+            val handleY = when {
+                landscape || compactWindow -> effectiveStatus + 2.dp
+                immGeom != null -> effectiveStatus + 6.dp
+                else -> effectiveStatus + 12.dp * PlayerPaddingScale
             }
-            val sliderFullHeight = when (appearance.glowProgress) {
-                GlowProgressStyle.ONE -> 31.dp
-                GlowProgressStyle.HYPER -> 26.dp
-                GlowProgressStyle.OFF -> 20.dp
-            } * controlsScale
-            val sliderMod = Modifier.padding(horizontal = controlSize(0.dp, coverInset.coerceAtLeast(0.dp))).fillMaxWidth().height(controlSize(sliderFullHeight, sliderNormalHeight))
-                .then(if (queueBlend > .5f) Modifier.clearAndSetSemantics {} else Modifier)
-            Column(Modifier.graphicsLayer { this.alpha = 1f - queueBlend }) {
-            when {
-                appearance.glowProgress != GlowProgressStyle.OFF -> {
-                    val isLightGlowSurface = (expressive?.dark == false) || (oneUi?.dark == false)
-                    val glowAccent = oneUi?.accentDeep
-                        ?: expressive?.primary
-                        ?: vibrantCoverGlowColor(coverPalette)
-                    val glowTrack = when {
-                        oneUi != null -> oneUi.track.copy(alpha = if (oneUi.dark) .75f else .85f)
-                        expressive != null -> expressive.surfaceContainerHighest.copy(alpha = if (expressive.dark) .55f else .85f)
-                        else -> Color.White.copy(alpha = .28f)
-                    }
-                    GlowProgressSlider(
-                        style = appearance.glowProgress,
-                        value = value,
-                        playing = model.playing && scrub == null,
-                        label = tr("playback_progress", "播放进度"),
-                        accentColor = glowAccent,
-                        trackColor = glowTrack,
-                        isLightSurface = isLightGlowSurface,
-                        waveform = model.app.effects.outputWaveform,
-                        active = active && !queueOpen && controlsVisibility > .01f,
-                        modifier = sliderMod,
-                        onChange = { scrub = it },
-                        onFinished = { model.seekTo(((scrub ?: value) * model.duration).toLong()); scrub = null },
-                        enabled = model.duration > 0 && !queueOpen,
-                    )
-                }
-                expressive != null -> MaterialWavyProgressSlider(
-                    value = value,
-                    playing = model.playing && scrub == null,
-                    label = tr("playback_progress", "播放进度"),
-                    activeColor = expressive.primary,
-                    trackColor = expressive.surfaceContainerHighest.copy(alpha = if (expressive.dark) .55f else .85f),
-                    modifier = sliderMod,
-                    onChange = { scrub = it },
-                    onFinished = { model.seekTo(((scrub ?: value) * model.duration).toLong()); scrub = null },
-                    enabled = model.duration > 0 && !queueOpen
-                )
-                oneUi != null -> OneUiPlayerProgressSlider(
-                    value = value,
-                    label = tr("playback_progress", "播放进度"),
-                    colors = oneUi,
-                    modifier = sliderMod,
-                    onChange = { scrub = it },
-                    onFinished = { model.seekTo(((scrub ?: value) * model.duration).toLong()); scrub = null },
-                    enabled = model.duration > 0 && !queueOpen,
-                )
-                else -> PillSlider(value, tr("playback_progress", "播放进度"), sliderMod,
-                    onChange = { scrub = it }, onFinished = { model.seekTo(((scrub ?: value) * model.duration).toLong()); scrub = null }, enabled = model.duration > 0 && !queueOpen)
-            }
-            Box(Modifier.padding(horizontal = controlSize(0.dp, coverInset.coerceAtLeast(0.dp))).fillMaxWidth().height(controlSize(20.dp * controlsScale, 26.dp))) {
-                val timeColor = expressive?.timeInk ?: oneUi?.subText ?: Color.White.copy(alpha = .85f)
-                val timeStyle = if (expressive != null || oneUi != null) androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum") else androidx.compose.ui.text.TextStyle.Default
-                Text(timeText(((scrub?.let { it * model.duration } ?: model.position.toFloat())).toLong()), color = timeColor, fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold, style = timeStyle, modifier = Modifier.align(Alignment.CenterStart))
-                Text(timeText(model.duration), color = timeColor, fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold, style = timeStyle, modifier = Modifier.align(Alignment.CenterEnd))
-                val actualQuality = model.streamInfo?.level?.let { level -> StreamQuality.entries.firstOrNull { it.level == level } }
-                if (appearance.showAudioInfo && song.cloud) {
-                    val qualityItems = buildList {
-                        if (model.qualityLoading) add(DropdownItem(tr("loading", "加载中…"), enabled = false))
-                        if (model.qualityError) add(DropdownItem(tr("quality_retry", "获取音质失败，点击重试"), onClick = model::refreshQualities))
-                        val menuQualities = model.availableQualities.ifEmpty { actualQuality?.let { listOf(it) }.orEmpty() }
-                        menuQualities.forEach { item ->
-                            add(DropdownItem(qualityName(item), selected = item == (actualQuality ?: model.quality), onClick = { model.selectQuality(item) }))
-                        }
-                        if (isEmpty()) add(DropdownItem(tr("quality_unavailable", "此歌曲暂无可用音质"), enabled = false))
-                    }
-                    GlassIconDropdownMenu(
-                        entry = DropdownEntry(qualityItems), backdrop = backdrop, modifier = Modifier.align(Alignment.Center), enabled = !queueOpen,
-                        onExpandedChange = { qualityMenuOpen = it },
-                        trigger = { toggle, enabled ->
-                            val badgeShape = RoundedCornerShape(if (expressive != null || oneUi != null) 50.dp else 8.dp)
-                            val badgeBg = when {
-                                expressive != null -> expressive.tertiaryContainer
-                                oneUi != null -> oneUi.cardAlt
-                                else -> null
-                            }
-                            val badgeFg = when {
-                                expressive != null -> expressive.onTertiaryContainer
-                                oneUi != null -> oneUi.accentDeep
-                                else -> timeColor
-                            }
-                            Box(Modifier.clip(badgeShape)
-                                .then(if (badgeBg != null) Modifier.background(badgeBg) else Modifier)
-                                .clickable(enabled = enabled) {
-                                    model.refreshQualities(); toggle()
-                                }.padding(horizontal = if (badgeBg != null) 11.dp else 7.dp, vertical = 4.dp)) {
-                                Text(qualityName(actualQuality ?: model.quality),
-                                    color = badgeFg, fontSize = 11.sp,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
-                            }
-                        }, content = {})
-                } else if (appearance.showAudioInfo) Text(localAudioText(model), color = timeColor, fontSize = 11.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 45.dp))
-            }
-            }
-            Spacer(Modifier.weight(1f))
-            Row(Modifier.fillMaxWidth().height(controlSize(64.dp * controlsScale, 100.dp)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
-                if (expressive != null) {
-                    MaterialExpressiveTransportButton(
-                        icon = R.drawable.ic_player_previous,
-                        label = tr("previous_track", "上一首"),
-                        containerColor = expressive.secondaryContainer,
-                        contentColor = expressive.onSecondaryContainer,
-                        width = controlSize(46.dp * controlsScale, 60.dp),
-                        height = controlSize(48.dp * controlsScale, 64.dp),
-                        iconSize = controlSize(26.dp * controlsScale, 36.dp) * PlayerIconScale,
-                        onClick = model::previous
-                    )
-                    MaterialExpressivePlayPauseButton(
-                        playing = model.playbackRequested,
-                        label = if (model.playbackRequested) tr("pause", "暂停") else tr("play", "播放"),
-                        colors = expressive,
-                        touchHeight = controlSize(58.dp * controlsScale, 76.dp),
-                        pausedWidth = controlSize(66.dp * controlsScale, 86.dp),
-                        playingWidth = controlSize(82.dp * controlsScale, 108.dp),
-                        iconSize = controlSize(34.dp * controlsScale, 44.dp) * PlayerIconScale,
-                        onClick = model::togglePlayback
-                    )
-                    MaterialExpressiveTransportButton(
-                        icon = R.drawable.ic_player_next,
-                        label = tr("next_track", "下一首"),
-                        containerColor = expressive.secondaryContainer,
-                        contentColor = expressive.onSecondaryContainer,
-                        width = controlSize(46.dp * controlsScale, 60.dp),
-                        height = controlSize(48.dp * controlsScale, 64.dp),
-                        iconSize = controlSize(26.dp * controlsScale, 36.dp) * PlayerIconScale,
-                        onClick = model::next
-                    )
-                } else if (oneUi != null) {
-                    OneUiPlayerTransportButton(
-                        icon = R.drawable.ic_player_previous,
-                        label = tr("previous_track", "上一首"),
-                        colors = oneUi,
-                        touchSize = controlSize(48.dp * controlsScale, 60.dp),
-                        iconSize = controlSize(26.dp * controlsScale, 34.dp) * PlayerIconScale,
-                        onClick = model::previous,
-                    )
-                    OneUiPlayerPlayPauseButton(
-                        playing = model.playbackRequested,
-                        label = if (model.playbackRequested) tr("pause", "暂停") else tr("play", "播放"),
-                        colors = oneUi,
-                        touchSize = controlSize(58.dp * controlsScale, 76.dp),
-                        iconSize = controlSize(34.dp * controlsScale, 44.dp) * PlayerIconScale,
-                        onClick = model::togglePlayback,
-                    )
-                    OneUiPlayerTransportButton(
-                        icon = R.drawable.ic_player_next,
-                        label = tr("next_track", "下一首"),
-                        colors = oneUi,
-                        touchSize = controlSize(48.dp * controlsScale, 60.dp),
-                        iconSize = controlSize(26.dp * controlsScale, 34.dp) * PlayerIconScale,
-                        onClick = model::next,
-                    )
-                } else {
-                    PlayerButton(R.drawable.ic_player_previous, tr("previous_track", "上一首"), Color.White, controlSize(32.dp * controlsScale, 48.dp), controlSize(52.dp * controlsScale, 76.dp), model::previous)
-                    PlayerButton(if (model.playbackRequested) R.drawable.ic_player_pause else R.drawable.ic_player_play,
-                        if (model.playbackRequested) tr("pause", "暂停") else tr("play", "播放"), Color.White, controlSize(44.dp * controlsScale, 60.dp * .88f), controlSize(64.dp * controlsScale, 96.dp), model::togglePlayback)
-                    PlayerButton(R.drawable.ic_player_next, tr("next_track", "下一首"), Color.White, controlSize(32.dp * controlsScale, 48.dp), controlSize(52.dp * controlsScale, 76.dp), model::next)
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            if (appearance.showVolume) {
-                val volMod = Modifier.fillMaxWidth().height(controlSize(32.dp * controlsScale, 44.dp))
+            Box(Modifier.align(Alignment.TopCenter).offset(y = handleY).size(104.dp, 28.dp)
+                .graphicsLayer { this.alpha = handleAlpha }
+                .clip(RoundedCornerShape(50))
+                .semantics { contentDescription = tr("collapse_player", "收起播放器") }
+                .playerSurfaceClick(onClose), contentAlignment = Alignment.Center) {
+                val pillWidth = if (landscape || isMultiWindow) 52.dp else 80.dp
+                val pillHeight = if (landscape || isMultiWindow) 4.5.dp else 6.dp
                 when {
-                    expressive != null -> MaterialExpressiveVolumeSlider(colors = expressive, modifier = volMod)
-                    oneUi != null -> OneUiPlayerVolumeSlider(colors = oneUi, modifier = volMod)
-                    else -> VolumeControl(volMod)
+                    expressive != null -> Box(Modifier.width(48.dp).height(4.5.dp).clip(RoundedCornerShape(50)).background(expressive.dragHandleColor))
+                    oneUi != null -> Box(Modifier.width(48.dp).height(4.5.dp).clip(RoundedCornerShape(50)).background(oneUi.track))
+                    else -> Box(Modifier.width(pillWidth).height(pillHeight).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = .36f)))
                 }
             }
-            val bottomTouch = controlSize(40.dp * controlsScale, 48.dp)
-            val bottomIcon = controlSize(27.dp * controlsScale, 32.dp)
-            Row(Modifier.fillMaxWidth().height(controlSize(44.dp * controlsScale, 56.dp)), horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.CenterVertically) {
-                val modeIcon = when (model.playbackMode) { 1 -> R.drawable.ic_player_shuffle; 2 -> R.drawable.ic_player_repeat_one; else -> R.drawable.ic_player_repeat }
-                val modeDescription = when (model.playbackMode) { 1 -> tr("shuffle_mode", "随机播放"); 2 -> tr("repeat_one_mode", "单曲循环"); else -> tr("repeat_all_mode", "列表循环") }
-                val revision = model.history.revision
-                val favorite = model.isFavorite(song)
-                if (expressive != null) {
-                    Box(Modifier.semantics { selected = lyricsOpen }) {
-                        MaterialExpressiveBottomButton(
-                            if (lyricsOpen) R.drawable.ic_player_lyrics_on else R.drawable.ic_player_lyrics,
-                            tr("lyrics", "歌词"), lyricsOpen, expressive, bottomTouch, bottomIcon * PlayerIconScale, onClick = onLyrics
+            if (queueBlend > .001f && p > 0f) {
+                val queueMod = if (landscapeGeom != null) {
+                    val qBottomClearance = 0.dp
+                    Modifier
+                        .offset(x = landscapeGeom.rightPaneX, y = landscapeGeom.usableTop)
+                        .size(
+                            landscapeGeom.rightPaneWidth,
+                            (landscapeGeom.usableBottom - landscapeGeom.usableTop - qBottomClearance).coerceAtLeast(1.dp),
                         )
-                    }
-                    MaterialExpressiveBottomButton(
-                        modeIcon, modeDescription, false, expressive, bottomTouch, bottomIcon * PlayerIconScale, onClick = model::cyclePlaybackMode
-                    )
-                    MaterialExpressiveBottomButton(
-                        if (favorite) R.drawable.ic_player_favorite_on else R.drawable.ic_player_favorite,
-                        if (favorite) tr("unfavorite", "取消收藏") else tr("favorite", "收藏"),
-                        favorite, expressive, bottomTouch, bottomIcon * PlayerIconScale, useTertiary = true
-                    ) { model.toggleFavorite(song) }
-                    Box(Modifier.semantics { selected = queueOpen }) {
-                        MaterialExpressiveBottomButton(
-                            if (queueOpen) R.drawable.ic_player_queue_on else R.drawable.ic_player_queue,
-                            tr("play_queue", "播放队列"), queueOpen, expressive, bottomTouch, bottomIcon * PlayerIconScale, onClick = onQueue
-                        )
-                    }
-                } else if (oneUi != null) {
-                    Box(Modifier.semantics { selected = lyricsOpen }) {
-                        OneUiPlayerBottomButton(
-                            if (lyricsOpen) R.drawable.ic_player_lyrics_on else R.drawable.ic_player_lyrics,
-                            tr("lyrics", "歌词"), lyricsOpen, oneUi, bottomTouch, bottomIcon * PlayerIconScale, onClick = onLyrics,
-                        )
-                    }
-                    OneUiPlayerBottomButton(
-                        modeIcon, modeDescription, false, oneUi, bottomTouch, bottomIcon * PlayerIconScale, onClick = model::cyclePlaybackMode,
-                    )
-                    OneUiPlayerBottomButton(
-                        if (favorite) R.drawable.ic_player_favorite_on else R.drawable.ic_player_favorite,
-                        if (favorite) tr("unfavorite", "取消收藏") else tr("favorite", "收藏"),
-                        favorite, oneUi, bottomTouch, bottomIcon * PlayerIconScale,
-                    ) { model.toggleFavorite(song) }
-                    Box(Modifier.semantics { selected = queueOpen }) {
-                        OneUiPlayerBottomButton(
-                            if (queueOpen) R.drawable.ic_player_queue_on else R.drawable.ic_player_queue,
-                            tr("play_queue", "播放队列"), queueOpen, oneUi, bottomTouch, bottomIcon * PlayerIconScale, onClick = onQueue,
-                        )
-                    }
                 } else {
-                    Box(Modifier.size(bottomTouch).semantics { selected = lyricsOpen }) {
-                        PlayerButton(if (lyricsOpen) R.drawable.ic_player_lyrics_on else R.drawable.ic_player_lyrics, tr("lyrics", "歌词"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, onLyrics)
+                    val qTop = smallY + small + (if (compactWindow) 12.dp else 20.dp * PlayerPaddingScale)
+                    Modifier
+                        .offset(y = qTop)
+                        .fillMaxWidth()
+                        .height((seekY + 50.dp - qTop - 8.dp).coerceAtLeast(1.dp))
+                        .padding(horizontal = smallX)
+                }
+                PlayerQueue(
+                    model,
+                    expressive = expressive,
+                    oneUi = oneUi,
+                    modifier = queueMod
+                        .graphicsLayer { this.alpha = p * queueBlend; translationY = (1f - p) * 24.dp.toPx() }
+                        .blur(((1f - p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp),
+                )
+            }
+            if (landscapeGeom != null) {
+                // Landscape Normal Controls inside Right Column
+                val normalCtrlAlpha = ((1f - p) * controlsVisibility).coerceIn(0f, 1f)
+                val landscapeHeaderReserve = with(density) {
+                    maxOf(46.dp, if (textHeight > 0) textHeight.toDp() else 48.dp)
+                }
+                val rightCtrlTop = landscapeGeom.controlStackTop + landscapeHeaderReserve + 8.dp
+                val rightCtrlHeight = (landscapeGeom.controlStackTop + landscapeGeom.controlStackHeight - rightCtrlTop).coerceAtLeast(110.dp)
+                if (normalCtrlAlpha > 0.001f) {
+                    val lScale = landscapeGeom.controlsScale
+                    val sliderH = when (appearance.glowProgress) {
+                        GlowProgressStyle.ONE -> 32.dp
+                        GlowProgressStyle.HYPER -> 26.dp
+                        GlowProgressStyle.OFF -> 22.dp
+                    } * lScale.coerceAtLeast(0.84f)
+                    Column(
+                        Modifier
+                            .offset(x = landscapeGeom.rightPaneX, y = rightCtrlTop)
+                            .size(landscapeGeom.rightPaneWidth, rightCtrlHeight)
+                            .graphicsLayer { this.alpha = normalCtrlAlpha }
+                            .blur(((1f - normalCtrlAlpha) * 12f).dp, BlurredEdgeTreatment.Unbounded),
+                    ) {
+                        PlayerProgressSection(
+                            model = model,
+                            song = song,
+                            appearance = appearance,
+                            coverPalette = coverPalette,
+                            expressive = expressive,
+                            oneUi = oneUi,
+                            backdrop = backdrop,
+                            active = active,
+                            queueOpen = queueOpen,
+                            controlsVisibility = normalCtrlAlpha,
+                            sliderHeight = sliderH,
+                            footerHeight = 22.dp * lScale.coerceAtLeast(0.84f),
+                            horizontalInset = 0.dp,
+                            onQualityMenuExpanded = { qualityMenuOpen = it },
+                            modifier = Modifier.graphicsLayer { this.alpha = 1f - queueBlend },
+                        )
+                        Spacer(Modifier.weight(1f))
+                        PlayerTransportSection(
+                            model = model,
+                            expressive = expressive,
+                            oneUi = oneUi,
+                            scale = lScale.coerceIn(0.80f, 1.0f),
+                            rowHeight = (74.dp * lScale).coerceIn(54.dp, 82.dp),
+                        )
+                        Spacer(Modifier.weight(1f))
+                        if (appearance.showVolume) {
+                            PlayerVolumeSection(
+                                expressive = expressive,
+                                oneUi = oneUi,
+                                height = (38.dp * lScale).coerceIn(30.dp, 42.dp),
+                            )
+                        }
+                        PlayerBottomActionsSection(
+                            model = model,
+                            song = song,
+                            lyricsOpen = lyricsOpen,
+                            queueOpen = queueOpen,
+                            expressive = expressive,
+                            oneUi = oneUi,
+                            rowHeight = (46.dp * lScale).coerceIn(36.dp, 50.dp),
+                            bottomTouch = (44.dp * lScale).coerceIn(34.dp, 48.dp),
+                            bottomIcon = (28.dp * lScale).coerceIn(22.dp, 31.dp),
+                            onLyrics = onLyrics,
+                            onQueue = onQueue,
+                        )
                     }
-                    PlayerButton(modeIcon, modeDescription, Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, model::cyclePlaybackMode)
-                    PlayerButton(if (favorite) R.drawable.ic_player_favorite_on else R.drawable.ic_player_favorite,
-                        if (favorite) tr("unfavorite", "取消收藏") else tr("favorite", "收藏"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch) { model.toggleFavorite(song) }
-                    Box(Modifier.semantics { selected = queueOpen }) {
-                        PlayerButton(if (queueOpen) R.drawable.ic_player_queue_on else R.drawable.ic_player_queue, tr("play_queue", "播放队列"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, onQueue)
+                }
+                // Landscape Non-Immersed Lyrics/Queue Controls inside Left Column below compact cover
+                val leftCtrlAlpha = (p * controlsVisibility).coerceIn(0f, 1f)
+                if (leftCtrlAlpha > 0.001f) {
+                    val leftCtrlTop = landscapeGeom.lyricsCompactCoverY + landscapeGeom.lyricsCompactCoverSize + 8.dp
+                    val leftCtrlHeight = (landscapeGeom.usableBottom - leftCtrlTop).coerceAtLeast(100.dp)
+                    val clScale = (leftCtrlHeight.value / 190f).coerceIn(0.60f, 0.88f)
+                    val showLeftVolume = appearance.showVolume && leftCtrlHeight >= 158.dp
+                    Column(
+                        Modifier
+                            .offset(x = landscapeGeom.leftPaneX, y = leftCtrlTop)
+                            .size(landscapeGeom.leftPaneWidth, leftCtrlHeight)
+                            .graphicsLayer { this.alpha = leftCtrlAlpha }
+                            .blur(((1f - leftCtrlAlpha) * 12f).dp, BlurredEdgeTreatment.Unbounded),
+                    ) {
+                        PlayerProgressSection(
+                            model = model,
+                            song = song,
+                            appearance = appearance,
+                            coverPalette = coverPalette,
+                            expressive = expressive,
+                            oneUi = oneUi,
+                            backdrop = backdrop,
+                            active = active,
+                            queueOpen = queueOpen,
+                            controlsVisibility = leftCtrlAlpha,
+                            sliderHeight = 20.dp * clScale.coerceAtLeast(0.84f),
+                            footerHeight = 20.dp * clScale.coerceAtLeast(0.84f),
+                            horizontalInset = 0.dp,
+                            onQualityMenuExpanded = { qualityMenuOpen = it },
+                            modifier = Modifier.graphicsLayer { this.alpha = 1f - queueBlend },
+                        )
+                        Spacer(Modifier.weight(1f))
+                        PlayerTransportSection(
+                            model = model,
+                            expressive = expressive,
+                            oneUi = oneUi,
+                            scale = clScale.coerceIn(0.72f, 0.88f),
+                            rowHeight = (58.dp * clScale).coerceIn(46.dp, 64.dp),
+                        )
+                        if (showLeftVolume) {
+                            Spacer(Modifier.weight(0.6f))
+                            PlayerVolumeSection(
+                                expressive = expressive,
+                                oneUi = oneUi,
+                                height = (32.dp * clScale).coerceIn(26.dp, 36.dp),
+                            )
+                        }
+                        Spacer(Modifier.weight(0.6f))
+                        PlayerBottomActionsSection(
+                            model = model,
+                            song = song,
+                            lyricsOpen = lyricsOpen,
+                            queueOpen = queueOpen,
+                            expressive = expressive,
+                            oneUi = oneUi,
+                            rowHeight = (42.dp * clScale).coerceIn(34.dp, 46.dp),
+                            bottomTouch = (40.dp * clScale).coerceIn(32.dp, 44.dp),
+                            bottomIcon = (26.dp * clScale).coerceIn(20.dp, 29.dp),
+                            onLyrics = onLyrics,
+                            onQueue = onQueue,
+                        )
                     }
+                }
+            } else if (controlsVisibility > .001f) {
+                Column(
+                    Modifier
+                        .offset(y = seekY)
+                        .fillMaxWidth()
+                        .graphicsLayer { this.alpha = controlsVisibility }
+                        .blur(((1f - controlsVisibility) * 14f).dp, BlurredEdgeTreatment.Unbounded)
+                        .height(
+                            controlSize(
+                                (fullCard.height - 76.dp).coerceAtLeast(1.dp),
+                                (h - normalSeekY - portraitNav - 10.dp).coerceAtLeast(baseControlsHeight),
+                            ),
+                        )
+                        .padding(horizontal = margin),
+                ) {
+                    val sliderNormalHeight = when (appearance.glowProgress) {
+                        GlowProgressStyle.ONE -> 36.dp
+                        GlowProgressStyle.HYPER -> 30.dp
+                        GlowProgressStyle.OFF -> 24.dp
+                    } * compactScale
+                    val sliderFullHeight = when (appearance.glowProgress) {
+                        GlowProgressStyle.ONE -> 31.dp
+                        GlowProgressStyle.HYPER -> 26.dp
+                        GlowProgressStyle.OFF -> 20.dp
+                    } * portraitControlsScale
+                    val footerNormal = 26.dp * compactScale
+                    val footerFull = 20.dp * portraitControlsScale
+                    val sliderInset = 0.dp
+                    PlayerProgressSection(
+                        model = model,
+                        song = song,
+                        appearance = appearance,
+                        coverPalette = coverPalette,
+                        expressive = expressive,
+                        oneUi = oneUi,
+                        backdrop = backdrop,
+                        active = active,
+                        queueOpen = queueOpen,
+                        controlsVisibility = controlsVisibility,
+                        sliderHeight = controlSize(sliderFullHeight, sliderNormalHeight),
+                        footerHeight = controlSize(footerFull, footerNormal),
+                        horizontalInset = sliderInset,
+                        onQualityMenuExpanded = { qualityMenuOpen = it },
+                        modifier = Modifier.graphicsLayer { this.alpha = 1f - queueBlend },
+                    )
+                    Spacer(Modifier.weight(1f))
+                    PlayerTransportSection(
+                        model = model,
+                        expressive = expressive,
+                        oneUi = oneUi,
+                        scale = portraitControlsScale,
+                        rowHeight = controlSize(64.dp * portraitControlsScale, 100.dp * compactScale),
+                    )
+                    Spacer(Modifier.weight(1f))
+                    if (appearance.showVolume) {
+                        PlayerVolumeSection(
+                            expressive = expressive,
+                            oneUi = oneUi,
+                            height = controlSize(32.dp * portraitControlsScale, 44.dp * compactScale),
+                        )
+                    }
+                    val bottomTouch = controlSize(40.dp * portraitControlsScale, 48.dp * compactScale)
+                    val bottomIcon = controlSize(27.dp * portraitControlsScale, 32.dp * compactScale)
+                    PlayerBottomActionsSection(
+                        model = model,
+                        song = song,
+                        lyricsOpen = lyricsOpen,
+                        queueOpen = queueOpen,
+                        expressive = expressive,
+                        oneUi = oneUi,
+                        rowHeight = controlSize(44.dp * portraitControlsScale, 56.dp * compactScale),
+                        bottomTouch = bottomTouch,
+                        bottomIcon = bottomIcon,
+                        onLyrics = onLyrics,
+                        onQueue = onQueue,
+                    )
                 }
             }
         }
+        val lyricVisual = remember(appearance.lyricTheme) { lyricThemeSpec(appearance.lyricTheme) }
+        val lyricChromeBlend = if (appearance.lyricTheme == btm.m.auraplayer.playback.LyricTheme.BLUR) {
+            0f
+        } else {
+            (p * (1f - queueBlend)).coerceIn(0f, 1f)
         }
+        val lyricInk = if (lyricChromeBlend > 0f) lerp(activeInk, lyricVisual.inkColor, lyricChromeBlend) else activeInk
+        val lyricSubInk = if (lyricChromeBlend > 0f) lerp(secondaryInk, lyricVisual.secondaryInkColor, lyricChromeBlend) else secondaryInk
         if (alpha > 0f && p > 0f && queueBlend < .999f) {
-            Box(Modifier.offset(y = smallY + small + 20.dp * PlayerPaddingScale).fillMaxWidth()
-                .height((seekY - smallY - small - 35.dp * PlayerPaddingScale + (h - nav - seekY) * (1f - controlsVisibility)).coerceAtLeast(1.dp))
+            val lyricBoxModifier = if (landscapeGeom != null) {
+                val bottomReserve = 52.dp * controlsVisibility
+                Modifier
+                    .offset(x = landscapeGeom.rightPaneX, y = landscapeGeom.usableTop)
+                    .size(
+                        landscapeGeom.rightPaneWidth,
+                        (landscapeGeom.usableBottom - landscapeGeom.usableTop - bottomReserve).coerceAtLeast(1.dp),
+                    )
+            } else {
+                val portraitLyricsTop = smallY + small + (if (compactWindow) 10.dp else 20.dp * PlayerPaddingScale)
+                val bottomReserve = 56.dp * controlsVisibility
+                val portraitLyricsBottom = seekY - bottomReserve + (h - portraitNav - seekY) * (1f - controlsVisibility)
+                Modifier
+                    .offset(y = portraitLyricsTop)
+                    .fillMaxWidth()
+                    .height((portraitLyricsBottom - portraitLyricsTop).coerceAtLeast(1.dp))
+            }
+            val lyricHorizontalPadDp = when {
+                landscapeGeom != null -> 10f
+                w < 330.dp -> 14f
+                else -> 26f
+            }
+            val effectiveLyricScale = model.lyricSize.scale * when {
+                landscapeGeom != null && landscapeGeom.rightPaneWidth < 360.dp -> (landscapeGeom.rightPaneWidth.value / 370f).coerceIn(0.76f, 1f)
+                !landscape && w < 330.dp -> (w.value / 345f).coerceIn(0.76f, 1f)
+                else -> 1f
+            }
+            Box(lyricBoxModifier
                 .graphicsLayer {
                     val shareExitAlpha = if (shareActive) 1f - lyricShareSmoothStep(.06f, .62f, shareP) else 1f
                     this.alpha = alpha * p * (1f - queueBlend) * shareExitAlpha
@@ -812,10 +1245,19 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 }
                 .blur(((1f - alpha) * 14f + (1f - p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp)) {
                 if (model.lyrics.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(if (model.lyricsLoading) tr("lyrics_loading", "正在获取歌词…") else tr("lyrics_empty", "暂无歌词"), color = activeInk.copy(alpha = .55f), fontSize = 20.sp)
+                    Text(if (model.lyricsLoading) tr("lyrics_loading", "正在获取歌词…") else tr("lyrics_empty", "暂无歌词"), color = lyricInk.copy(alpha = .55f), fontSize = 20.sp)
                 } else AndroidView(factory = { PlayerLyricView(it) }, update = {
-                    it.inkColor(activeInk.toArgb())
-                    it.submit(model.lyrics, model.showTranslation, model.showPronunciation, model.lyricSize.scale)
+                    it.lyricTheme(appearance.lyricTheme)
+                    it.spatialLyrics(appearance.spatialLyrics)
+                    it.spatialTilt(spatialTilt.x, spatialTilt.y)
+                    it.inkColor(lyricInk.toArgb())
+                    it.submit(
+                        lines = model.lyrics,
+                        translation = model.showTranslation,
+                        pronunciation = model.showPronunciation,
+                        textScale = effectiveLyricScale,
+                        horizontalPaddingDp = lyricHorizontalPadDp,
+                    )
                     it.position(model.position, model.playing)
                     it.onSeek = model::seekTo
                     it.onLongPress = { index -> openSharePage(index, it.rowBoundsInWindow(index)?.toComposeRect(), it.viewportBoundsInWindow().toComposeRect()) }
@@ -823,151 +1265,920 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 }, modifier = Modifier.fillMaxSize())
             }
         }
-        val fullCoverSize = coverSize + (small - coverSize) * p
-        val miniScale = miniHeight / PlayerNavigationGeometry.miniHeight
-        val miniCoverSize = 44.dp * miniScale
-        val miniCoverX = 12.dp * miniScale
-        val miniCoverY = (miniHeight - miniCoverSize) / 2
-        val sharedSize = lerp(miniCoverSize, fullCoverSize, e)
-        val sharedX = lerp(miniCoverX, coverX + (smallX - coverX) * p, e)
-        val sharedY = lerp(miniCoverY, coverY + (smallY - coverY) * p, e)
-        val sharedScale = sharedSize / coverSize
-        val baseCoverRadius = when {
-            expressive != null -> 28.dp
-            oneUi != null -> OneUiCardRadius
-            else -> 24.dp
-        }
-        val sharedRadius = lerp(13.dp * miniScale, baseCoverRadius + (9.dp - baseCoverRadius) * p, e)
-        val sharedClick = if (e < .5f) onExpand else if (queueOpen) onQueue else onLyrics
-        val miniShift = miniSwipe / density.density
-        val miniAlpha = (1f - abs(miniSwipe) / fullWidthPx.coerceAtLeast(1f) * .35f).coerceIn(.55f, 1f)
-        Cover(song.artwork, Modifier.offset(sharedX, sharedY).size(coverSize).graphicsLayer {
-            transformOrigin = TransformOrigin(0f, 0f); scaleX = sharedScale; scaleY = sharedScale
-            translationX = miniShift
-            this.alpha = miniAlpha * (if (fullscreen) 1f - e * (1f - p) else 1f) * shareChromeAlpha
-        }.blur(shareChromeBlur).playerTrackSwipe(appearance.swipeTracks && active && p < .01f && !fullscreen, model::next, model::previous),
-            sharedRadius / sharedScale, onClick = { if (!shareActive) sharedClick() }, mixVisual = mixVisual,
-            animation = appearance.coverAnimation, animate = active && e > .99f, transitionKey = song.key,
-            placeholderTint = activeInk.copy(alpha = .3f))
-        val compactTextX = smallX + small + 12.dp * PlayerPaddingScale
-        val expandedTextX = if (fullscreen) fullCard.left + 16.dp else coverX
-        val fullTextX = expandedTextX + (compactTextX - expandedTextX) * p
-        // Only the fullscreen controls card uses smaller metadata. Restore the normal
-        // typography continuously as it morphs into lyrics/queue or the mini player.
-        val metadataSize = if (fullscreen) 1f - .12f * e * (1f - p) else 1f
-        var textHeight by remember { mutableIntStateOf(0) }
+        val metadataSize = if (fullscreen && !landscape) 1f - .12f * e * (1f - p) else 1f
         val measuredTextHeight = with(density) { if (textHeight > 0) textHeight.toDp() else (46.sp * metadataSize).toDp() }
-        val compactTextY = smallY + (small - measuredTextHeight * .78f) / 2
-        val fullTextY = titleY + (compactTextY - titleY) * p
-        val textScale = .7f * miniScale + ((1f - .22f * p) - .7f * miniScale) * e
         val miniTextX = 66.dp * miniScale
         val miniTextWidth = (miniWidth - miniTextX - miniControlClearance).coerceAtLeast(24.dp)
-        val expandedTextWidth = if (fullscreen) (fullCard.width - 84.dp).coerceAtLeast(24.dp) else coverSize
-        val fullTextWidth = expandedTextWidth + ((w - compactTextX - 68.dp).coerceAtLeast(24.dp) - expandedTextWidth) * p
-        val textWidth = (miniTextWidth + (fullTextWidth - miniTextWidth) * e) / textScale
-        val textColor = lerp(miniColor, activeInk, e)
-        val artistColor = lerp(miniColor.copy(alpha = .8f), oneUi?.subText ?: expressive?.secondaryInk ?: Color.White.copy(alpha = .8f), e)
         val miniTextY = (miniHeight - measuredTextHeight * .7f * miniScale) / 2
+        val textScale = if (landscapeGeom != null) {
+            .7f * miniScale + ((1f - .14f * p) - .7f * miniScale) * e
+        } else {
+            .7f * miniScale + ((1f - .22f * p) - .7f * miniScale) * e
+        }
+        val hasCubeOnTitleRow = spatialCoverAllowed
+        val buttonSize = 46.dp
+        val cubeGap = 4.dp
+        val fullTextX = if (landscapeGeom != null) {
+            val normalMetaX = landscapeGeom.rightPaneX
+            val compactMetaX = landscapeGeom.lyricsCompactCoverX + landscapeGeom.lyricsCompactCoverSize + 12.dp
+            lerp(normalMetaX, compactMetaX, p)
+        } else {
+            val compactTextX = smallX + small + 12.dp * PlayerPaddingScale
+            val expandedTextX = if (fullscreen) fullCard.left + 16.dp else portraitColX
+            expandedTextX + (compactTextX - expandedTextX) * p
+        }
+        val fullTextY = if (landscapeGeom != null) {
+            val normalMetaY = landscapeGeom.controlStackTop
+            val compactMetaY = landscapeGeom.lyricsCompactCoverY + (landscapeGeom.lyricsCompactCoverSize - measuredTextHeight * .86f) / 2
+            lerp(normalMetaY, compactMetaY, p)
+        } else {
+            val compactTextY = smallY + (small - measuredTextHeight * .78f) / 2
+            titleY + (compactTextY - titleY) * p
+        }
+        val fullTextWidth = if (landscapeGeom != null) {
+            val cubeReserve = if (hasCubeOnTitleRow) buttonSize + cubeGap else 0.dp
+            val normalMetaW = (landscapeGeom.rightPaneWidth - 52.dp - cubeReserve).coerceAtLeast(24.dp)
+            val compactMetaW = (landscapeGeom.leftPaneWidth - landscapeGeom.lyricsCompactCoverSize - 12.dp - 48.dp).coerceAtLeast(24.dp)
+            lerp(normalMetaW, compactMetaW, p)
+        } else {
+            val compactTextX = smallX + small + 12.dp * PlayerPaddingScale
+            val cubeReserve = if (hasCubeOnTitleRow) buttonSize + cubeGap else 0.dp
+            val expandedTextWidth = if (fullscreen) {
+                (fullCard.width - 84.dp - cubeReserve).coerceAtLeast(24.dp)
+            } else if (immGeom != null) {
+                (portraitColW - buttonSize - 8.dp - cubeReserve).coerceAtLeast(24.dp)
+            } else {
+                (portraitColW - cubeReserve).coerceAtLeast(24.dp)
+            }
+            expandedTextWidth + ((w - compactTextX - 68.dp).coerceAtLeast(24.dp) - expandedTextWidth) * p
+        }
+        val textWidth = (miniTextWidth + (fullTextWidth - miniTextWidth) * e) / textScale
+        val textColor = lerp(miniColor, lyricInk, e)
+        val baseArtistColor = oneUi?.subText ?: expressive?.secondaryInk ?: Color.White.copy(alpha = .8f)
+        val artistColor = lerp(miniColor.copy(alpha = .8f), if (lyricChromeBlend > 0f) lerp(baseArtistColor, lyricSubInk, lyricChromeBlend) else baseArtistColor, e)
         val mixProgress = mixVisual?.progress?.coerceIn(0f, 1f)
         val mixFromAlpha = mixProgress?.let { (1f - it).coerceIn(0f, 1f) } ?: 0f
         val mixToAlpha = mixProgress?.coerceIn(0f, 1f) ?: 0f
+        val landscapeMetaChrome = if (landscapeGeom != null) 1f - e * p * (1f - controlsVisibility) else 1f
         Box(Modifier.offset(lerp(miniTextX, fullTextX, e), miniTextY + (fullTextY - miniTextY) * e)
             .width(textWidth).height(measuredTextHeight).graphicsLayer {
                 translationX = miniShift
-                this.alpha = miniAlpha * shareChromeAlpha
-            }.blur(shareChromeBlur)) {
-        Column(Modifier.fillMaxSize()
-            .width(textWidth).onSizeChanged { textHeight = it.height }.graphicsLayer {
-                transformOrigin = TransformOrigin(0f, 0f); scaleX = textScale; scaleY = textScale
-                this.alpha = miniAlpha * if (mixVisual == null) 1f else mixFromAlpha
+                this.alpha = miniAlpha * shareChromeAlpha * landscapeMetaChrome
+            }.blur(shareChromeBlur + if (landscapeGeom != null) ((1f - landscapeMetaChrome) * 14f).dp else 0.dp)) {
+            Column(Modifier.fillMaxSize()
+                .width(textWidth).onSizeChanged { textHeight = it.height }.graphicsLayer {
+                    transformOrigin = TransformOrigin(0f, 0f); scaleX = textScale; scaleY = textScale
+                    this.alpha = miniAlpha * if (mixVisual == null) 1f else mixFromAlpha
+                }
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !shareActive && landscapeMetaChrome > 0.1f, onClick = sharedClick)) {
+                Text(mixVisual?.fromTitle ?: song.title, color = textColor, fontSize = 20.sp * metadataSize, lineHeight = 25.sp * metadataSize,
+                    fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(mixVisual?.fromArtist ?: song.artist, color = artistColor, fontSize = 16.sp * metadataSize, lineHeight = 21.sp * metadataSize,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !shareActive, onClick = sharedClick)) {
-            Text(mixVisual?.fromTitle ?: song.title, color = textColor, fontSize = 20.sp * metadataSize, lineHeight = 25.sp * metadataSize,
-                fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(mixVisual?.fromArtist ?: song.artist, color = artistColor, fontSize = 16.sp * metadataSize, lineHeight = 21.sp * metadataSize,
-                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        if (mixVisual != null) Column(Modifier.fillMaxSize().graphicsLayer {
-            transformOrigin = TransformOrigin(0f, 0f); scaleX = textScale; scaleY = textScale
-            this.alpha = miniAlpha * mixToAlpha
-        }) {
-            Text(mixVisual.toTitle, color = textColor, fontSize = 20.sp * metadataSize, lineHeight = 25.sp * metadataSize,
-                fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(mixVisual.toArtist, color = artistColor, fontSize = 16.sp * metadataSize, lineHeight = 21.sp * metadataSize,
-                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        /* Keep the normal click target over the two metadata layers. */
-        Box(Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !shareActive, onClick = sharedClick))
+            if (mixVisual != null) Column(Modifier.fillMaxSize().graphicsLayer {
+                transformOrigin = TransformOrigin(0f, 0f); scaleX = textScale; scaleY = textScale
+                this.alpha = miniAlpha * mixToAlpha
+            }) {
+                Text(mixVisual.toTitle, color = textColor, fontSize = 20.sp * metadataSize, lineHeight = 25.sp * metadataSize,
+                    fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(mixVisual.toArtist, color = artistColor, fontSize = 16.sp * metadataSize, lineHeight = 21.sp * metadataSize,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            /* Keep the normal click target over the two metadata layers. */
+            Box(Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !shareActive && landscapeMetaChrome > 0.1f, onClick = sharedClick))
         }
 
-        // One button moves and scales between both layouts, outside the content's blur layer.
+        // Action buttons live outside the content's blur layer so glass/blur remains sharp.
         if (alpha > 0f) {
-            val buttonSize = 46.dp
-            val bigX = if (fullscreen) fullCard.left + fullCard.width - 16.dp - buttonSize else coverX + coverSize - buttonSize
-            val bigY = if (fullscreen) titleY + (measuredTextHeight - buttonSize) / 2 else status + 8.dp
-            val compactX = w - 68.dp
+            val compactX = w - (if (compactWindow) normalMargin + buttonSize else 68.dp)
             val compactY = smallY + (small - buttonSize) / 2
-            Box(Modifier.offset(bigX + (compactX - bigX) * p, bigY + (compactY - bigY) * p)
-                .size(buttonSize).graphicsLayer { this.alpha = alpha * shareChromeAlpha; scaleX = 1f - .08f * p; scaleY = scaleX }
-                .blur(shareChromeBlur)
-                .clip(RoundedCornerShape(50)), contentAlignment = Alignment.Center) {
-                when {
-                    expressive != null -> MaterialExpressiveMoreButton(
-                        label = tr("more", "更多"),
-                        colors = expressive,
-                        buttonSize = 46.dp * .85f * .92f,
-                        iconSize = 24.dp * PlayerIconScale * .92f,
-                        enabled = !shareActive,
-                        onClick = onMore
-                    )
-                    oneUi != null -> OneUiPlayerMoreButton(
-                        label = tr("more", "更多"),
-                        colors = oneUi,
-                        buttonSize = 46.dp * .85f * .92f,
-                        iconSize = 24.dp * PlayerIconScale * .92f,
-                        enabled = !shareActive,
-                        onClick = onMore,
-                    )
-                    else -> Box(Modifier.fillMaxSize().clickable(enabled = !shareActive, onClick = onMore), contentAlignment = Alignment.Center) {
-                        Box(Modifier.size(46.dp * .85f * .92f).playerMenuMaterial(miuixBackdrop, menuTint, 50.dp)) {
-                            Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.align(Alignment.Center).size(24.dp * PlayerIconScale * .92f), colorFilter = ColorFilter.tint(Color.White))
-                        }
-                    }
+            val moreX: Dp
+            val moreY: Dp
+            if (landscapeGeom != null) {
+                val normalMoreX = landscapeGeom.rightPaneX + landscapeGeom.rightPaneWidth - buttonSize
+                val compactMoreX = landscapeGeom.leftPaneX + landscapeGeom.leftPaneWidth - buttonSize
+                val normalMoreY = landscapeGeom.controlStackTop + (measuredTextHeight - buttonSize) / 2
+                val compactMoreY = landscapeGeom.lyricsCompactCoverY + (landscapeGeom.lyricsCompactCoverSize - buttonSize) / 2
+                moreX = lerp(normalMoreX, compactMoreX, p)
+                moreY = lerp(normalMoreY, compactMoreY, p)
+            } else {
+                val useRightCornerAnchor = fullscreen || compactWindow || coverSize < w * .66f
+                val bigX = if (fullscreen) {
+                    fullCard.left + fullCard.width - 16.dp - buttonSize
+                } else if (immGeom != null) {
+                    portraitColX + portraitColW - buttonSize
+                } else if (useRightCornerAnchor) {
+                    maxOf(w / 2 + 52.dp, w - normalMargin - buttonSize).coerceAtMost(w - buttonSize - 6.dp)
+                } else {
+                    coverX + coverSize - buttonSize
                 }
+                val bigY = if (fullscreen || immGeom != null) {
+                    titleY + (measuredTextHeight - buttonSize) / 2
+                } else {
+                    effectiveStatus + (if (compactWindow) 2.dp else 8.dp)
+                }
+                moreX = bigX + (compactX - bigX) * p
+                moreY = bigY + (compactY - bigY) * p
+            }
+            val cubeModeVis = (1f - (p / 0.72f).coerceIn(0f, 1f))
+            if (hasCubeOnTitleRow && cubeModeVis > 0.001f) {
+                val cubeX: Dp
+                val cubeY: Dp
+                if (landscapeGeom != null) {
+                    cubeX = landscapeGeom.rightPaneX + landscapeGeom.rightPaneWidth - buttonSize * 2 - cubeGap
+                    cubeY = landscapeGeom.controlStackTop + (measuredTextHeight - buttonSize) / 2
+                } else if (fullscreen) {
+                    cubeX = fullCard.left + fullCard.width - 16.dp - buttonSize * 2 - cubeGap
+                    cubeY = titleY + (measuredTextHeight - buttonSize) / 2
+                } else if (immGeom != null) {
+                    cubeX = portraitColX + portraitColW - buttonSize * 2 - cubeGap
+                    cubeY = titleY + (measuredTextHeight - buttonSize) / 2
+                } else {
+                    cubeX = portraitColX + portraitColW - buttonSize
+                    cubeY = titleY + (measuredTextHeight - buttonSize) / 2
+                }
+                val cubeBlur = ((1f - cubeModeVis) * 14f).dp + shareChromeBlur
+                val cubeGenerating = spatialCoverState is SpatialCoverResolveState.Generating
+                PlayerSpatialCubeButton(
+                    active = spatialCoverRequested,
+                    generating = cubeGenerating,
+                    expressive = expressive,
+                    oneUi = oneUi,
+                    miuixBackdrop = miuixBackdrop,
+                    menuTint = menuTint,
+                    inkColor = activeInk,
+                    enabled = !shareActive && cubeModeVis > 0.1f,
+                    onClick = onToggleSpatialCover,
+                    modifier = Modifier
+                        .offset(cubeX, cubeY)
+                        .size(buttonSize)
+                        .graphicsLayer {
+                            this.alpha = alpha * shareChromeAlpha * cubeModeVis
+                            scaleX = 0.84f + 0.16f * cubeModeVis
+                            scaleY = scaleX
+                        }
+                        .blur(cubeBlur, BlurredEdgeTreatment.Unbounded),
+                )
+            }
+            val moreVis = if (landscapeGeom != null) (1f - p * (1f - controlsVisibility)) else 1f
+            if (moreVis > 0.001f) {
+                PlayerMoreActionButton(
+                    expressive = expressive,
+                    oneUi = oneUi,
+                    miuixBackdrop = miuixBackdrop,
+                    menuTint = menuTint,
+                    enabled = !shareActive && moreVis > 0.1f,
+                    onMore = onMore,
+                    modifier = Modifier
+                        .offset(moreX, moreY)
+                        .size(buttonSize)
+                        .graphicsLayer {
+                            this.alpha = alpha * shareChromeAlpha * moreVis
+                            scaleX = 1f - .08f * p
+                            scaleY = scaleX
+                        }
+                        .blur(shareChromeBlur + if (landscapeGeom != null) ((1f - moreVis) * 14f).dp else 0.dp),
+                )
             }
         }
 
         if (alpha > 0f && p > 0f && queueBlend < .01f && controlsVisibility > .001f) {
-            LyricOptionsMenu(model, miuixBackdrop, menuTint, if (fullscreen) margin else coverX, seekY - 52.dp,
-                w, status + 8.dp,
+            val menuAnchorX = if (landscapeGeom != null) {
+                landscapeGeom.rightPaneX
+            } else if (fullscreen) {
+                margin
+            } else {
+                coverX
+            }
+            val menuAnchorY = if (landscapeGeom != null) {
+                landscapeGeom.usableBottom - 46.dp
+            } else {
+                seekY - 50.dp
+            }
+            val menuMaxTop = if (landscapeGeom != null) landscapeGeom.usableTop else effectiveStatus + 8.dp
+            LyricOptionsMenu(
+                model,
+                miuixBackdrop,
+                menuTint,
+                menuAnchorX,
+                menuAnchorY,
+                w,
+                menuMaxTop,
                 Modifier.graphicsLayer { this.alpha = alpha * p * controlsVisibility * shareChromeAlpha }
-                    .blur(((1f - p + 1f - controlsVisibility) * 14f).dp + shareChromeBlur), onLyricMenuExpanded)
+                    .blur(((1f - p + 1f - controlsVisibility) * 14f).dp + shareChromeBlur),
+                onLyricMenuExpanded,
+            )
         }
 
     }
 }
 
 @Composable
-private fun Cover(uri: String, modifier: Modifier, radius: Dp, onClick: (() -> Unit)? = null,
+private fun PlayerProgressSection(
+    model: AuraViewModel,
+    song: btm.m.auraplayer.data.Song,
+    appearance: NowPlayingConfig,
+    coverPalette: com.materialkolor.palettes.CorePalette,
+    expressive: PlayerExpressiveColors?,
+    oneUi: PlayerOneUiColors?,
+    backdrop: Backdrop,
+    active: Boolean,
+    queueOpen: Boolean,
+    controlsVisibility: Float,
+    sliderHeight: Dp,
+    footerHeight: Dp,
+    horizontalInset: Dp,
+    onQualityMenuExpanded: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var scrub by remember(song.key) { mutableStateOf<Float?>(null) }
+    val value = scrub ?: if (model.duration > 0) model.position.toFloat() / model.duration else 0f
+    val sliderMod = Modifier
+        .padding(horizontal = horizontalInset)
+        .fillMaxWidth()
+        .height(sliderHeight)
+        .then(if (queueOpen) Modifier.clearAndSetSemantics {} else Modifier)
+    Column(modifier) {
+        when {
+            appearance.glowProgress != GlowProgressStyle.OFF -> {
+                val isLightGlowSurface = (expressive?.dark == false) || (oneUi?.dark == false)
+                val glowAccent = oneUi?.accentDeep
+                    ?: expressive?.primary
+                    ?: vibrantCoverGlowColor(coverPalette)
+                val glowTrack = when {
+                    oneUi != null -> oneUi.track.copy(alpha = if (oneUi.dark) .75f else .85f)
+                    expressive != null -> expressive.surfaceContainerHighest.copy(alpha = if (expressive.dark) .55f else .85f)
+                    else -> Color.White.copy(alpha = .28f)
+                }
+                GlowProgressSlider(
+                    style = appearance.glowProgress,
+                    value = value,
+                    playing = model.playing && scrub == null,
+                    label = tr("playback_progress", "播放进度"),
+                    accentColor = glowAccent,
+                    trackColor = glowTrack,
+                    isLightSurface = isLightGlowSurface,
+                    waveform = model.app.effects.outputWaveform,
+                    active = active && !queueOpen && controlsVisibility > .01f,
+                    modifier = sliderMod,
+                    onChange = { scrub = it },
+                    onFinished = { model.seekTo(((scrub ?: value) * model.duration).toLong()); scrub = null },
+                    enabled = model.duration > 0 && !queueOpen,
+                )
+            }
+            expressive != null -> MaterialWavyProgressSlider(
+                value = value,
+                playing = model.playing && scrub == null,
+                label = tr("playback_progress", "播放进度"),
+                activeColor = expressive.primary,
+                trackColor = expressive.surfaceContainerHighest.copy(alpha = if (expressive.dark) .55f else .85f),
+                modifier = sliderMod,
+                onChange = { scrub = it },
+                onFinished = { model.seekTo(((scrub ?: value) * model.duration).toLong()); scrub = null },
+                enabled = model.duration > 0 && !queueOpen,
+            )
+            oneUi != null -> OneUiPlayerProgressSlider(
+                value = value,
+                label = tr("playback_progress", "播放进度"),
+                colors = oneUi,
+                modifier = sliderMod,
+                onChange = { scrub = it },
+                onFinished = { model.seekTo(((scrub ?: value) * model.duration).toLong()); scrub = null },
+                enabled = model.duration > 0 && !queueOpen,
+            )
+            else -> PillSlider(
+                value = value,
+                label = tr("playback_progress", "播放进度"),
+                modifier = sliderMod,
+                onChange = { scrub = it },
+                onFinished = { model.seekTo(((scrub ?: value) * model.duration).toLong()); scrub = null },
+                enabled = model.duration > 0 && !queueOpen,
+            )
+        }
+        Box(
+            Modifier
+                .padding(horizontal = horizontalInset)
+                .fillMaxWidth()
+                .height(footerHeight),
+        ) {
+            val timeColor = expressive?.timeInk ?: oneUi?.subText ?: Color.White.copy(alpha = .85f)
+            val timeStyle = if (expressive != null || oneUi != null) {
+                androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
+            } else {
+                androidx.compose.ui.text.TextStyle.Default
+            }
+            Text(
+                timeText(((scrub?.let { it * model.duration } ?: model.position.toFloat())).toLong()),
+                color = timeColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                style = timeStyle,
+                modifier = Modifier.align(Alignment.CenterStart),
+            )
+            Text(
+                timeText(model.duration),
+                color = timeColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                style = timeStyle,
+                modifier = Modifier.align(Alignment.CenterEnd),
+            )
+            val actualQuality = model.streamInfo?.level?.let { level -> StreamQuality.entries.firstOrNull { it.level == level } }
+            if (appearance.showAudioInfo && song.cloud) {
+                val qualityItems = buildList {
+                    if (model.qualityLoading) add(DropdownItem(tr("loading", "加载中…"), enabled = false))
+                    if (model.qualityError) add(DropdownItem(tr("quality_retry", "获取音质失败，点击重试"), onClick = model::refreshQualities))
+                    val menuQualities = model.availableQualities.ifEmpty { actualQuality?.let { listOf(it) }.orEmpty() }
+                    menuQualities.forEach { item ->
+                        add(DropdownItem(qualityName(item), selected = item == (actualQuality ?: model.quality), onClick = { model.selectQuality(item) }))
+                    }
+                    if (isEmpty()) add(DropdownItem(tr("quality_unavailable", "此歌曲暂无可用音质"), enabled = false))
+                }
+                GlassIconDropdownMenu(
+                    entry = DropdownEntry(qualityItems),
+                    backdrop = backdrop,
+                    modifier = Modifier.align(Alignment.Center),
+                    enabled = !queueOpen,
+                    onExpandedChange = onQualityMenuExpanded,
+                    trigger = { toggle, enabled ->
+                        val badgeShape = RoundedCornerShape(if (expressive != null || oneUi != null) 50.dp else 8.dp)
+                        val badgeBg = when {
+                            expressive != null -> expressive.tertiaryContainer
+                            oneUi != null -> oneUi.cardAlt
+                            else -> null
+                        }
+                        val badgeFg = when {
+                            expressive != null -> expressive.onTertiaryContainer
+                            oneUi != null -> oneUi.accentDeep
+                            else -> timeColor
+                        }
+                        Box(
+                            Modifier
+                                .clip(badgeShape)
+                                .then(if (badgeBg != null) Modifier.background(badgeBg) else Modifier)
+                                .clickable(enabled = enabled) {
+                                    model.refreshQualities()
+                                    toggle()
+                                }
+                                .padding(horizontal = if (badgeBg != null) 11.dp else 7.dp, vertical = 4.dp),
+                        ) {
+                            Text(
+                                qualityName(actualQuality ?: model.quality),
+                                color = badgeFg,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    },
+                    content = {},
+                )
+            } else if (appearance.showAudioInfo) {
+                Text(
+                    localAudioText(model),
+                    color = timeColor,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 45.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayerTransportSection(
+    model: AuraViewModel,
+    expressive: PlayerExpressiveColors?,
+    oneUi: PlayerOneUiColors?,
+    scale: Float,
+    rowHeight: Dp,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth().height(rowHeight),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceEvenly,
+    ) {
+        if (expressive != null) {
+            MaterialExpressiveTransportButton(
+                icon = R.drawable.ic_player_previous,
+                label = tr("previous_track", "上一首"),
+                containerColor = expressive.secondaryContainer,
+                contentColor = expressive.onSecondaryContainer,
+                width = 60.dp * scale,
+                height = 64.dp * scale,
+                iconSize = 36.dp * scale * PlayerIconScale,
+                onClick = model::previous,
+            )
+            MaterialExpressivePlayPauseButton(
+                playing = model.playbackRequested,
+                label = if (model.playbackRequested) tr("pause", "暂停") else tr("play", "播放"),
+                colors = expressive,
+                touchHeight = 76.dp * scale,
+                pausedWidth = 86.dp * scale,
+                playingWidth = 108.dp * scale,
+                iconSize = 44.dp * scale * PlayerIconScale,
+                onClick = model::togglePlayback,
+            )
+            MaterialExpressiveTransportButton(
+                icon = R.drawable.ic_player_next,
+                label = tr("next_track", "下一首"),
+                containerColor = expressive.secondaryContainer,
+                contentColor = expressive.onSecondaryContainer,
+                width = 60.dp * scale,
+                height = 64.dp * scale,
+                iconSize = 36.dp * scale * PlayerIconScale,
+                onClick = model::next,
+            )
+        } else if (oneUi != null) {
+            OneUiPlayerTransportButton(
+                icon = R.drawable.ic_player_previous,
+                label = tr("previous_track", "上一首"),
+                colors = oneUi,
+                touchSize = 60.dp * scale,
+                iconSize = 34.dp * scale * PlayerIconScale,
+                onClick = model::previous,
+            )
+            OneUiPlayerPlayPauseButton(
+                playing = model.playbackRequested,
+                label = if (model.playbackRequested) tr("pause", "暂停") else tr("play", "播放"),
+                colors = oneUi,
+                touchSize = 76.dp * scale,
+                iconSize = 44.dp * scale * PlayerIconScale,
+                onClick = model::togglePlayback,
+            )
+            OneUiPlayerTransportButton(
+                icon = R.drawable.ic_player_next,
+                label = tr("next_track", "下一首"),
+                colors = oneUi,
+                touchSize = 60.dp * scale,
+                iconSize = 34.dp * scale * PlayerIconScale,
+                onClick = model::next,
+            )
+        } else {
+            PlayerButton(R.drawable.ic_player_previous, tr("previous_track", "上一首"), Color.White, 48.dp * scale, 76.dp * scale, model::previous)
+            PlayerButton(
+                if (model.playbackRequested) R.drawable.ic_player_pause else R.drawable.ic_player_play,
+                if (model.playbackRequested) tr("pause", "暂停") else tr("play", "播放"),
+                Color.White,
+                60.dp * .88f * scale,
+                96.dp * scale,
+                model::togglePlayback,
+            )
+            PlayerButton(R.drawable.ic_player_next, tr("next_track", "下一首"), Color.White, 48.dp * scale, 76.dp * scale, model::next)
+        }
+    }
+}
+
+@Composable
+private fun PlayerVolumeSection(
+    expressive: PlayerExpressiveColors?,
+    oneUi: PlayerOneUiColors?,
+    height: Dp,
+) {
+    val volMod = Modifier.fillMaxWidth().height(height)
+    when {
+        expressive != null -> MaterialExpressiveVolumeSlider(colors = expressive, modifier = volMod)
+        oneUi != null -> OneUiPlayerVolumeSlider(colors = oneUi, modifier = volMod)
+        else -> VolumeControl(volMod)
+    }
+}
+
+@Composable
+private fun PlayerBottomActionsSection(
+    model: AuraViewModel,
+    song: btm.m.auraplayer.data.Song,
+    lyricsOpen: Boolean,
+    queueOpen: Boolean,
+    expressive: PlayerExpressiveColors?,
+    oneUi: PlayerOneUiColors?,
+    rowHeight: Dp,
+    bottomTouch: Dp,
+    bottomIcon: Dp,
+    onLyrics: () -> Unit,
+    onQueue: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().height(rowHeight),
+        horizontalArrangement = Arrangement.SpaceAround,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val modeIcon = when (model.playbackMode) {
+            1 -> R.drawable.ic_player_shuffle
+            2 -> R.drawable.ic_player_repeat_one
+            else -> R.drawable.ic_player_repeat
+        }
+        val modeDescription = when (model.playbackMode) {
+            1 -> tr("shuffle_mode", "随机播放")
+            2 -> tr("repeat_one_mode", "单曲循环")
+            else -> tr("repeat_all_mode", "列表循环")
+        }
+        val revision = model.history.revision
+        val favorite = model.isFavorite(song)
+        if (expressive != null) {
+            Box(Modifier.semantics { selected = lyricsOpen }) {
+                MaterialExpressiveBottomButton(
+                    if (lyricsOpen) R.drawable.ic_player_lyrics_on else R.drawable.ic_player_lyrics,
+                    tr("lyrics", "歌词"), lyricsOpen, expressive, bottomTouch, bottomIcon * PlayerIconScale, onClick = onLyrics,
+                )
+            }
+            MaterialExpressiveBottomButton(
+                modeIcon, modeDescription, false, expressive, bottomTouch, bottomIcon * PlayerIconScale, onClick = model::cyclePlaybackMode,
+            )
+            MaterialExpressiveBottomButton(
+                if (favorite) R.drawable.ic_player_favorite_on else R.drawable.ic_player_favorite,
+                if (favorite) tr("unfavorite", "取消收藏") else tr("favorite", "收藏"),
+                favorite, expressive, bottomTouch, bottomIcon * PlayerIconScale, useTertiary = true,
+            ) { model.toggleFavorite(song) }
+            Box(Modifier.semantics { selected = queueOpen }) {
+                MaterialExpressiveBottomButton(
+                    if (queueOpen) R.drawable.ic_player_queue_on else R.drawable.ic_player_queue,
+                    tr("play_queue", "播放队列"), queueOpen, expressive, bottomTouch, bottomIcon * PlayerIconScale, onClick = onQueue,
+                )
+            }
+        } else if (oneUi != null) {
+            Box(Modifier.semantics { selected = lyricsOpen }) {
+                OneUiPlayerBottomButton(
+                    if (lyricsOpen) R.drawable.ic_player_lyrics_on else R.drawable.ic_player_lyrics,
+                    tr("lyrics", "歌词"), lyricsOpen, oneUi, bottomTouch, bottomIcon * PlayerIconScale, onClick = onLyrics,
+                )
+            }
+            OneUiPlayerBottomButton(
+                modeIcon, modeDescription, false, oneUi, bottomTouch, bottomIcon * PlayerIconScale, onClick = model::cyclePlaybackMode,
+            )
+            OneUiPlayerBottomButton(
+                if (favorite) R.drawable.ic_player_favorite_on else R.drawable.ic_player_favorite,
+                if (favorite) tr("unfavorite", "取消收藏") else tr("favorite", "收藏"),
+                favorite, oneUi, bottomTouch, bottomIcon * PlayerIconScale,
+            ) { model.toggleFavorite(song) }
+            Box(Modifier.semantics { selected = queueOpen }) {
+                OneUiPlayerBottomButton(
+                    if (queueOpen) R.drawable.ic_player_queue_on else R.drawable.ic_player_queue,
+                    tr("play_queue", "播放队列"), queueOpen, oneUi, bottomTouch, bottomIcon * PlayerIconScale, onClick = onQueue,
+                )
+            }
+        } else {
+            Box(Modifier.size(bottomTouch).semantics { selected = lyricsOpen }) {
+                PlayerButton(if (lyricsOpen) R.drawable.ic_player_lyrics_on else R.drawable.ic_player_lyrics, tr("lyrics", "歌词"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, onLyrics)
+            }
+            PlayerButton(modeIcon, modeDescription, Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, model::cyclePlaybackMode)
+            PlayerButton(
+                if (favorite) R.drawable.ic_player_favorite_on else R.drawable.ic_player_favorite,
+                if (favorite) tr("unfavorite", "取消收藏") else tr("favorite", "收藏"),
+                Color.White.copy(alpha = .9f),
+                bottomIcon,
+                bottomTouch,
+            ) { model.toggleFavorite(song) }
+            Box(Modifier.semantics { selected = queueOpen }) {
+                PlayerButton(if (queueOpen) R.drawable.ic_player_queue_on else R.drawable.ic_player_queue, tr("play_queue", "播放队列"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, onQueue)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayerMoreActionButton(
+    expressive: PlayerExpressiveColors?,
+    oneUi: PlayerOneUiColors?,
+    miuixBackdrop: top.yukonga.miuix.kmp.blur.Backdrop,
+    menuTint: Color,
+    enabled: Boolean,
+    onMore: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier.clip(RoundedCornerShape(50)), contentAlignment = Alignment.Center) {
+        when {
+            expressive != null -> MaterialExpressiveMoreButton(
+                label = tr("more", "更多"),
+                colors = expressive,
+                buttonSize = 46.dp * .85f * .92f,
+                iconSize = 24.dp * PlayerIconScale * .92f,
+                enabled = enabled,
+                onClick = onMore,
+            )
+            oneUi != null -> OneUiPlayerMoreButton(
+                label = tr("more", "更多"),
+                colors = oneUi,
+                buttonSize = 46.dp * .85f * .92f,
+                iconSize = 24.dp * PlayerIconScale * .92f,
+                enabled = enabled,
+                onClick = onMore,
+            )
+            else -> Box(Modifier.fillMaxSize().clickable(enabled = enabled, onClick = onMore), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(46.dp * .85f * .92f).playerMenuMaterial(miuixBackdrop, menuTint, 50.dp)) {
+                    Image(
+                        AuraMoreHorizontalIcon,
+                        tr("more", "更多"),
+                        Modifier.align(Alignment.Center).size(24.dp * PlayerIconScale * .92f),
+                        colorFilter = ColorFilter.tint(Color.White),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayerSpatialCubeButton(
+    active: Boolean,
+    generating: Boolean,
+    expressive: PlayerExpressiveColors?,
+    oneUi: PlayerOneUiColors?,
+    miuixBackdrop: top.yukonga.miuix.kmp.blur.Backdrop,
+    menuTint: Color,
+    inkColor: Color,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val iconAlpha by animateFloatAsState(
+        targetValue = when {
+            generating -> 0.52f
+            active -> 1f
+            else -> 0.56f
+        },
+        animationSpec = tween(220),
+        label = "spatialCubeIconAlpha",
+    )
+    val bgTint = when {
+        expressive != null && active -> expressive.primaryContainer
+        expressive != null -> expressive.surfaceContainerHigh
+        oneUi != null && active -> oneUi.chip
+        oneUi != null -> oneUi.cardAlt
+        active -> Color.White.copy(alpha = 0.24f)
+        else -> menuTint
+    }
+    val tintColor = when {
+        expressive != null && active -> expressive.onPrimaryContainer
+        expressive != null -> inkColor
+        oneUi != null && active -> oneUi.onChip
+        oneUi != null -> inkColor
+        else -> Color.White
+    }.copy(alpha = iconAlpha)
+    Box(
+        modifier
+            .clip(RoundedCornerShape(50))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(46.dp * .85f * .92f)
+                .then(
+                    if (expressive != null || oneUi != null) {
+                        Modifier.clip(CircleShape).background(bgTint)
+                    } else {
+                        Modifier.playerMenuMaterial(miuixBackdrop, bgTint, 50.dp)
+                    },
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painterResource(R.drawable.ic_player_cube),
+                tr("player_spatial_cover", "空间封面效果"),
+                Modifier.size(21.dp * PlayerIconScale),
+                colorFilter = ColorFilter.tint(tintColor),
+            )
+        }
+    }
+}
+
+internal fun shouldUseImmersiveCover(
+    immersiveCoverSetting: Boolean,
+    appleMusicAnimatedCoverEnabled: Boolean,
+    appleMusicAnimatedCoverAvailable: Boolean,
+    fullscreen: Boolean,
+    @Suppress("UNUSED_PARAMETER") hasLandscapeGeometry: Boolean = false,
+): Boolean =
+    (immersiveCoverSetting || (appleMusicAnimatedCoverEnabled && appleMusicAnimatedCoverAvailable)) &&
+        !fullscreen
+
+internal fun shouldShowSpatialCoverButton(
+    spatialCoverEnabled: Boolean,
+    appleMusicAnimatedCoverEnabled: Boolean,
+    motionVideoPath: String?,
+): Boolean = spatialCoverEnabled && !(appleMusicAnimatedCoverEnabled && !motionVideoPath.isNullOrBlank())
+
+internal fun immersiveCoverBottomCornerRadius(
+    miniCorner: Dp,
+    lyricsCorner: Dp,
+    expansion: Float,
+    lyricsProgress: Float,
+): Dp = lerp(
+    miniCorner,
+    lerp(0.dp, lyricsCorner, lyricsProgress.coerceIn(0f, 1f)),
+    expansion.coerceIn(0f, 1f),
+)
+
+private fun coverSmoothstep(edge0: Float, edge1: Float, x: Float): Float {
+    if (edge1 <= edge0) return if (x >= edge1) 1f else 0f
+    val t = ((x - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
+
+internal fun computeMotionCoverOverlayAlpha(
+    expansion: Float,
+    lyricsProgress: Float,
+    mixActive: Boolean,
+    spatialActive: Boolean,
+): Float {
+    if (mixActive || spatialActive) return 0f
+    val expandFade = coverSmoothstep(0.14f, 0.56f, expansion)
+    val lyricsFade = 1f - coverSmoothstep(0.08f, 0.52f, lyricsProgress)
+    return (expandFade * lyricsFade).coerceIn(0f, 1f)
+}
+
+@Composable
+private fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp = radius,
+                  topEndRadius: Dp = radius, bottomEndRadius: Dp = bottomRadius,
+                  onClick: (() -> Unit)? = null,
                   animation: CoverAnimation = CoverAnimation.DEFAULT, animate: Boolean = false, transitionKey: String = uri,
                   mixVisual: btm.m.auraplayer.auramix.AuraMixVisualTransition? = null,
-                  placeholderTint: Color = Color.White.copy(alpha = .3f)) {
+                  placeholderTint: Color = Color.White.copy(alpha = .3f),
+                  spatialState: SpatialCoverResolveState = SpatialCoverResolveState.Idle,
+                  spatialActive: Boolean = false,
+                  spatialTilt: Offset = Offset.Zero,
+                  immersiveFeather: Float = 0f,
+                  immersiveHorizontal: Boolean = false,
+                  motionVideoPath: String? = null,
+                  motionPlaying: Boolean = animate,
+                  motionOverlayAlpha: Float = 1f) {
     val progress = mixVisual?.progress?.coerceIn(0f, 1f)
-    Box(modifier.clip(RoundedCornerShape(radius))
+    val isGenerating = spatialActive && spatialState is SpatialCoverResolveState.Generating && mixVisual == null
+    val generatingProgress = (spatialState as? SpatialCoverResolveState.Generating)?.progress ?: 0f
+    val spatialAssets = (spatialState as? SpatialCoverResolveState.Ready)?.assets
+    val coverBlurDp by animateFloatAsState(
+        targetValue = if (isGenerating) 22f else 0f,
+        animationSpec = tween(durationMillis = if (isGenerating) 380 else 440, easing = FastOutSlowInEasing),
+        label = "spatialCoverComputeBlur",
+    )
+    val progressOverlayAlpha by animateFloatAsState(
+        targetValue = if (isGenerating) 1f else 0f,
+        animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+        label = "spatialProgressOverlayAlpha",
+    )
+    val animatedGenProgress by animateFloatAsState(
+        targetValue = generatingProgress.coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "spatialGenProgressBar",
+    )
+    val showSpatial by animateFloatAsState(
+        targetValue = if (spatialActive && spatialAssets != null && mixVisual == null) 1f else 0f,
+        animationSpec = tween(320, easing = FastOutSlowInEasing),
+        label = "spatialCoverCrossfade",
+    )
+    val feather = immersiveFeather.coerceIn(0f, 1f)
+    val coverBackdrop = rememberMiuixBackdrop { drawContent() }
+    val featherMask = if (feather > 0.001f) {
+        Modifier
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                val fadeStart = 1f - 0.42f * feather
+                val mid1 = 1f - 0.28f * feather
+                val mid2 = 1f - 0.13f * feather
+                val endAlpha = 1f - feather
+                val stops = arrayOf(
+                    0f to Color.Black,
+                    fadeStart to Color.Black,
+                    mid1 to Color.Black.copy(alpha = 1f - 0.26f * feather),
+                    mid2 to Color.Black.copy(alpha = 1f - 0.76f * feather),
+                    1f to Color.Black.copy(alpha = endAlpha),
+                )
+                drawRect(
+                    brush = if (immersiveHorizontal) {
+                        Brush.horizontalGradient(*stops)
+                    } else {
+                        Brush.verticalGradient(*stops)
+                    },
+                    blendMode = BlendMode.DstIn,
+                )
+            }
+    } else {
+        Modifier
+    }
+    Box(modifier.clip(RoundedCornerShape(topStart = radius, topEnd = topEndRadius, bottomStart = bottomRadius, bottomEnd = bottomEndRadius))
         .then(if (onClick == null) Modifier else Modifier.playerSurfaceClick(onClick))
-        .background(Color.White.copy(alpha = .12f)), contentAlignment = Alignment.Center) {
+        .then(featherMask)
+        .background(Color.White.copy(alpha = .12f * (1f - feather))), contentAlignment = Alignment.Center) {
         if (mixVisual == null) {
-            if (uri.isNotBlank()) AnimatedPlayerArtwork(uri, transitionKey, animation, animate)
-            else Image(painterResource(R.drawable.ic_player_queue), null, Modifier.fillMaxSize(.3f * PlayerIconScale), colorFilter = ColorFilter.tint(placeholderTint))
+            Box(Modifier.fillMaxSize().blur(coverBlurDp.dp)) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .then(if (feather > 0.001f) Modifier.miuixLayerBackdrop(coverBackdrop) else Modifier),
+                ) {
+                    if (uri.isNotBlank()) AnimatedPlayerArtwork(uri, transitionKey, animation, animate)
+                    else Image(painterResource(R.drawable.ic_player_queue), null, Modifier.fillMaxSize(.3f * PlayerIconScale), colorFilter = ColorFilter.tint(placeholderTint))
+                    if (!motionVideoPath.isNullOrBlank()) {
+                        AnimatedMotionCoverVideo(
+                            videoPath = motionVideoPath,
+                            playing = motionPlaying && !(spatialActive && spatialAssets != null),
+                            visibleAlpha = motionOverlayAlpha,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    if (spatialAssets != null && showSpatial > 0.001f) {
+                        Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = showSpatial }) {
+                            SpatialCoverRenderer(
+                                assets = spatialAssets,
+                                tiltProvider = { spatialTilt },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+                }
+                if (feather > 0.01f) {
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                            .progressiveTextureBlur(
+                                backdrop = coverBackdrop,
+                                shape = RectangleShape,
+                                blurRadius = 3.8f * feather,
+                                gradient = if (immersiveHorizontal) ProgressiveBlur.Right else ProgressiveBlur.Bottom,
+                            ).drawWithContent {
+                                drawContent()
+                                val blurStops = arrayOf(
+                                    0f to Color.Transparent,
+                                    .54f to Color.Transparent,
+                                    .92f to Color.White.copy(alpha = feather),
+                                    1f to Color.White.copy(alpha = feather),
+                                )
+                                drawRect(
+                                    if (immersiveHorizontal) Brush.horizontalGradient(*blurStops) else Brush.verticalGradient(*blurStops),
+                                    blendMode = BlendMode.DstIn,
+                                )
+                            },
+                    )
+                }
+            }
+            if (progressOverlayAlpha > 0.01f) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.36f * progressOverlayAlpha))
+                        .graphicsLayer { this.alpha = progressOverlayAlpha },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            tr("spatial_generating_label", "正在计算空间效果"),
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                        )
+                        Text(
+                            "${(animatedGenProgress * 100f).roundToInt().coerceIn(0, 100)}%",
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Box(
+                            Modifier
+                                .width(120.dp)
+                                .height(5.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(Color.White.copy(alpha = 0.28f)),
+                        ) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(animatedGenProgress.coerceIn(0.04f, 1f))
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color.White),
+                            )
+                        }
+                    }
+                }
+            }
         } else {
             val fromAlpha = 1f - progress!!
             val toAlpha = progress
+            val context = LocalContext.current
+            val fromReq = remember(mixVisual.fromArtwork, context) {
+                if (mixVisual.fromArtwork.isNotBlank()) ImageRequest.Builder(context).data(mixVisual.fromArtwork).size(1600).precision(Precision.INEXACT).build() else null
+            }
+            val toReq = remember(mixVisual.toArtwork, context) {
+                if (mixVisual.toArtwork.isNotBlank()) ImageRequest.Builder(context).data(mixVisual.toArtwork).size(1600).precision(Precision.INEXACT).build() else null
+            }
             Box(Modifier.fillMaxSize().graphicsLayer { alpha = fromAlpha }.blur((progress * 26f).dp)) {
-                if (mixVisual.fromArtwork.isNotBlank()) AsyncImage(mixVisual.fromArtwork, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                if (fromReq != null) AsyncImage(fromReq, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 else if (uri.isNotBlank()) AnimatedPlayerArtwork(uri, transitionKey, animation, animate)
             }
             Box(Modifier.fillMaxSize().graphicsLayer { alpha = toAlpha }.blur(((1f - progress) * 26f).dp)) {
-                if (mixVisual.toArtwork.isNotBlank()) AsyncImage(mixVisual.toArtwork, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                if (toReq != null) AsyncImage(toReq, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             }
         }
     }
@@ -1139,6 +2350,28 @@ private fun PillSlider(value: Float, label: String, modifier: Modifier, onChange
     }
 }
 
+internal fun nextMediaVolumeStep(current: Int, max: Int, increase: Boolean): Int {
+    val safeMax = max.coerceAtLeast(1)
+    val safeCurrent = current.coerceIn(0, safeMax)
+    val step = (safeMax / 15).coerceAtLeast(1)
+    return if (increase) {
+        (safeCurrent + step).coerceAtMost(safeMax)
+    } else {
+        (safeCurrent - step).coerceAtLeast(0)
+    }
+}
+
+internal fun stepMediaVolume(manager: AudioManager, max: Int, increase: Boolean): Float {
+    val safeMax = max.coerceAtLeast(1)
+    val current = manager.getStreamVolume(AudioManager.STREAM_MUSIC)
+    if (!manager.isVolumeFixed) {
+        val next = nextMediaVolumeStep(current = current, max = safeMax, increase = increase)
+        manager.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0)
+        return manager.getStreamVolume(AudioManager.STREAM_MUSIC) / safeMax.toFloat()
+    }
+    return current / safeMax.toFloat()
+}
+
 @Composable
 private fun VolumeControl(modifier: Modifier) {
     val context = LocalContext.current
@@ -1148,18 +2381,38 @@ private fun VolumeControl(modifier: Modifier) {
     var adjusting by remember { mutableStateOf(false) }
     LaunchedEffect(manager) { while (true) { if (!adjusting) volume = manager.getStreamVolume(AudioManager.STREAM_MUSIC) / max.toFloat(); delay(300) } }
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        Speaker(false, Modifier.size(40.dp))
+        Speaker(
+            loud = false,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .clickable(enabled = !manager.isVolumeFixed, role = Role.Button) {
+                    volume = stepMediaVolume(manager, max, increase = false)
+                },
+        )
         PillSlider(volume, tr("media_volume", "媒体音量"), Modifier.weight(1f).height(44.dp), onChange = {
             adjusting = true; volume = it; manager.setStreamVolume(AudioManager.STREAM_MUSIC, (it * max).roundToInt(), 0)
         }, onFinished = { adjusting = false }, enabled = !manager.isVolumeFixed)
-        Speaker(true, Modifier.size(40.dp))
+        Speaker(
+            loud = true,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .clickable(enabled = !manager.isVolumeFixed, role = Role.Button) {
+                    volume = stepMediaVolume(manager, max, increase = true)
+                },
+        )
     }
 }
 
 @Composable
 private fun Speaker(loud: Boolean, modifier: Modifier) {
-    Image(painterResource(if (loud) R.drawable.ic_player_volume_full else R.drawable.ic_player_volume_muted),
-        null, modifier.padding(10.dp).size(24.dp * PlayerIconScale), colorFilter = ColorFilter.tint(Color.White.copy(alpha = .72f)))
+    Image(
+        painter = painterResource(if (loud) R.drawable.ic_player_volume_full else R.drawable.ic_player_volume_muted),
+        contentDescription = if (loud) tr("volume_up", "增大音量") else tr("volume_down", "减小音量"),
+        modifier = modifier.padding(10.dp).size(24.dp * PlayerIconScale),
+        colorFilter = ColorFilter.tint(Color.White.copy(alpha = .72f)),
+    )
 }
 
 internal fun qualityName(value: StreamQuality): String = when (value) {

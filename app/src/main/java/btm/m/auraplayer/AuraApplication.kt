@@ -12,6 +12,8 @@ import okio.Path.Companion.toOkioPath
 
 class AuraApplication : Application(), SingletonImageLoader.Factory {
     lateinit var nowPlaying: btm.m.auraplayer.playback.NowPlayingSettings; private set
+    lateinit var rearScreen: btm.m.auraplayer.rear.RearScreenSettings; private set
+    lateinit var rearPrivilege: btm.m.auraplayer.rear.RearScreenPrivilegeManager; private set
     lateinit var effects: btm.m.auraplayer.audio.EffectsStore; private set
     lateinit var auraMix: btm.m.auraplayer.auramix.AuraMixSettings; private set
     lateinit var settings: AuraSettings; private set
@@ -26,6 +28,8 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         settings = AuraSettings(this)
         navigationMaterial = btm.m.auraplayer.ui.navigation.NavigationMaterialStore(this)
         nowPlaying = btm.m.auraplayer.playback.NowPlayingSettings(this)
+        rearScreen = btm.m.auraplayer.rear.RearScreenSettings(this)
+        rearPrivilege = btm.m.auraplayer.rear.RearScreenPrivilegeManager(this)
         effects = btm.m.auraplayer.audio.EffectsStore(this)
         auraMix = btm.m.auraplayer.auramix.AuraMixSettings(this)
         history = LibraryHistory(this)
@@ -37,6 +41,9 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         btm.m.auraplayer.download.MusicDownloads.resume(this)
     }
     override fun newImageLoader(context: Context): ImageLoader = ImageLoader.Builder(context)
+        .components {
+            add(LocalAudioArtworkFetcher.Factory(context))
+        }
         .memoryCache { MemoryCache.Builder().maxSizePercent(context, .15).build() }
         .diskCache { DiskCache.Builder().directory(cacheDir.resolve("artwork").toOkioPath()).maxSizeBytes(128L * 1024 * 1024).build() }
         .build()

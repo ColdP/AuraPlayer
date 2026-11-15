@@ -41,6 +41,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         sortJob = viewModelScope.launch { sortedSongs = withContext(Dispatchers.Default) { order.apply(source) } }
     }
     var songs by mutableStateOf<List<Song>>(emptyList()); private set
+    var manualImportCount by mutableIntStateOf(ManualImportStore(application).count()); private set
     var scanning by mutableStateOf(false); private set
     var hasPermission by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
@@ -228,11 +229,20 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         ?: Song(0, "", "", "", uri = uri)
 
     fun localTagsSaved(song: Song, tags: btm.m.auraplayer.tags.AudioTagDocument) {
+        val freshVersion = System.currentTimeMillis()
+        val updatedArtwork = if (!song.cloud) {
+            LocalAudioArtwork.bumpVersion(song.artwork, song.uri, freshVersion)
+        } else {
+            song.artwork
+        }
         val updated = song.copy(title = tags[btm.m.auraplayer.tags.AudioTagField.TITLE],
             artist = tags[btm.m.auraplayer.tags.AudioTagField.ARTIST], album = tags[btm.m.auraplayer.tags.AudioTagField.ALBUM],
             composer = tags[btm.m.auraplayer.tags.AudioTagField.COMPOSER], albumArtist = tags[btm.m.auraplayer.tags.AudioTagField.ALBUM_ARTIST],
             year = tags[btm.m.auraplayer.tags.AudioTagField.YEAR].take(4).toIntOrNull() ?: 0,
-            track = tags[btm.m.auraplayer.tags.AudioTagField.TRACK].toIntOrNull() ?: 0, artists = emptyList())
+            track = tags[btm.m.auraplayer.tags.AudioTagField.TRACK].toIntOrNull() ?: 0,
+            artwork = updatedArtwork,
+            modified = freshVersion / 1000L,
+            artists = emptyList())
         knownSongs[song.key] = updated
         songs = songs.map { if (it.key == song.key) updated else it }
         queue = queue.map { if (it.key == song.key) updated else it }
@@ -267,23 +277,102 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         if (before.whitelist != after.whitelist || before.blacklist != after.blacklist ||
             before.durationFilter != after.durationFilter || before.minimumSeconds != after.minimumSeconds) refreshLibrary(debounce = true)
     }
-    fun refreshLibrary(debounce: Boolean = false) {
+    fun refreshLibrary(debounce: Boolean = false, onComplete: ((Int) -> Unit)? = null) {
         hasPermission = ContextCompat.checkSelfPermission(app, Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
         scanJob?.cancel()
-        if (!hasPermission) { songs = emptyList(); sortedSongs = emptyList(); scanning = false; return }
         scanJob = viewModelScope.launch {
             if (debounce) delay(300)
             scanning = true
             try {
-                songs = MediaLibrary(app).scan(settings.value)
+                val scanned = if (hasPermission) MediaLibrary(app).scan(settings.value) else emptyList()
+                val manual = withContext(Dispatchers.IO) { ManualImportStore(app).load() }
+                manualImportCount = manual.size
+                val merged = mergeSongLists(scanned, manual)
+                songs = merged
                 updateSortedSongs()
                 if (error == tr("scan_error", "读取音乐失败，请重新扫描")) error = null
-                knownSongs.putAll(songs.associateBy { it.key })
+                knownSongs.putAll(merged.associateBy { it.key })
+                onComplete?.invoke(merged.size)
             } catch (e: CancellationException) { throw e }
-            catch (_: SecurityException) { hasPermission = false; songs = emptyList(); sortedSongs = emptyList() }
+            catch (_: SecurityException) {
+                hasPermission = false
+                val manual = withContext(Dispatchers.IO) { ManualImportStore(app).load() }
+                manualImportCount = manual.size
+                songs = manual
+                updateSortedSongs()
+                knownSongs.putAll(manual.associateBy { it.key })
+                onComplete?.invoke(manual.size)
+            }
             catch (e: Exception) { android.util.Log.e("AuraMediaLibrary", "MediaStore scan failed", e); error = tr("scan_error", "读取音乐失败，请重新扫描") }
             finally { scanning = false }
         }
+    }
+
+    fun importManualSongs(drafts: List<ManualAudioDraft>, onComplete: (Int) -> Unit = {}) {
+        if (drafts.isEmpty()) {
+            onComplete(0)
+            return
+        }
+        viewModelScope.launch {
+            val (addedCount, manualSongs) = withContext(Dispatchers.IO) {
+                val store = ManualImportStore(app)
+                val count = store.addAll(drafts)
+                count to store.load()
+            }
+            manualImportCount = manualSongs.size
+            val merged = mergeSongLists(songs, manualSongs)
+            songs = merged
+            updateSortedSongs()
+            knownSongs.putAll(merged.associateBy { it.key })
+            onComplete(addedCount)
+        }
+    }
+
+    fun scanFolder(treeUri: android.net.Uri, onComplete: (Int) -> Unit = {}) {
+        hasPermission = ContextCompat.checkSelfPermission(app, Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+        scanJob?.cancel()
+        scanJob = viewModelScope.launch {
+            scanning = true
+            try {
+                val result = MediaLibrary(app).scanTree(treeUri, settings.value)
+                val manual = withContext(Dispatchers.IO) { ManualImportStore(app).load() }
+                manualImportCount = manual.size
+                val folderUris = result.folderSongs.mapTo(hashSetOf()) { it.uri }
+                val retained = songs.filterNot { existing ->
+                    if (existing.cloud || existing.uri in folderUris) return@filterNot true
+                    if (result.volume.isNotBlank() && result.relativePrefix.isNotBlank()) {
+                        val sameVolume = existing.volume.equals(result.volume, ignoreCase = true)
+                        val normPath = LibraryFilter.normalize(existing.relativePath)
+                        sameVolume && normPath.startsWith(result.relativePrefix, ignoreCase = true)
+                    } else if (result.volume.isNotBlank() && result.relativePrefix.isEmpty()) {
+                        existing.volume.equals(result.volume, ignoreCase = true)
+                    } else {
+                        false
+                    }
+                }
+                val merged = mergeSongLists(retained + result.folderSongs, manual)
+                songs = merged
+                updateSortedSongs()
+                if (error == tr("scan_error", "读取音乐失败，请重新扫描")) error = null
+                knownSongs.putAll(merged.associateBy { it.key })
+                onComplete(result.folderSongs.size)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("AuraMediaLibrary", "Partial folder scan failed", e)
+                error = tr("scan_error", "读取音乐失败，请重新扫描")
+            } finally {
+                scanning = false
+            }
+        }
+    }
+
+    private fun mergeSongLists(primary: List<Song>, secondary: List<Song>): List<Song> {
+        val byUri = linkedMapOf<String, Song>()
+        for (song in primary) byUri[song.uri] = song
+        for (song in secondary) byUri.putIfAbsent(song.uri, song)
+        val collator = java.text.Collator.getInstance()
+        return byUri.values.sortedWith { first, second -> collator.compare(first.title, second.title) }
     }
     fun play(queue: List<Song>, start: Int = 0, shuffle: Boolean = false) {
         if (queue.isEmpty()) return

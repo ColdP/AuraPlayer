@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.*
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import btm.m.auraplayer.AuraApplication
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.ui.navigation.*
 import btm.m.auraplayer.ui.player.LocalSongActions
@@ -173,6 +174,12 @@ private fun AuraShell(model: AuraViewModel) {
     var songActionsOpen by remember { mutableStateOf(false) }
     LaunchedEffect(model.current) { if (model.current == null) playerOpen = false }
     val playerDark = MiuixTheme.colorScheme.surface.luminance() < .5f
+    val nowPlayingConfig by (context.applicationContext as btm.m.auraplayer.AuraApplication).nowPlaying.state.collectAsState()
+    val playerHasLightSurface = !playerDark && (
+        nowPlayingConfig.theme == btm.m.auraplayer.playback.PlayerTheme.ONE ||
+            (nowPlayingConfig.theme == btm.m.auraplayer.playback.PlayerTheme.MATERIAL &&
+                nowPlayingConfig.materialBackground == btm.m.auraplayer.playback.MaterialPlayerBackground.MATERIAL)
+        )
     val visibleCollection = pages.lastOrNull()?.takeIf { it.startsWith("collection:") }?.substringAfter(':')?.toLongOrNull()
         ?.let(model::collectionDestination)?.collection
     val catalogDark = visibleCollection?.key?.let { it.startsWith("artist:") || it.startsWith("cloud:artist:") } == true
@@ -180,18 +187,18 @@ private fun AuraShell(model: AuraViewModel) {
     SideEffect {
         val activity = context as btm.m.auraplayer.MainActivity
         WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
-            isAppearanceLightStatusBars = !playerDark && !playerCoveringBars && !catalogDark
-            isAppearanceLightNavigationBars = !playerDark && !playerCoveringBars
+            isAppearanceLightStatusBars = if (playerCoveringBars) playerHasLightSurface else !playerDark && !catalogDark
+            isAppearanceLightNavigationBars = if (playerCoveringBars) playerHasLightSurface else !playerDark
         }
         activity.window.statusBarColor = android.graphics.Color.TRANSPARENT
         activity.window.navigationBarColor = android.graphics.Color.TRANSPARENT
         activity.window.isStatusBarContrastEnforced = false
     }
-    LaunchedEffect(playerCoveringBars, playerDark, catalogDark) {
+    LaunchedEffect(playerCoveringBars, playerDark, playerHasLightSurface, catalogDark) {
         val activity = context as btm.m.auraplayer.MainActivity
         val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
-        controller.isAppearanceLightStatusBars = !playerCoveringBars && !playerDark && !catalogDark
-        controller.isAppearanceLightNavigationBars = !playerCoveringBars && !playerDark
+        controller.isAppearanceLightStatusBars = if (playerCoveringBars) playerHasLightSurface else !playerDark && !catalogDark
+        controller.isAppearanceLightNavigationBars = if (playerCoveringBars) playerHasLightSurface else !playerDark
     }
     var searchOpen by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
@@ -443,14 +450,45 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
     val page = when {
         route.startsWith("tagEditor:") -> "tagEditor"
         route.startsWith("collection:") -> "collection"
+        route.startsWith("spatial_cover_preview:") -> "spatial_cover_preview"
         route.substringBefore(':') in setOf("albumInfo", "artistSongs", "artistAlbums") -> route.substringBefore(':')
         else -> route
     }
     val collection = destination?.collection ?: albumInfoDestination?.collection
     val catalog = collection?.isCatalog() == true
-    val catalogTopBarTint = if (collection != null && (page == "albumInfo" || (page == "collection" && collection.isArtist()))) {
-        val palette = btm.m.auraplayer.ui.player.rememberPlayerMonetPalette(collection.artwork)
-        Color(palette.a2.tone(if (MiuixTheme.colorScheme.surface.luminance() < .5f) 16 else 90))
+    val app = LocalContext.current.applicationContext as AuraApplication
+    val nowPlayingConfig by app.nowPlaying.state.collectAsState()
+    val catalogTracks = destination?.cloud?.songs ?: collection?.songs.orEmpty()
+    val catalogMotionPath = rememberCatalogMotionCoverPath(
+        collection = if (page == "collection" && catalog) collection else null,
+        tracks = catalogTracks,
+        enabled = nowPlayingConfig.albumAnimatedCover,
+    )
+    val artistCatalogMedia = rememberCatalogArtistMedia(
+        collection = if (page == "collection" && catalog && collection.isArtist()) collection else null,
+        needLogo = nowPlayingConfig.artistWordmarkLogo,
+        needArtwork = nowPlayingConfig.appleMusicArtistArtwork,
+        needMotionVideo = nowPlayingConfig.artistAnimatedCover,
+    )
+    val effectiveCollection = if (collection != null && page == "collection" && collection.isArtist() &&
+        nowPlayingConfig.appleMusicArtistArtwork && !artistCatalogMedia.artworkUrl.isNullOrBlank()
+    ) {
+        collection.copy(artwork = artistCatalogMedia.artworkUrl)
+    } else {
+        collection
+    }
+    val immersiveAlbumCatalog = shouldShowImmersiveAlbumHero(
+        isArtist = effectiveCollection?.isArtist() == true,
+        albumAnimatedCoverEnabled = nowPlayingConfig.albumAnimatedCover,
+        motionVideoPath = catalogMotionPath,
+    )
+    val catalogTopBarTint = if (effectiveCollection != null && (page == "albumInfo" || (page == "collection" && (effectiveCollection.isArtist() || immersiveAlbumCatalog)))) {
+        btm.m.auraplayer.ui.player.rememberCatalogPlayerThemeTokens(
+            artwork = effectiveCollection.artwork,
+            config = nowPlayingConfig,
+            fallbackDarkSurface = MiuixTheme.colorScheme.surface.luminance() < .5f,
+            forceHeroSurface = effectiveCollection.isArtist() || immersiveAlbumCatalog,
+        ).surface
     } else null
     val title = when (page) {
         "tagEditor" -> tr("tag_editor", "标签编辑器")
@@ -465,7 +503,11 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "effect_custom" -> tr("custom", "自定义")
         "effect_online" -> tr("online_presets", "在线预设库")
         "audio_settings" -> tr("audio_settings", "音频")
+        "artist_album_settings" -> tr("artist_and_album", "艺术家与专辑")
         "now_playing_settings" -> tr("now_playing_page", "正在播放页面")
+        "spatial_cover_downloads" -> tr("spatial_model_downloads", "模型下载")
+        "spatial_cover_cache" -> tr("spatial_cover_cache_title", "空间封面数据缓存")
+        "rear_screen" -> tr("rear_screen", "背屏")
         "about" -> tr("about", "关于")
         "donate" -> tr("donate", "捐赠")
         "localPlaylists" -> tr("playback_lists", "播放列表")
@@ -485,6 +527,11 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
     }
     if (page == "lyricShare") {
         LyricShareRoute(model, back, isActive)
+        return
+    }
+    if (page == "spatial_cover_preview") {
+        val key = route.substringAfter(':')
+        SpatialCoverPreviewPage(key, back)
         return
     }
     val playlistSearchSupported = page == "collection" && !catalog && collection != null
@@ -533,8 +580,15 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         useLegacyTopBarBackdrop = page == "about",
         topBarTint = catalogTopBarTint,
         pageBackground = when {
-            page == "albumInfo" && collection != null -> ({ AlbumInfoBackground(collection, Modifier.matchParentSize()) })
-            catalog && page !in setOf("artistSongs", "artistAlbums") -> ({ CatalogBackground(collection, Modifier.matchParentSize()) })
+            page == "albumInfo" && effectiveCollection != null -> ({ AlbumInfoBackground(effectiveCollection, Modifier.matchParentSize()) })
+            catalog && page !in setOf("artistSongs", "artistAlbums") -> ({
+                CatalogBackground(
+                    collection = effectiveCollection,
+                    modifier = Modifier.matchParentSize(),
+                    nowPlayingConfig = nowPlayingConfig,
+                    immersiveAlbum = immersiveAlbumCatalog,
+                )
+            })
             page == "about" -> ({ AboutMaterialBackground(Modifier.matchParentSize(), model.settings.value.monet) })
             else -> null
         }) { padding, _ ->
@@ -549,20 +603,35 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             "audio_effects" -> AudioEffectsPage(contentPadding, isActive, open)
             "effect_library" -> PresetLibraryPage(contentPadding, presetTab, open)
             "effect_custom" -> CustomEffectsPage(contentPadding)
-            "audio_settings" -> AudioPreferencesPage(contentPadding)
+            "audio_settings" -> AudioPreferencesPage(model, contentPadding)
             "effect_online" -> Box(Modifier.fillMaxSize().padding(contentPadding))
-            "now_playing_settings" -> NowPlayingSettingsPage(contentPadding)
+            "artist_album_settings" -> ArtistAlbumSettingsPage(contentPadding)
+            "now_playing_settings" -> NowPlayingSettingsPage(contentPadding, open)
+            "spatial_cover_downloads" -> SpatialCoverDownloadsPage(contentPadding)
+            "spatial_cover_cache" -> SpatialCoverCachePage(contentPadding, open)
+            "rear_screen" -> RearScreenSettingsPage(contentPadding)
             "about" -> AboutPage(model, contentPadding, open)
             "donate" -> DonatePage(contentPadding)
             "localPlaylists" -> LocalPlaylistsPage(model, contentPadding)
             "albums" -> AlbumsArtistsPage(model, contentPadding, 0)
             "artists" -> AlbumsArtistsPage(model, contentPadding, 1)
-            "collection" -> if (collection != null && destination != null) {
-                if (catalog) CatalogDetailPage(model, contentPadding, collection, destination.cloud, destination.id, open)
+            "collection" -> if (effectiveCollection != null && destination != null) {
+                if (catalog) CatalogDetailPage(
+                    model = model,
+                    padding = contentPadding,
+                    collection = effectiveCollection,
+                    cloud = destination.cloud,
+                    destinationId = destination.id,
+                    open = open,
+                    nowPlayingConfig = nowPlayingConfig,
+                    motionVideoPath = catalogMotionPath,
+                    artistLogoUrl = artistCatalogMedia.logoUrl,
+                    artistMotionVideoPath = artistCatalogMedia.motionVideoPath,
+                )
                 else CollectionPage(
                     model,
                     contentPadding,
-                    collection,
+                    effectiveCollection,
                     destination.cloud,
                     searchQuery = playlistSearchQuery,
                     searchExpanded = playlistSearchExpanded,
@@ -577,13 +646,14 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
     }
 }
 
-private val CHROME_HIDDEN_ROUTES = setOf("navigation_material", "lyricShare", "about")
+private val CHROME_HIDDEN_ROUTES = setOf("navigation_material", "lyricShare", "about", "spatial_cover_preview")
 
 internal fun shouldHideBottomChrome(pages: List<String>, closingIndex: Int): Boolean {
     val topIndex = pages.lastIndex
     if (topIndex < 0) return false
-    val topHidesChrome = pages[topIndex] in CHROME_HIDDEN_ROUTES && closingIndex != topIndex
-    val revealingHiddenUnderlay = topIndex >= 1 && closingIndex == topIndex && pages[topIndex - 1] in CHROME_HIDDEN_ROUTES
+    val routeKey = { r: String -> r.substringBefore(':') }
+    val topHidesChrome = routeKey(pages[topIndex]) in CHROME_HIDDEN_ROUTES && closingIndex != topIndex
+    val revealingHiddenUnderlay = topIndex >= 1 && closingIndex == topIndex && routeKey(pages[topIndex - 1]) in CHROME_HIDDEN_ROUTES
     return topHidesChrome || revealingHiddenUnderlay
 }
 

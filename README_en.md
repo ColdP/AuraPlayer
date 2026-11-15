@@ -38,8 +38,8 @@ The source version is defined by `versionName` in [app/build.gradle.kts](app/bui
 
 - MediaStore local music scanning and permission handling with Songs, Local Playlists, Albums, Artists, Favorites, and Playback History.
 - Retro Music-inspired home layout: greeting header, quick shortcuts, recently added, cover collage suggestions, and top/recent artists and albums.
-- Folder blacklist/whitelist, minimum-duration filter, persistent sorting, pull-to-refresh, and categorized search.
-- Adaptive responsive layout: compact track rows with `44dp` covers, multi-column grids on landscape/tablet screens, and preserved system font scaling.
+- Folder blacklist/whitelist, minimum-duration filter, manual file/folder import via Android SAF, persistent sorting, pull-to-refresh, and categorized search.
+- Adaptive responsive layout: compact track rows with `44dp` covers, freeform/multi-window and landscape split-pane Now Playing scaling, multi-column grids on large screens, and preserved system font scaling.
 
 ### NetEase Cloud Music and Downloads
 
@@ -52,7 +52,11 @@ The source version is defined by `versionName` in [app/build.gradle.kts](app/bui
 ### Now Playing, Lyrics, and Lyric Sharing
 
 - **Media3 Playback and Gestures**: Background playback with media notifications, 0.5–3x playback speed, sleep timer, volume controls, drag-to-reorder queue, horizontal swipe track switching, mini-player to full-screen continuous morphing, swipe-down collapse, and predictive back.
-- **Player Appearance**: Aurora, Blurred Aurora, Blur, Solid Color, Full-Screen, and Material themes; snow and rain effects; multiple cover transitions (Card, Cover, Page Turn, Stack, Vertical/Horizontal Flip); keep-screen-on in lyrics mode; and auto-hiding immersive controls.
+- **Player Appearance**: Aurora, Blurred Aurora, Blur, Solid Color, Full-Screen, Material, and One themes; snow and rain effects; glow progress bars (`Hyper` / `One`); 10 stylized lyric themes; Immersive Cover (bottom feather mask and screen-corner collapse morphing); **Apple Music animated artwork** (forces immersive layout automatically when motion data is available); multiple cover transitions (Card, Cover, Page Turn, Stack, Vertical/Horizontal Flip); keep-screen-on in lyrics mode; and auto-hiding immersive controls.
+- **Experimental Features**:
+  - **Spatial Lyrics**: gyroscope-driven multi-layer 3D depth parallax in lyric view.
+  - **Spatial Cover**: on-device depth estimation + foreground matting rendered into gyroscope-driven 3D parallax covers, with **album-scoped cache sharing** (keyed by album title and album artist), cache inspection/full-screen preview, and optional on-demand downloads for the `arm64-v8a` ONNX Runtime libraries and models (kept out of the base APK).
+  - **Rear Display Mode**: optional secondary rear-screen Now Playing & lyrics display powered by Root or Shizuku.
 - **Multi-Source Lyrics**: Fetches from NetEase, QQ Music, Kuwo, Kugou, LrcLib, AMLL, and TTML Hub; supports word-by-word timing, translations, pronunciation, duet alignment, edge fade/blur shader, tap-to-seek, and 3-second browse focus auto-return.
 - **Lyric Share Studio**: Multiple card templates (Aura Mesh, Cinema, Paper, Polaroid, Vinyl, Swiss, etc.) with customizable light/dark mode, fonts, backgrounds, filters, line spacing, corner radius, and image export/sharing.
 
@@ -74,7 +78,8 @@ The source version is defined by `versionName` in [app/build.gradle.kts](app/bui
 | --- | --- |
 | Minimum Android version | Android 13 (API 33) |
 | Compile / target SDK | API 37 |
-| Permissions | `READ_MEDIA_AUDIO` (local library and tag editing), `INTERNET` (streaming and lyrics), `MODIFY_AUDIO_SETTINGS` (audio effects), `POST_NOTIFICATIONS` and foreground media playback service (controls and download alerts) |
+| Supported ABI | `arm64-v8a` (optional Spatial Cover ONNX Runtime & models downloaded on demand) |
+| Permissions | `READ_MEDIA_AUDIO` (local library and tag editing), `INTERNET` (streaming, lyrics, and optional animated/spatial artwork downloads), `MODIFY_AUDIO_SETTINGS` (audio effects), `POST_NOTIFICATIONS` and foreground media playback service (controls and download alerts) |
 
 ## Build from Source
 
@@ -139,11 +144,12 @@ Issues and pull requests are welcome. Read the [English contributing guide](CONT
 
 This project is distributed under the [GNU AGPL-3.0-or-later](LICENSE) license. Ported components and third-party dependencies retain their respective licenses; see [NOTICE.md](NOTICE.md) for complete attribution and modification notes:
 
-- UI styling, glass components, navigation motion, and About/Donate layouts from [HyperChanger](https://github.com/ColdP/HyperChanger) (AGPL-3.0-or-later).
+- UI styling, glass components, navigation motion, and About/Donate layouts from [HyperChanger](https://github.com/ColdP/HyperChanger) (AGPL-3.0-or-later); Spatial Cover on-device inference, model catalog, and layered parallax pipeline adapted from [HyperChanger Depth Wallpaper](https://github.com/ColdP/HyperChanger-Depth-Wallpaper) (AGPL-3.0-or-later) with dual-layer parallax references from [HyperExtreme](https://github.com/22Frederic/HyperExtreme) (AGPL-3.0).
 - Home structure and MediaStore sorting adapted from [Retro Music](https://github.com/RetroMusicPlayer/RetroMusicPlayer) (GPL-3.0-or-later).
-- UI widgets and visual systems powered by [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix) (Apache-2.0) and [Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass) (Apache-2.0); playlist title-bar search uses [COUI-Kit](https://github.com/ItosEO/COUI-Kit) (MPL-2.0); the `One` interface style and native interactive widgets (`MonetTones`, `OneUiPalette`, `BoSwitchView`, `DragOnlySeekBar`) adapt `OneUI_Kit` (MIT, originating from `OneUIProject/oneui-design` & `oneui-core`).
-- Lyric fetching, matching, and rendering from [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) (AGPL-3.0), [HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced) (GPL-3.0 / Apache-2.0), and [Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics) (Apache-2.0).
-- Additional dependencies: [Media3](https://developer.android.com/media/media3), [Coil](https://github.com/coil-kt/coil), [OkHttp](https://github.com/square/okhttp), [jaudiotagger](https://github.com/Adonai/jaudiotagger-android) (LGPL-2.1), [MaterialKolor](https://github.com/jordond/MaterialKolor) (MIT), [ZXing](https://github.com/zxing/zxing) (Apache-2.0), and [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) (MIT).
+- UI widgets and visual systems powered by [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix) (Apache-2.0) and [Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass) (Apache-2.0); playlist title-bar search uses [COUI-Kit](https://github.com/ItosEO/COUI-Kit) (MPL-2.0); the `One` interface style and native interactive widgets (`MonetTones`, `OneUiPalette`, `BoSwitchView`, `DragOnlySeekBar`) adapt [OneUI_Kit](https://github.com/TGP258/OneUI_Kit) (MIT, originating from [OneUIProject/oneui-design](https://github.com/OneUIProject/oneui-design) & [OneUIProject/oneui-core](https://github.com/OneUIProject/oneui-core)).
+- Lyric fetching, matching, rendering, and Apple Music motion cover pipeline from [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) (AGPL-3.0), [HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced) (GPL-3.0 / Apache-2.0), and [Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics) (Apache-2.0).
+- Optional Spatial Cover runtime & models: [ONNX Runtime](https://github.com/microsoft/onnxruntime) (MIT, downloaded on demand), [Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) / [Depth Anything 3](https://github.com/ByteDance-Seed/depth-anything-3) (Apache-2.0), [MiDaS](https://github.com/isl-org/MiDaS) (MIT), [U2Net / DIS (rembg)](https://github.com/danielgatis/rembg) (MIT / Apache-2.0), and [BiRefNet](https://github.com/ZhengPeng7/BiRefNet) (MIT).
+- Additional dependencies: [Media3](https://developer.android.com/media/media3), [Coil](https://github.com/coil-kt/coil), [OkHttp](https://github.com/square/okhttp), [jaudiotagger](https://github.com/Adonai/jaudiotagger-android) (LGPL-2.1), [MaterialKolor](https://github.com/jordond/MaterialKolor) (MIT), [ZXing](https://github.com/zxing/zxing) (Apache-2.0), [Shizuku](https://github.com/RikkaApps/Shizuku) (Apache-2.0), and [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) (MIT).
 
 ## Star History
 

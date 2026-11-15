@@ -21,29 +21,36 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /** One material implementation for flat and cascading dropdown surfaces. */
 @Composable
 internal fun Modifier.glassMenuSurface(backdrop: Backdrop?, shape: Shape): Modifier {
-    when (LocalAppUiStyle.current) {
-        AppUiStyle.MATERIAL -> {
-            val scheme = rememberActiveExpressiveScheme()
-            val container = if (scheme.dark) scheme.surfaceContainerHigh else scheme.surfaceContainerLow
-            return shadow(12.dp, shape, clip = false)
-                .background(container, shape)
-                .border(BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = if (scheme.dark) .28f else .18f)), shape)
-        }
-        AppUiStyle.ONE -> {
-            val palette = rememberActiveOneUiPalette()
-            return shadow(10.dp, shape, clip = false)
-                .background(Color(palette.card), shape)
-                .border(BorderStroke(0.75.dp, Color(palette.divider)), shape)
-        }
-        AppUiStyle.HYPER -> Unit
+    val uiStyle = LocalAppUiStyle.current
+    if (uiStyle == AppUiStyle.MATERIAL) {
+        val scheme = rememberActiveExpressiveScheme()
+        val container = if (scheme.dark) scheme.surfaceContainerHigh else scheme.surfaceContainerLow
+        return shadow(12.dp, shape, clip = false)
+            .background(container, shape)
+            .border(BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = if (scheme.dark) .28f else .18f)), shape)
     }
+    val isOne = uiStyle == AppUiStyle.ONE
+    val onePalette = if (isOne) rememberActiveOneUiPalette() else null
     val surface = MiuixTheme.colorScheme.surfaceContainer
-    val light = surface.luminance() > .5f
-    val tint = (if (light) Color(0xFFF8F8F8) else surface).copy(alpha = .80f)
+    val light = if (onePalette != null) !onePalette.dark else surface.luminance() > .5f
+    val tint = if (onePalette != null) {
+        Color(onePalette.card).copy(alpha = .82f)
+    } else {
+        (if (light) Color(0xFFF8F8F8) else surface).copy(alpha = .80f)
+    }
+    val blurRadius = if (isOne) 14.dp else 4.dp
+    val lensHeight = if (isOne) 8.dp else 10.dp
+    val lensAmount = if (isOne) 4.dp else 28.dp
+    val chromatic = !isOne
+    val highlightAlpha = .70f
     return if (backdrop == null) background(tint, shape) else drawBackdrop(
         backdrop = backdrop, shape = { shape },
-        effects = { vibrancy(); blur(4.dp.toPx()); lens(10.dp.toPx(), 28.dp.toPx(), chromaticAberration = true) },
-        highlight = { Highlight.Default.copy(alpha = .70f) },
+        effects = {
+            vibrancy()
+            blur(blurRadius.toPx())
+            lens(lensHeight.toPx(), lensAmount.toPx(), chromaticAberration = chromatic)
+        },
+        highlight = { Highlight.Default.copy(alpha = highlightAlpha) },
         shadow = { Shadow.Default.copy(radius = 12.dp, color = if (light) Color.Gray else Color.Black, alpha = .35f) },
         innerShadow = null, onDrawSurface = { drawRect(tint) },
     )

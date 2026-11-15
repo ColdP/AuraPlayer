@@ -29,7 +29,6 @@ import kotlin.math.roundToInt
 @Composable
 fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Unit) {
     val value = model.settings.value
-    var blacklist by remember { mutableStateOf(false) }
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Group(tr("appearance", "外观")) {
@@ -62,19 +61,11 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
         item {
             Group(tr("features", "功能")) {
                 Preference(tr("netease", "网易云音乐"), model.account?.nickname ?: tr("login_summary", "通过网易云官方页面登录")) { open("login") }
+                Preference(tr("artist_and_album", "艺术家与专辑")) { open("artist_album_settings") }
                 GlassDropdownPreference(tr("home_content", "首页内容"),
                     listOf(tr("home_content_local", "本地"), tr("home_content_cloud", "云端")),
                     if (value.homeContent == "cloud") 1 else 0, backdrop = LocalToolbarBackdrop.current) { index ->
                     model.updateSettings { it.copy(homeContent = if (index == 1) "cloud" else "local") }
-                }
-                Preference(tr("blacklist", "黑名单"), if (value.whitelist) tr("blacklist_disabled", "白名单已开启，黑名单暂不生效") else
-                    "${value.blacklist.size} ${tr("folder_count", "个文件夹")}", enabled = !value.whitelist) { blacklist = true }
-                SwitchPreference(tr("whitelist", "白名单"), tr("whitelist_summary", "仅显示 Music 目录下的音乐"), value.whitelist) { checked -> model.updateSettings { it.copy(whitelist = checked) } }
-                SwitchPreference(tr("filter_duration", "筛选歌曲时长"), checked = value.durationFilter, onCheckedChange = { checked -> model.updateSettings { it.copy(durationFilter = checked) } })
-                AnimatedVisibility(value.durationFilter) {
-                    SliderPreference(tr("minimum_duration", "最短歌曲时长"), value.minimumSeconds.toFloat(), 0f..60f, "${value.minimumSeconds}s", steps = 59) { seconds ->
-                        model.updateSettings { it.copy(minimumSeconds = seconds.roundToInt()) }
-                    }
                 }
                 GlassDropdownPreference(tr("select_language", "选择语言"), listOf(tr("chinese", "简体中文"), tr("english", "English")),
                     if (value.language == "en") 1 else 0, backdrop = LocalToolbarBackdrop.current) { index ->
@@ -87,6 +78,9 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
                 Preference(tr("audio_effects", "音效")) { open("audio_effects") }
                 Preference(tr("now_playing_page", "正在播放页面")) { open("now_playing_settings") }
                 Preference(tr("audio_settings", "音频")) { open("audio_settings") }
+                if (btm.m.auraplayer.rear.RearScreenDevice.isSupported()) {
+                    Preference(tr("rear_screen", "背屏")) { open("rear_screen") }
+                }
             }
         }
         item {
@@ -96,11 +90,10 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
             }
         }
     }
-    if (blacklist) BlacklistDialog(model) { blacklist = false }
 }
 
 @Composable
-private fun BlacklistDialog(model: AuraViewModel, close: () -> Unit) {
+internal fun BlacklistDialog(model: AuraViewModel, close: () -> Unit) {
     val context = LocalContext.current
     var folders by remember { mutableStateOf(model.settings.value.blacklist) }
     var confirmClear by remember { mutableStateOf(false) }

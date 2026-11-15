@@ -12,6 +12,9 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         buildConfigField("String", "BUILD_DATE", "\"2026.11.10\"")
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions {
@@ -24,6 +27,14 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
+    packaging {
+        jniLibs {
+            excludes += listOf(
+                "**/libonnxruntime.so",
+                "**/libonnxruntime4j_jni.so",
+            )
+        }
+    }
 }
 dependencies {
     implementation("com.github.Adonai:jaudiotagger:2.3.15")
@@ -31,6 +42,7 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.11.0")
     implementation("com.mocharealm.accompanist:lyrics-core:0.4.7")
     implementation("com.materialkolor:material-color-utilities:5.0.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.0")
     implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.4")
     implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.4")
     implementation("top.yukonga.miuix.kmp:miuix-icons-android:0.9.4")
@@ -51,6 +63,8 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-compose:3.3.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.3.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")

@@ -1,2 +1,4 @@
 -keepattributes Signature,InnerClasses,EnclosingMethod
 -keep class org.jaudiotagger.** { *; }
+-keep class ai.onnxruntime.** { *; }
+-keep class btm.m.auraplayer.rear.RearScreenShellService { *; }

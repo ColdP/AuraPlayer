@@ -111,7 +111,7 @@ fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction:
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(durationText(song.duration), fontSize = 12.sp, color = subColor)
                     IconButton(onClick = { openActions(SongActionRequest(song, backdrop, onLongAction)) }, modifier = Modifier.size(40.dp)) {
-                        Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.size(20.dp), colorFilter = ColorFilter.tint(if (isCurrent) Color(palette.accentDeep) else subColor))
+                        Image(AuraMoreHorizontalIcon, tr("more", "更多"), Modifier.size(20.dp), colorFilter = ColorFilter.tint(if (isCurrent) Color(palette.accentDeep) else subColor))
                     }
                 }
             }
@@ -153,7 +153,7 @@ fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction:
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(durationText(song.duration), fontSize = 12.sp, color = subColor)
                     IconButton(onClick = { openActions(SongActionRequest(song, backdrop, onLongAction)) }, modifier = Modifier.size(40.dp)) {
-                        Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.size(20.dp), colorFilter = ColorFilter.tint(if (isCurrent) scheme.onSecondaryContainer else scheme.onSurfaceVariant))
+                        Image(AuraMoreHorizontalIcon, tr("more", "更多"), Modifier.size(20.dp), colorFilter = ColorFilter.tint(if (isCurrent) scheme.onSecondaryContainer else scheme.onSurfaceVariant))
                     }
                 }
             }
@@ -173,7 +173,7 @@ fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction:
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(durationText(song.duration), style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             IconButton(onClick = { openActions(SongActionRequest(song, backdrop, onLongAction)) }, modifier = Modifier.size(44.dp)) {
-                Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary))
+                Image(AuraMoreHorizontalIcon, tr("more", "更多"), Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary))
             }
         }
     }
@@ -637,7 +637,7 @@ private fun RankSongRow(rank: Int, song: Song, model: AuraViewModel, onClick: ()
         }
         Text("${song.playCount} ${tr("play_count", "次")}", style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
         IconButton(onClick = { openActions(SongActionRequest(song, backdrop)) }, modifier = Modifier.size(44.dp)) {
-            Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary))
+            Image(AuraMoreHorizontalIcon, tr("more", "更多"), Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary))
         }
     }
 }

@@ -38,8 +38,8 @@ Aura Player（パッケージ名 `btm.m.auraplayer`）は、Android 13（API 33�
 
 - MediaStore によるローカル音楽スキャンと権限管理、曲・ローカルプレイリスト・アルバム・アーティスト別の閲覧、お気に入り・再生履歴に対応しています。
 - Retro Music 構成のホーム画面：挨拶ヘッダー、クイックショートカット、最近追加した曲、カバーコラージュのおすすめ、人気・最近のアーティストとアルバムを表示します。
-- フォルダーのブラックリスト／ホワイトリスト、最短再生時間フィルター、並べ替え設定の保存、引っ張って更新、分類検索に対応しています。
-- レスポンシブレイアウト：コンパクトな曲行と `44dp` カバーアートを採用し、横画面や大画面では列数を増やしつつシステムの文字サイズ倍率を維持します。
+- フォルダーのブラックリスト／ホワイトリスト、最短再生時間フィルター、Android SAF によるファイル／フォルダーの手動インポート、並べ替え設定の保存、引っ張って更新、分類検索に対応しています。
+- レスポンシブレイアウト：コンパクトな曲行と `44dp` カバーアートを採用し、フリーフォーム／マルチウィンドウ、横画面2ペイン表示、大画面マルチカラムに対応しつつシステムの文字サイズ倍率を維持します。
 
 ### NetEase Cloud Music とダウンロード
 
@@ -52,7 +52,11 @@ Aura Player（パッケージ名 `btm.m.auraplayer`）は、Android 13（API 33�
 ### 再生画面、歌詞、歌詞共有
 
 - **Media3 再生とジェスチャー**：バックグラウンド再生とメディア通知、0.5–3 倍速再生、スリープタイマー、音量操作、ドラッグ並び替え可能な再生キュー、左右スワイプ曲送り、ミニプレイヤーから全画面への連続展開、下スワイプ折りたたみ、予測型「戻る」に対応しています。
-- **画面テーマ**：オーロラ、ぼかしオーロラ、ぼかし、単色、全画面、Material テーマ、雪・雨エフェクト、曲切り替え時のカバーアニメーション（カード、カバー、ページめくり、スタック、縦／横回転）、歌詞表示中の画面オン維持、操作ボタンの自動非表示に対応しています。
+- **画面テーマ**：オーロラ、ぼかしオーロラ、ぼかし、単色、全画面、Material、One テーマ、雪・雨エフェクト、グロープログレスバー（Hyper / One）、10 種の歌詞テーマ、イマーシブカバー（下部フェードマスクと画面角丸に合わせた折りたたみ遷移）、**Apple Music モーションカバー**（取得できた場合は自動でイマーシブ表示を強制）、曲切り替え時のカバーアニメーション（カード、カバー、ページめくり、スタック、縦／横回転）、歌詞表示中の画面オン維持、操作ボタンの自動非表示に対応しています。
+- **実験的機能**：
+  - **空間歌詞**：ジャイロスコープ連動の多層 3D 奥行き視差歌詞表示に対応しています。
+  - **空間カバー**：端末上での深度推定と人物切り抜きにより、ジャイロ連動の多層 3D 空間カバーを生成します。**アルバム名とアルバムアーティスト単位で空間キャッシュを共有・再利用**し、キャッシュ管理と全画面プレビューを備え、`arm64-v8a` 版 ONNX Runtime および各モデルはオンデマンドダウンロードに対応しています（APK 容量削減のため同梱しません）。
+  - **背面ディスプレイ表示**：Root または Shizuku を利用し、対応端末の背面ディスプレイでの歌詞・再生操作に対応しています。
 - **マルチソース歌詞**：NetEase、QQ Music、Kuwo、Kugou、LrcLib、AMLL、TTML Hub から歌詞を取得し、字単位同期、翻訳、発音、デュエット配置、端のぼかしフェードシェーダー、タップシーク、3 秒後の自動フォーカス復帰に対応しています。
 - **歌詞共有スタジオ**：多彩なカードテンプレート（Aura Mesh、Cinema、Paper、Polaroid、Vinyl、Swiss など）を備え、ライト／ダーク切替、フォント、背景、フィルター、行間、角丸を調整して画像保存・共有できます。
 
@@ -74,7 +78,8 @@ Aura Player（パッケージ名 `btm.m.auraplayer`）は、Android 13（API 33�
 | --- | --- |
 | 最小 Android バージョン | Android 13（API 33） |
 | コンパイル / ターゲット SDK | API 37 |
-| 主な権限 | `READ_MEDIA_AUDIO`（ローカルライブラリとタグ編集）、`INTERNET`（オンライン再生と歌詞）、`MODIFY_AUDIO_SETTINGS`（音響効果）、`POST_NOTIFICATIONS` およびフォアグラウンドメディア再生サービス（再生操作とダウンロード通知） |
+| 対応 ABI | `arm64-v8a`（空間カバー用の ONNX Runtime とモデルは必要に応じて個別ダウンロード） |
+| 主な権限 | `READ_MEDIA_AUDIO`（ローカルライブラリとタグ編集）、`INTERNET`（オンライン再生・歌詞・動的／空間アートワーク取得）、`MODIFY_AUDIO_SETTINGS`（音響効果）、`POST_NOTIFICATIONS` およびフォアグラウンドメディア再生サービス（再生操作とダウンロード通知） |
 
 ## ソースコードからのビルド
 
@@ -139,11 +144,12 @@ Issue や Pull Request を歓迎します。参加前に [日本語コントリ�
 
 本プロジェクトは [GNU AGPL-3.0-or-later](LICENSE) ライセンスの下で公開されています。一部移植モジュールおよび外部ライブラリには各自のライセンスが適用されます。詳細は [NOTICE.md](NOTICE.md) をご覧ください：
 
-- UI スタイル、ガラスコンポーネント、ナビゲーションアニメーション、アプリ情報／寄付画面レイアウト：[HyperChanger](https://github.com/ColdP/HyperChanger)（AGPL-3.0-or-later）。
+- UI スタイル、ガラスコンポーネント、ナビゲーションアニメーション、アプリ情報／寄付画面レイアウト：[HyperChanger](https://github.com/ColdP/HyperChanger)（AGPL-3.0-or-later）；空間カバーの端末内推論・モデル一覧・多層視差パイプラインは [HyperChanger Depth Wallpaper](https://github.com/ColdP/HyperChanger-Depth-Wallpaper)（AGPL-3.0-or-later）を移植し、[HyperExtreme](https://github.com/22Frederic/HyperExtreme)（AGPL-3.0）の二層視差表現を参照しています。
 - ホーム構成と MediaStore ソート処理の参考・移植：[Retro Music](https://github.com/RetroMusicPlayer/RetroMusicPlayer)（GPL-3.0-or-later）。
-- UI コンポーネントと各種スタイル表現：[MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）、[Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0）；プレイリストタイトルバーの検索コンポーネントは [COUI-Kit](https://github.com/ItosEO/COUI-Kit)（MPL-2.0）、`One` スタイルおよびスイッチ・シークバー（`MonetTones`、`OneUiPalette`、`BoSwitchView`、`DragOnlySeekBar`）は `OneUI_Kit`（MIT、`OneUIProject/oneui-design` および `oneui-core` 由来）を使用しています。
-- 歌詞の取得・照合・描画：[HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（AGPL-3.0）、[HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced)（GPL-3.0 / Apache-2.0）、[Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics)（Apache-2.0）。
-- その他の主な依存ライブラリ：[Media3](https://developer.android.com/media/media3)、[Coil](https://github.com/coil-kt/coil)、[OkHttp](https://github.com/square/okhttp)、[jaudiotagger](https://github.com/Adonai/jaudiotagger-android)（LGPL-2.1）、[MaterialKolor](https://github.com/jordond/MaterialKolor)（MIT）、[ZXing](https://github.com/zxing/zxing)（Apache-2.0）、[NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT）。
+- UI コンポーネントと各種スタイル表現：[MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）、[Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0）；プレイリストタイトルバーの検索コンポーネントは [COUI-Kit](https://github.com/ItosEO/COUI-Kit)（MPL-2.0）、`One` スタイルおよびスイッチ・シークバー（`MonetTones`、`OneUiPalette`、`BoSwitchView`、`DragOnlySeekBar`）は [OneUI_Kit](https://github.com/TGP258/OneUI_Kit)（MIT、[OneUIProject/oneui-design](https://github.com/OneUIProject/oneui-design) および [OneUIProject/oneui-core](https://github.com/OneUIProject/oneui-core) 由来）を使用しています。
+- 歌詞の取得・照合・描画および Apple Music モーションカバー取得：[HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（AGPL-3.0）、[HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced)（GPL-3.0 / Apache-2.0）、[Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics)（Apache-2.0）。
+- 空間カバーの任意ランタイムおよび推論モデル：[ONNX Runtime](https://github.com/microsoft/onnxruntime)（MIT・オンデマンド取得）、[Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) / [Depth Anything 3](https://github.com/ByteDance-Seed/depth-anything-3)（Apache-2.0）、[MiDaS](https://github.com/isl-org/MiDaS)（MIT）、[U2Net / DIS (rembg)](https://github.com/danielgatis/rembg)（MIT / Apache-2.0）、[BiRefNet](https://github.com/ZhengPeng7/BiRefNet)（MIT）。
+- その他の主な依存ライブラリ：[Media3](https://developer.android.com/media/media3)、[Coil](https://github.com/coil-kt/coil)、[OkHttp](https://github.com/square/okhttp)、[jaudiotagger](https://github.com/Adonai/jaudiotagger-android)（LGPL-2.1）、[MaterialKolor](https://github.com/jordond/MaterialKolor)（MIT）、[ZXing](https://github.com/zxing/zxing)（Apache-2.0）、[Shizuku](https://github.com/RikkaApps/Shizuku)（Apache-2.0）、[NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT）。
 
 ## Star History
 

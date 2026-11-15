@@ -12,14 +12,20 @@ class NowPlayingSettingsTest {
         assertEquals(MaterialPlayerBackground.MATERIAL, expected.materialBackground)
         assertEquals(GlowProgressStyle.OFF, expected.glowProgress)
         assertEquals(50, expected.materialColorMix)
-        assertTrue(expected.showVolume && expected.showAudioInfo && expected.swipeTracks)
-        assertFalse(expected.immersiveLyrics || expected.keepLyricsAwake)
+        assertTrue(expected.showVolume && expected.showAudioInfo && expected.swipeTracks && expected.artistWordmarkLogo)
+        assertFalse(expected.immersiveLyrics || expected.keepLyricsAwake || expected.immersiveCover || expected.appleMusicAnimatedCover || expected.albumAnimatedCover || expected.appleMusicArtistArtwork || expected.artistAnimatedCover)
         assertTrue(expected.fullscreenGlass)
     }
 
     @Test fun everyThemeAnimationAndToggleSurvivesRestart() {
         for (theme in PlayerTheme.entries) for (bg in MaterialPlayerBackground.entries) for (glow in GlowProgressStyle.entries) for (animation in CoverAnimation.entries) for (weather in PlayerWeather.entries) {
             val config = NowPlayingConfig(theme, -32, weather, animation,
+                immersiveCover = true,
+                appleMusicAnimatedCover = true,
+                albumAnimatedCover = true,
+                appleMusicArtistArtwork = true,
+                artistAnimatedCover = true,
+                artistWordmarkLogo = false,
                 showVolume = false, openFromNotification = false, keepLyricsAwake = true,
                 showAudioInfo = false, swipeTracks = false,
                 immersiveLyrics = true, immersiveSeconds = 27, fullscreenGlass = false,

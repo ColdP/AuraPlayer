@@ -38,8 +38,8 @@ Aura Player（包名 `btm.m.auraplayer`）是一款面向 Android 13（API 33）
 
 - MediaStore 本地音乐扫描与权限管理，支持歌曲、本地歌单、专辑、艺术家分类浏览，以及收藏与播放历史。
 - 适配 Retro Music 首页结构：欢迎区、快捷入口、最近添加、推荐封面拼图、热门与最近艺术家及专辑。
-- 支持文件夹黑白名单、最小时长过滤、持久化排序、下拉刷新与分类搜索。
-- 采用自适应响应式布局：紧凑歌曲行与 `44dp` 封面；横屏及大屏设备自动增加列数并保留系统字体缩放。
+- 支持文件夹黑白名单、最小时长过滤、通过系统文件选择器手动导入单曲或文件夹、持久化排序、下拉刷新与分类搜索。
+- 采用自适应响应式布局：紧凑歌曲行与 `44dp` 封面；支持自由小窗、分屏、横屏分栏与大屏多列布局并保留系统字体缩放。
 
 ### 网易云音乐与缓存下载
 
@@ -52,7 +52,11 @@ Aura Player（包名 `btm.m.auraplayer`）是一款面向 Android 13（API 33）
 ### 播放界面、歌词与歌词分享
 
 - **Media3 播放与手势**：支持后台播放与媒体通知、0.5–3 倍速、定时关闭、音量控制、拖动排序队列、左右滑切歌、迷你播放器与全屏连续展开/下滑收起及预测性返回。
-- **播放器外观**：支持极光、模糊极光、模糊、单色、全屏与 Material 主题，提供雪/雨氛围特效、多种切歌封面动效（卡片、封面、翻页、堆叠、垂直/水平翻转）、歌词常亮与沉浸式自动隐藏控件。
+- **播放器外观**：支持极光、模糊极光、模糊、单色、全屏与 Material / One UI 主题，提供雪/雨氛围特效、炫光进度条（Hyper / One）、10 款风格化歌词主题、沉浸式封面（底部羽化与屏幕圆角收起过渡）、**Apple Music 动态封面**（获取到动态数据时自动强制沉浸式显示）、多种切歌封面动效（卡片、封面、翻页、堆叠、垂直/水平翻转）、歌词常亮与沉浸式自动隐藏控件。
+- **实验性功能**：
+  - **空间歌词效果**：基于陀螺仪驱动的多层歌词 3D 景深视差。
+  - **空间封面效果**：端侧运行深度估计与前景抠图，将平面专辑封面渲染为随陀螺仪倾斜的多层 3D 空间封面，并**以专辑标题和专辑艺术家为单位自动复用空间缓存**；提供缓存管理、全屏陀螺仪预览，以及按需下载的 `arm64-v8a` ONNX Runtime 运行库与深度/抠图模型管理页（不内置于 APK 以控制安装包体积）。
+  - **背屏控制与歌词**：支持配合 Root 或 Shizuku 在副屏/背屏启动独立播放与歌词界面。
 - **多源歌词**：集成网易云、QQ 音乐、酷我、酷狗、LrcLib、AMLL 与 TTML Hub 歌词；支持逐字、翻译、发音、对唱、边缘渐隐模糊、点击跳转与浏览焦点 3 秒自动回位。
 - **歌词分享工作室**：内置多款模板（Aura Mesh、Cinema、Paper、Polaroid、Vinyl、Swiss 等），可自定义明暗模式、字体、背景、滤镜、行距与圆角并导出保存或分享图片。
 
@@ -74,7 +78,8 @@ Aura Player（包名 `btm.m.auraplayer`）是一款面向 Android 13（API 33）
 | --- | --- |
 | 最低版本 | Android 13（API 33） |
 | 编译 / 目标 SDK | API 37 |
-| 权限用途 | `READ_MEDIA_AUDIO`（本地库与标签）、`INTERNET`（在线播放与歌词）、`MODIFY_AUDIO_SETTINGS`（音效）、`POST_NOTIFICATIONS` 与前台媒体服务（通知与后台播放） |
+| 支持架构 | `arm64-v8a`（空间封面所需的 ONNX Runtime 与模型按需下载） |
+| 权限用途 | `READ_MEDIA_AUDIO`（本地库与标签）、`INTERNET`（在线播放、歌词与可选动态/空间资源下载）、`MODIFY_AUDIO_SETTINGS`（音效）、`POST_NOTIFICATIONS` 与前台媒体服务（通知与后台播放） |
 
 ## 从源码构建
 
@@ -139,11 +144,12 @@ Aura-Player/
 
 本项目整体采用 [GNU AGPL-3.0-or-later](LICENSE) 开源分发。部分移植模块与第三方依赖保留各自原有协议，完整来源、版权归属与修改说明见 [NOTICE.md](NOTICE.md)：
 
-- 界面风格、玻璃组件、导航动画及关于/捐赠页面布局来源：[HyperChanger](https://github.com/ColdP/HyperChanger)（AGPL-3.0-or-later）。
+- 界面风格、玻璃组件、导航动画及关于/捐赠页面布局来源：[HyperChanger](https://github.com/ColdP/HyperChanger)（AGPL-3.0-or-later）；空间封面端侧推理、模型清单与多层视差管线适配自 [HyperChanger Depth Wallpaper](https://github.com/ColdP/HyperChanger-Depth-Wallpaper)（AGPL-3.0-or-later）并参考 [HyperExtreme](https://github.com/22Frederic/HyperExtreme)（AGPL-3.0）。
 - 首页结构与 MediaStore 排序逻辑适配自 [Retro Music](https://github.com/RetroMusicPlayer/RetroMusicPlayer)（GPL-3.0-or-later）。
-- 控件与风格组件基于 [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）、[Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0），歌单标题栏搜索组件使用 [COUI-Kit](https://github.com/ItosEO/COUI-Kit)（MPL-2.0），`One` 界面风格与交互控件（`MonetTones`、`OneUiPalette`、`BoSwitchView`、`DragOnlySeekBar`）移植自 `OneUI_Kit`（MIT，源自 `OneUIProject/oneui-design` 与 `oneui-core`）。
-- 歌词解析、匹配与渲染来源：[HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（AGPL-3.0）、[HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced)（GPL-3.0 / Apache-2.0）与 [Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics)（Apache-2.0）。
-- 其他核心依赖：[Media3](https://developer.android.com/media/media3)、[Coil](https://github.com/coil-kt/coil)、[OkHttp](https://github.com/square/okhttp)、[jaudiotagger](https://github.com/Adonai/jaudiotagger-android)（LGPL-2.1）、[MaterialKolor](https://github.com/jordond/MaterialKolor)（MIT）、[ZXing](https://github.com/zxing/zxing)（Apache-2.0）及 [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT）。
+- 控件与风格组件基于 [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）、[Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0），歌单标题栏搜索组件使用 [COUI-Kit](https://github.com/ItosEO/COUI-Kit)（MPL-2.0），`One` 界面风格与交互控件（`MonetTones`、`OneUiPalette`、`BoSwitchView`、`DragOnlySeekBar`）移植自 [OneUI_Kit](https://github.com/TGP258/OneUI_Kit)（MIT，源自 [OneUIProject/oneui-design](https://github.com/OneUIProject/oneui-design) 与 [OneUIProject/oneui-core](https://github.com/OneUIProject/oneui-core)）。
+- 歌词与 Apple Music 动态封面来源：[HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（AGPL-3.0）、[HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced)（GPL-3.0 / Apache-2.0）与 [Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics)（Apache-2.0）。
+- 空间封面可选运行库与模型来源：[ONNX Runtime](https://github.com/microsoft/onnxruntime)（MIT，按需下载）、[Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) / [Depth Anything 3](https://github.com/ByteDance-Seed/depth-anything-3)（Apache-2.0）、[MiDaS](https://github.com/isl-org/MiDaS)（MIT）、[U2Net / DIS (rembg)](https://github.com/danielgatis/rembg)（MIT / Apache-2.0）与 [BiRefNet](https://github.com/ZhengPeng7/BiRefNet)（MIT）。
+- 其他核心依赖：[Media3](https://developer.android.com/media/media3)、[Coil](https://github.com/coil-kt/coil)、[OkHttp](https://github.com/square/okhttp)、[jaudiotagger](https://github.com/Adonai/jaudiotagger-android)（LGPL-2.1）、[MaterialKolor](https://github.com/jordond/MaterialKolor)（MIT）、[ZXing](https://github.com/zxing/zxing)（Apache-2.0）、[Shizuku](https://github.com/RikkaApps/Shizuku)（Apache-2.0）及 [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT）。
 
 ## Star History
 

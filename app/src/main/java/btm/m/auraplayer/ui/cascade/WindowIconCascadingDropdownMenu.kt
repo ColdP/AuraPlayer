@@ -15,12 +15,12 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import top.yukonga.miuix.kmp.basic.DropdownColors
-import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.IconButtonDefaults
 import btm.m.auraplayer.ui.LocalToolbarBackdrop
 import btm.m.auraplayer.ui.LocalDialogBackdrop
+import btm.m.auraplayer.ui.glassDropdownColors
 import com.kyant.backdrop.Backdrop
 import androidx.compose.runtime.CompositionLocalProvider
 
@@ -37,7 +37,7 @@ fun WindowIconCascadingDropdownMenu(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     maxHeight: Dp? = null,
-    dropdownColors: DropdownColors = DropdownDefaults.dropdownColors(containerColor = Color.Transparent, selectedContainerColor = Color.Transparent),
+    dropdownColors: DropdownColors = glassDropdownColors(),
     collapseOnSelection: Boolean = true,
     onExpandedChange: ((Boolean) -> Unit)? = null,
     backgroundColor: Color = Color.Unspecified,
@@ -80,7 +80,7 @@ fun WindowIconCascadingDropdownMenu(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     maxHeight: Dp? = null,
-    dropdownColors: DropdownColors = DropdownDefaults.dropdownColors(containerColor = Color.Transparent, selectedContainerColor = Color.Transparent),
+    dropdownColors: DropdownColors = glassDropdownColors(),
     collapseOnSelection: Boolean = true,
     onExpandedChange: ((Boolean) -> Unit)? = null,
     backgroundColor: Color = Color.Unspecified,

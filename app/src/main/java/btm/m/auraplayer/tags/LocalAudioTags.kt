@@ -3,16 +3,21 @@ package btm.m.auraplayer.tags
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import btm.m.auraplayer.data.Song
 import kotlinx.coroutines.*
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
 import kotlin.coroutines.resume
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 internal class TagEditSession(val uri: Uri, val directory: File, val originalFile: File,
                               var original: AudioTagDocument, val path: String) : AutoCloseable {
@@ -108,6 +113,9 @@ internal object LocalAudioTags {
         return hash.digest()
     }
 
+    private const val MAX_IMPORT_COVER_EDGE = 2400
+    private const val MAX_RAW_COVER_BYTES = 8 * 1024 * 1024
+
     suspend fun importCover(context: Context, uri: Uri): TagCover = withContext(Dispatchers.IO) {
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readNBytes(32 * 1024 * 1024 + 1) } ?: error("IMAGE_UNREADABLE")
         require(bytes.size <= 32 * 1024 * 1024) { "IMAGE_TOO_LARGE" }
@@ -115,15 +123,83 @@ internal object LocalAudioTags {
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         require(bounds.outWidth > 0 && bounds.outHeight > 0 && bounds.outWidth <= 20_000 && bounds.outHeight <= 20_000 &&
             bounds.outWidth.toLong() * bounds.outHeight <= 200_000_000) { "INVALID_IMAGE" }
+        val orientation = runCatching {
+            ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL,
+            )
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        val mime = bounds.outMimeType.orEmpty().lowercase()
+        val isNormalOrientation = orientation == ExifInterface.ORIENTATION_NORMAL ||
+            orientation == ExifInterface.ORIENTATION_UNDEFINED
+        if (isNormalOrientation &&
+            (mime == "image/jpeg" || mime == "image/png") &&
+            bounds.outWidth <= MAX_IMPORT_COVER_EDGE &&
+            bounds.outHeight <= MAX_IMPORT_COVER_EDGE &&
+            bytes.size <= MAX_RAW_COVER_BYTES
+        ) {
+            return@withContext TagCover(bytes, mime, bounds.outWidth, bounds.outHeight)
+        }
+
+        // Keep decoded bitmap >= MAX_IMPORT_COVER_EDGE before smooth scaling so we never drop
+        // e.g. 2500px straight down to 1250px via power-of-2 inSampleSize.
         var sample = 1
-        while (bounds.outWidth / sample > 2400 || bounds.outHeight / sample > 2400) sample *= 2
-        val image = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
-            ?: error("INVALID_IMAGE")
+        while (bounds.outWidth / (sample * 2) >= MAX_IMPORT_COVER_EDGE &&
+            bounds.outHeight / (sample * 2) >= MAX_IMPORT_COVER_EDGE
+        ) {
+            sample *= 2
+        }
+        val decoded = BitmapFactory.decodeByteArray(
+            bytes,
+            0,
+            bytes.size,
+            BitmapFactory.Options().apply { inSampleSize = sample },
+        ) ?: error("INVALID_IMAGE")
+        val oriented = applyExifOrientation(decoded, orientation)
+        if (oriented !== decoded) decoded.recycle()
+        val maxSide = max(oriented.width, oriented.height)
+        val finalBitmap = if (maxSide > MAX_IMPORT_COVER_EDGE) {
+            val ratio = MAX_IMPORT_COVER_EDGE.toFloat() / maxSide.toFloat()
+            val targetW = (oriented.width * ratio).roundToInt().coerceAtLeast(1)
+            val targetH = (oriented.height * ratio).roundToInt().coerceAtLeast(1)
+            Bitmap.createScaledBitmap(oriented, targetW, targetH, true).also {
+                if (it !== oriented) oriented.recycle()
+            }
+        } else {
+            oriented
+        }
         try {
             val output = java.io.ByteArrayOutputStream()
-            check(image.compress(Bitmap.CompressFormat.JPEG, 94, output))
-            TagCover(output.toByteArray(), "image/jpeg", image.width, image.height)
-        } finally { image.recycle() }
+            val encodeAsPng = mime == "image/png" && finalBitmap.hasAlpha()
+            val format = if (encodeAsPng) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+            val quality = if (encodeAsPng) 100 else 98
+            val outMime = if (encodeAsPng) "image/png" else "image/jpeg"
+            check(finalBitmap.compress(format, quality, output))
+            TagCover(output.toByteArray(), outMime, finalBitmap.width, finalBitmap.height)
+        } finally {
+            finalBitmap.recycle()
+        }
+    }
+
+    private fun applyExifOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
+            else -> return bitmap
+        }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
     /** Called on the lyrics worker; read tags first so edits take effect before online lookup. */

@@ -497,6 +497,8 @@ internal fun GlassToolbarIconButton(
     containerPadding: PaddingValues = PaddingValues(horizontal = 2.dp),
     iconTranslationX: Dp = 0.dp,
     surfaceAlpha: Float = TOOLBAR_GLASS_SURFACE_ALPHA,
+    buttonSize: Dp = 46.dp,
+    iconSize: Dp = 22.dp,
     onClick: () -> Unit,
 ) {
     val uiStyle = LocalAppUiStyle.current
@@ -511,13 +513,15 @@ internal fun GlassToolbarIconButton(
             modifier = Modifier.padding(containerPadding),
             tonal = collapsedFraction > .15f,
             tint = iconColor,
+            buttonSize = buttonSize,
+            iconSize = iconSize,
         )
         return
     }
     val glassAlpha by animateFloatAsState(collapsedFraction, tween(180), label = "toolbarButtonGlassAlpha")
     val glassSurface = if (isOne && onePalette != null) ComposeColor(onePalette.background) else MiuixTheme.colorScheme.surface
     InteractiveToolbarGlass(
-        modifier = Modifier.padding(containerPadding).size(46.dp),
+        modifier = Modifier.padding(containerPadding).size(buttonSize),
         backdrop = backdrop,
         tint = glassSurface.copy(alpha = surfaceAlpha.coerceIn(0f, 1f)),
         glassAlpha = glassAlpha,
@@ -526,7 +530,7 @@ internal fun GlassToolbarIconButton(
         onClick = onClick,
     ) {
         Image(icon, description,
-            Modifier.size(22.dp).graphicsLayer { translationX = iconTranslationX.toPx() },
+            Modifier.size(iconSize).graphicsLayer { translationX = iconTranslationX.toPx() },
             colorFilter = ColorFilter.tint(iconColor))
     }
 }

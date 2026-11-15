@@ -6,19 +6,32 @@ import android.net.Uri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.util.BitmapLoader
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSourceBitmapLoader
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import btm.m.auraplayer.AuraApplication
 import btm.m.auraplayer.MainActivity
 import btm.m.auraplayer.auramix.AuraMixManager
+import btm.m.auraplayer.data.LocalAudioArtwork
+import coil3.SingletonImageLoader
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
+import coil3.request.allowHardware
+import coil3.toBitmap
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import okhttp3.OkHttpClient
 import org.json.JSONObject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
 
@@ -84,7 +97,11 @@ class PlaybackService : MediaSessionService() {
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val transport = btm.m.auraplayer.audio.FadingPlayer(player, app.effects, serviceScope)
-        session = MediaSession.Builder(this, transport).setSessionActivity(activity).build()
+        val bitmapLoader = CacheBitmapLoader(AuraMediaBitmapLoader(this, DataSourceBitmapLoader(this)))
+        session = MediaSession.Builder(this, transport)
+            .setSessionActivity(activity)
+            .setBitmapLoader(bitmapLoader)
+            .build()
         serviceScope.launch {
             var previousAlways = app.effects.state.value.alwaysPlay
             app.effects.state.collect { settings ->
@@ -181,5 +198,49 @@ class PlaybackService : MediaSessionService() {
             }.toString())
         }
         editor.apply()
+    }
+
+    private inner class AuraMediaBitmapLoader(
+        private val context: android.content.Context,
+        private val fallback: DataSourceBitmapLoader,
+    ) : BitmapLoader {
+        override fun supportsMimeType(mimeType: String): Boolean = fallback.supportsMimeType(mimeType)
+
+        override fun decodeBitmap(data: ByteArray): ListenableFuture<android.graphics.Bitmap> =
+            fallback.decodeBitmap(data)
+
+        override fun loadBitmap(uri: Uri): ListenableFuture<android.graphics.Bitmap> {
+            if (uri.scheme == LocalAudioArtwork.SCHEME) {
+                val future = SettableFuture.create<android.graphics.Bitmap>()
+                serviceScope.launch(Dispatchers.IO) {
+                    val bitmap = runCatching {
+                        val result = SingletonImageLoader.get(context).execute(
+                            ImageRequest.Builder(context)
+                                .data(uri.toString())
+                                .size(1024)
+                                .allowHardware(false)
+                                .build(),
+                        ) as? SuccessResult
+                        result?.image?.toBitmap()
+                    }.getOrNull()
+                    if (bitmap != null) {
+                        future.set(bitmap)
+                    } else {
+                        val parsedAlbumArt = LocalAudioArtwork.parse(uri.toString())?.albumArtUri
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let(Uri::parse)
+                        if (parsedAlbumArt != null) {
+                            runCatching { fallback.loadBitmap(parsedAlbumArt).get() }
+                                .onSuccess(future::set)
+                                .onFailure(future::setException)
+                        } else {
+                            future.setException(java.io.IOException("ARTWORK_UNAVAILABLE"))
+                        }
+                    }
+                }
+                return future
+            }
+            return fallback.loadBitmap(uri)
+        }
     }
 }

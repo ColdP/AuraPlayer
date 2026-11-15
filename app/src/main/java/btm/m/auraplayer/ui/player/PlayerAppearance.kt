@@ -11,10 +11,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -24,6 +26,7 @@ import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.request.allowHardware
+import coil3.size.Precision
 import coil3.toBitmap
 import com.materialkolor.palettes.CorePalette
 import kotlinx.coroutines.CancellationException
@@ -39,6 +42,8 @@ internal fun PlayerThemeBackground(
     config: NowPlayingConfig,
     compactProgress: Float,
     animate: Boolean,
+    queueBlend: Float = 0f,
+    spatialTilt: Offset = Offset.Zero,
     expressive: PlayerExpressiveColors? = null,
     oneUi: PlayerOneUiColors? = null,
     modifier: Modifier = Modifier,
@@ -46,13 +51,28 @@ internal fun PlayerThemeBackground(
     val usesFlowingArt = config.theme == PlayerTheme.AURORA_BLUR ||
         (config.theme == PlayerTheme.MATERIAL && config.materialBackground == MaterialPlayerBackground.AURORA_BLUR)
     val usesMaterialWash = config.theme == PlayerTheme.MATERIAL && config.materialBackground == MaterialPlayerBackground.MATERIAL
+    val lyricOverlayBlend = if (config.lyricTheme == LyricTheme.BLUR) {
+        0f
+    } else {
+        (compactProgress * (1f - queueBlend)).coerceIn(0f, 1f)
+    }
     var phase by remember { mutableFloatStateOf(0f) }
+    var lyricPhase by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(animate, usesFlowingArt, usesMaterialWash, config.weather) {
         if (!animate || (!usesFlowingArt && !usesMaterialWash && config.weather == PlayerWeather.NONE)) return@LaunchedEffect
         var last = withFrameNanos { it }
         while (true) {
             val now = withFrameNanos { it }
             phase = (phase + ((now - last) / 1e9f).coerceAtMost(.05f)) % 120f
+            last = now
+        }
+    }
+    LaunchedEffect(animate, config.lyricTheme, lyricOverlayBlend > 0.005f) {
+        if (!animate || config.lyricTheme == LyricTheme.BLUR || lyricOverlayBlend <= 0.005f) return@LaunchedEffect
+        var last = withFrameNanos { it }
+        while (true) {
+            val now = withFrameNanos { it }
+            lyricPhase = (lyricPhase + ((now - last) / 1e9f).coerceAtMost(.05f)) % 600f
             last = now
         }
     }
@@ -88,7 +108,24 @@ internal fun PlayerThemeBackground(
         }
         previousBackground = null
     }
+    val baseSpatialWeight = if (config.spatialLyrics) (compactProgress * (1f - queueBlend)).coerceIn(0f, 1f) else 0f
     Box(modifier.clipToBounds()) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    if (baseSpatialWeight > 0.001f) {
+                        val overscan = 1f + 0.048f * baseSpatialWeight
+                        scaleX = overscan
+                        scaleY = overscan
+                        translationX = -spatialTilt.x * 16.dp.toPx() * baseSpatialWeight
+                        translationY = -spatialTilt.y * 12.dp.toPx() * baseSpatialWeight
+                        rotationY = -spatialTilt.x * 3.6f * baseSpatialWeight
+                        rotationX = spatialTilt.y * 2.8f * baseSpatialWeight
+                        cameraDistance = 12f * density
+                    }
+                },
+        ) {
         Crossfade(config.theme to config.materialBackground, animationSpec = tween(380), label = "playerTheme") { (theme, materialBg) ->
             val materialMode = theme == PlayerTheme.MATERIAL
             val oneUiMode = theme == PlayerTheme.ONE && oneUi != null
@@ -151,6 +188,17 @@ internal fun PlayerThemeBackground(
                     Box(Modifier.fillMaxSize().background(expressive.surface.copy(alpha = materialMix * .94f)))
                 }
             }
+        }
+        }
+        if (lyricOverlayBlend > 0.001f) {
+            PlayerLyricThemeBackdrop(
+                theme = config.lyricTheme,
+                blend = lyricOverlayBlend,
+                phase = lyricPhase,
+                palette = palette,
+                spatialTilt = if (config.spatialLyrics) spatialTilt else Offset.Zero,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
         if (config.weather != PlayerWeather.NONE) PlayerWeatherOverlay(config.weather, phase)
     }
@@ -284,8 +332,153 @@ internal fun AnimatedPlayerArtwork(artwork: String, transitionKey: String, anima
             }
         }
     }.then(if (animation == CoverAnimation.BLUR) Modifier.blur((18f * if (incoming) 1f - t else t).dp) else Modifier)
+    val context = LocalContext.current
+    val previousRequest = remember(previous, context) {
+        previous?.let {
+            ImageRequest.Builder(context)
+                .data(it)
+                .size(1600)
+                .precision(Precision.INEXACT)
+                .build()
+        }
+    }
+    val currentRequest = remember(current, context) {
+        ImageRequest.Builder(context)
+            .data(current)
+            .size(1600)
+            .precision(Precision.INEXACT)
+            .build()
+    }
     Box(Modifier.fillMaxSize()) {
-        previous?.let { AsyncImage(it, null, Modifier.fillMaxSize().frame(false), contentScale = ContentScale.Crop) }
-        AsyncImage(current, null, Modifier.fillMaxSize().frame(true), contentScale = ContentScale.Crop)
+        previousRequest?.let { AsyncImage(it, null, Modifier.fillMaxSize().frame(false), contentScale = ContentScale.Crop) }
+        AsyncImage(currentRequest, null, Modifier.fillMaxSize().frame(true), contentScale = ContentScale.Crop)
+    }
+}
+
+internal data class CatalogPlayerThemeTokens(
+    val dark: Boolean,
+    val surface: Color,
+    val foreground: Color,
+    val muted: Color,
+    val accent: Color,
+    val onAccent: Color,
+    val cardFill: Color,
+    val heroMixTint: Color,
+)
+
+@Composable
+internal fun rememberCatalogPlayerThemeTokens(
+    artwork: String,
+    config: NowPlayingConfig,
+    fallbackDarkSurface: Boolean,
+    forceHeroSurface: Boolean,
+): CatalogPlayerThemeTokens {
+    val palette = rememberPlayerMonetPalette(artwork)
+    val seed = rememberPlayerArtworkSeed(artwork)
+    val effectiveDark = when {
+        config.theme == PlayerTheme.MATERIAL -> fallbackDarkSurface || config.materialBackground != MaterialPlayerBackground.MATERIAL
+        config.theme == PlayerTheme.ONE -> fallbackDarkSurface
+        forceHeroSurface -> true
+        else -> fallbackDarkSurface
+    }
+    val expressive = rememberPlayerExpressiveColors(seed, isDark = effectiveDark)
+    val oneUi = rememberPlayerOneUiColors(seed, isDark = effectiveDark)
+    val mixFraction = (config.materialColorMix / 100f).coerceIn(0f, 1f)
+    return remember(palette, config.theme, config.materialBackground, mixFraction, effectiveDark, forceHeroSurface, expressive, oneUi) {
+        when {
+            !forceHeroSurface && !effectiveDark -> {
+                val base = Color(palette.a2.tone(90))
+                val fg = Color(palette.a1.tone(10))
+                val accent = Color(palette.a1.tone(25))
+                CatalogPlayerThemeTokens(
+                    dark = false,
+                    surface = base,
+                    foreground = fg,
+                    muted = fg.copy(alpha = .66f),
+                    accent = accent,
+                    onAccent = Color.White,
+                    cardFill = fg.copy(alpha = .10f),
+                    heroMixTint = Color(palette.a1.tone(82)),
+                )
+            }
+            config.theme == PlayerTheme.MATERIAL -> CatalogPlayerThemeTokens(
+                dark = effectiveDark,
+                surface = expressive.surface,
+                foreground = expressive.activeInk,
+                muted = expressive.secondaryInk,
+                accent = expressive.primary,
+                onAccent = expressive.onPrimary,
+                cardFill = expressive.surfaceContainerHigh.copy(alpha = if (effectiveDark) .58f else .74f),
+                heroMixTint = lerp(expressive.primaryContainer, expressive.surface, mixFraction * .65f),
+            )
+            config.theme == PlayerTheme.ONE -> CatalogPlayerThemeTokens(
+                dark = effectiveDark,
+                surface = oneUi.background,
+                foreground = oneUi.text,
+                muted = oneUi.subText,
+                accent = oneUi.accent,
+                onAccent = oneUi.onAccent,
+                cardFill = oneUi.card.copy(alpha = if (effectiveDark) .66f else .80f),
+                heroMixTint = lerp(oneUi.chip, oneUi.background, .35f),
+            )
+            else -> {
+                val accent = Color(palette.a1.tone(80))
+                CatalogPlayerThemeTokens(
+                    dark = true,
+                    surface = Color(palette.a2.tone(14)),
+                    foreground = Color.White,
+                    muted = Color.White.copy(alpha = .70f),
+                    accent = accent,
+                    onAccent = Color(palette.n1.tone(12)),
+                    cardFill = Color.White.copy(alpha = .11f),
+                    heroMixTint = lerp(Color(palette.a1.tone(30)), Color(palette.a3.tone(24)), .35f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun CatalogNowPlayingBackground(
+    artwork: String,
+    config: NowPlayingConfig,
+    fallbackDarkSurface: Boolean,
+    forceHeroSurface: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val palette = rememberPlayerMonetPalette(artwork)
+    val seed = rememberPlayerArtworkSeed(artwork)
+    val tokens = rememberCatalogPlayerThemeTokens(artwork, config, fallbackDarkSurface, forceHeroSurface)
+    if (!forceHeroSurface && !tokens.dark) {
+        Box(modifier.background(tokens.surface))
+        return
+    }
+    val expressive = rememberPlayerExpressiveColors(seed, isDark = tokens.dark)
+    val oneUi = rememberPlayerOneUiColors(seed, isDark = tokens.dark)
+    val resolvedConfig = remember(config) {
+        config.copy(lyricTheme = LyricTheme.BLUR, weather = PlayerWeather.NONE)
+    }
+    Box(modifier) {
+        PlayerThemeBackground(
+            artwork = artwork,
+            palette = palette,
+            config = resolvedConfig,
+            compactProgress = 0f,
+            animate = true,
+            expressive = if (resolvedConfig.theme == PlayerTheme.MATERIAL) expressive else null,
+            oneUi = if (resolvedConfig.theme == PlayerTheme.ONE) oneUi else null,
+            modifier = Modifier.fillMaxSize(),
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        .55f to Color.Transparent,
+                        1f to tokens.surface.copy(alpha = if (tokens.dark) .46f else .34f),
+                    ),
+                ),
+        )
     }
 }

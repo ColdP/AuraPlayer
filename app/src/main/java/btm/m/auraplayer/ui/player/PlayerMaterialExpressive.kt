@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package btm.m.auraplayer.ui.player
 
+import btm.m.auraplayer.ui.AuraMoreHorizontalIcon
 import android.media.AudioManager
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
@@ -445,7 +446,7 @@ internal fun MaterialExpressiveMoreButton(
         contentAlignment = Alignment.Center
     ) {
         Image(
-            imageVector = MiuixIcons.Regular.More,
+            imageVector = AuraMoreHorizontalIcon,
             contentDescription = label,
             modifier = Modifier.size(iconSize),
             colorFilter = ColorFilter.tint(colors.onSecondaryContainer)
@@ -478,12 +479,18 @@ internal fun MaterialExpressiveVolumeSlider(
 
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         Box(
-            Modifier.size(30.dp).clip(CircleShape).background(badgeBg),
+            Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(badgeBg)
+                .clickable(enabled = !manager.isVolumeFixed, role = Role.Button) {
+                    value = stepMediaVolume(manager, max, increase = false)
+                },
             contentAlignment = Alignment.Center
         ) {
             Image(
                 painter = painterResource(R.drawable.ic_player_volume_muted),
-                contentDescription = null,
+                contentDescription = tr("volume_down", "减小音量"),
                 modifier = Modifier.size(16.dp),
                 colorFilter = ColorFilter.tint(colors.iconInk)
             )
@@ -506,12 +513,18 @@ internal fun MaterialExpressiveVolumeSlider(
         )
         Spacer(Modifier.width(8.dp))
         Box(
-            Modifier.size(30.dp).clip(CircleShape).background(badgeBg),
+            Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(badgeBg)
+                .clickable(enabled = !manager.isVolumeFixed, role = Role.Button) {
+                    value = stepMediaVolume(manager, max, increase = true)
+                },
             contentAlignment = Alignment.Center
         ) {
             Image(
                 painter = painterResource(R.drawable.ic_player_volume_full),
-                contentDescription = null,
+                contentDescription = tr("volume_up", "增大音量"),
                 modifier = Modifier.size(16.dp),
                 colorFilter = ColorFilter.tint(colors.primary)
             )

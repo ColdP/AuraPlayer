@@ -8,6 +8,16 @@ import androidx.compose.ui.unit.dp
 internal fun playerCoverInset(width: Dp, coverSize: Dp, outerMargin: Dp): Dp =
     ((width - coverSize) / 2 - outerMargin).coerceAtLeast(0.dp)
 
+/**
+ * Compute uniform control column X and width for non-landscape viewports so top rows
+ * (title & progress slider) never narrow into a pyramid above wider transport/volume/bottom rows.
+ */
+internal fun portraitControlColumnRange(width: Dp, outerMargin: Dp): Pair<Dp, Dp> {
+    val safeMargin = outerMargin.coerceAtLeast(0.dp)
+    val columnWidth = (width - safeMargin * 2).coerceAtLeast(24.dp)
+    return safeMargin to columnWidth
+}
+
 /** Existing mini-player material recipe; shared with the page blur cap, not a new setting. */
 internal fun playerMiniBlurRadius(style: String, blurPercent: Int): Dp =
     (when (style) {
@@ -29,3 +39,137 @@ internal fun fullscreenPlayerCard(width: Dp, height: Dp, status: Dp, navigation:
     val cardHeight = cardWidth * .75f
     return FullscreenPlayerCard((width - cardWidth) / 2, height - navigation - 14.dp - cardHeight, cardWidth, cardHeight)
 }
+
+internal fun isLandscapePlayerLayout(width: Dp, height: Dp): Boolean =
+    width >= 480.dp && width > height * 1.08f
+
+internal fun isCompactPlayerWindow(width: Dp, height: Dp, isMultiWindow: Boolean): Boolean =
+    isMultiWindow || (!isLandscapePlayerLayout(width, height) && (height < 640.dp || width < 330.dp))
+
+internal data class LandscapePlayerGeometry(
+    val leftPaneX: Dp,
+    val leftPaneWidth: Dp,
+    val rightPaneX: Dp,
+    val rightPaneWidth: Dp,
+    val usableTop: Dp,
+    val usableBottom: Dp,
+    val usableHeight: Dp,
+    val heroCoverSize: Dp,
+    val heroCoverX: Dp,
+    val heroCoverY: Dp,
+    val lyricsCompactCoverSize: Dp,
+    val lyricsCompactCoverX: Dp,
+    val lyricsCompactCoverY: Dp,
+    val controlStackHeight: Dp,
+    val controlStackTop: Dp,
+    val controlsScale: Float,
+)
+
+internal fun computeLandscapePlayerGeometry(
+    width: Dp,
+    height: Dp,
+    leftInset: Dp,
+    topInset: Dp,
+    rightInset: Dp,
+    bottomInset: Dp,
+    showVolume: Boolean,
+): LandscapePlayerGeometry {
+    val edgeMargin = maxOf(18.dp, width * 0.032f)
+    val safeLeft = leftInset + edgeMargin
+    val safeRight = width - rightInset - edgeMargin
+    val safeWidth = (safeRight - safeLeft).coerceAtLeast(220.dp)
+    val paneGap = maxOf(22.dp, safeWidth * 0.045f)
+    val leftPaneWidth = ((safeWidth - paneGap) * 0.43f).coerceAtLeast(120.dp)
+    val rightPaneX = safeLeft + leftPaneWidth + paneGap
+    val rightPaneWidth = (safeRight - rightPaneX).coerceAtLeast(180.dp)
+    val usableTop = topInset + 24.dp
+    val usableBottom = (height - bottomInset - 8.dp).coerceAtLeast(usableTop + 100.dp)
+    val usableHeight = (usableBottom - usableTop).coerceAtLeast(100.dp)
+
+    val heroCoverSize = minOf(leftPaneWidth * 0.88f, usableHeight * 0.84f, 340.dp).coerceAtLeast(84.dp)
+    val heroCoverX = safeLeft + (leftPaneWidth - heroCoverSize) / 2
+    val heroCoverY = usableTop + (usableHeight - heroCoverSize) / 2
+
+    val baseControlHeight = if (showVolume) 276.dp else 234.dp
+    val controlsScale = (usableHeight.value / baseControlHeight.value).coerceIn(0.76f, 1.04f)
+    val controlStackHeight = minOf(usableHeight, (baseControlHeight * controlsScale).coerceAtLeast(168.dp))
+    val controlStackTop = usableTop + (usableHeight - controlStackHeight) / 2
+
+    // Non-immersed lyrics/queue mode uses a sleek compact cover + full metadata/controls in the left pane.
+    val lyricsCompactCoverSize = minOf(usableHeight * 0.36f, leftPaneWidth * 0.40f, 128.dp).coerceAtLeast(64.dp)
+    val lyricsCompactCoverX = safeLeft
+    val lyricsCompactCoverY = usableTop + 6.dp
+
+    return LandscapePlayerGeometry(
+        leftPaneX = safeLeft,
+        leftPaneWidth = leftPaneWidth,
+        rightPaneX = rightPaneX,
+        rightPaneWidth = rightPaneWidth,
+        usableTop = usableTop,
+        usableBottom = usableBottom,
+        usableHeight = usableHeight,
+        heroCoverSize = heroCoverSize,
+        heroCoverX = heroCoverX,
+        heroCoverY = heroCoverY,
+        lyricsCompactCoverSize = lyricsCompactCoverSize,
+        lyricsCompactCoverX = lyricsCompactCoverX,
+        lyricsCompactCoverY = lyricsCompactCoverY,
+        controlStackHeight = controlStackHeight,
+        controlStackTop = controlStackTop,
+        controlsScale = controlsScale,
+    )
+}
+
+internal data class ImmersiveCoverGeometry(
+    val coverX: Dp,
+    val coverY: Dp,
+    val coverWidth: Dp,
+    val coverHeight: Dp,
+    val titleY: Dp,
+    val seekY: Dp,
+)
+
+internal fun computeImmersiveCoverGeometry(
+    width: Dp,
+    height: Dp,
+    statusTop: Dp,
+    seekCeiling: Dp,
+    titleToSeek: Dp,
+    compactWindow: Boolean,
+): ImmersiveCoverGeometry {
+    val targetSeek = height * (if (compactWindow) 0.575f else 0.625f)
+    val minTitleY = statusTop + (if (compactWindow) 44.dp else 64.dp)
+    val minSeekY = minTitleY + titleToSeek
+    val seekY = if (seekCeiling <= minSeekY) {
+        seekCeiling.coerceAtLeast(statusTop + titleToSeek + 12.dp)
+    } else {
+        targetSeek.coerceIn(minSeekY, seekCeiling)
+    }
+    val titleY = (seekY - titleToSeek).coerceAtLeast(statusTop + 28.dp)
+    val coverHeight = (seekY + 12.dp).coerceIn(height * 0.46f, height * 0.69f)
+    return ImmersiveCoverGeometry(
+        coverX = 0.dp,
+        coverY = 0.dp,
+        coverWidth = width.coerceAtLeast(1.dp),
+        coverHeight = coverHeight.coerceAtLeast(1.dp),
+        titleY = titleY,
+        seekY = seekY,
+    )
+}
+
+internal fun computeLandscapeImmersiveCoverGeometry(
+    width: Dp,
+    height: Dp,
+    rightPaneX: Dp,
+    leftPaneWidth: Dp,
+): ImmersiveCoverGeometry = ImmersiveCoverGeometry(
+    coverX = 0.dp,
+    coverY = 0.dp,
+    coverWidth = (rightPaneX + 24.dp).coerceIn(
+        (leftPaneWidth + 24.dp).coerceAtLeast(1.dp),
+        maxOf(width * 0.60f, (leftPaneWidth + 24.dp).coerceAtLeast(1.dp)),
+    ),
+    coverHeight = height.coerceAtLeast(1.dp),
+    titleY = 0.dp,
+    seekY = 0.dp,
+)

@@ -15,7 +15,6 @@ import btm.m.auraplayer.data.SongSort
 import btm.m.auraplayer.ui.cascade.WindowIconCascadingDropdownMenu
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.icon.extended.ConvertFile
 import top.yukonga.miuix.kmp.icon.extended.Sort
@@ -56,6 +55,6 @@ internal fun SongsToolbarMenu(model: AuraViewModel) {
     }
     WindowIconCascadingDropdownMenu(entry = entry, backdrop = LocalToolbarBackdrop.current,
         trigger = { onClick, _ ->
-            GlassToolbarIconButton(MiuixIcons.Regular.More, tr("more", "更多"), onClick = onClick)
+            GlassToolbarIconButton(AuraMoreHorizontalIcon, tr("more", "更多"), onClick = onClick)
         }, content = {})
 }

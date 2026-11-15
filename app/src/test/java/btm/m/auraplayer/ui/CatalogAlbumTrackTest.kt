@@ -69,4 +69,50 @@ class CatalogAlbumTrackTest {
         assertEquals("39分钟", formatAlbumReleaseSummary(null, "39分钟"))
         assertNull(formatAlbumReleaseSummary("", null))
     }
+
+    @Test
+    fun albumAnimatedCoverHelpersSelectMetadataAndForceImmersiveOnlyWithVideo() {
+        val collection = btm.m.auraplayer.data.MusicCollection(
+            key = "album:100",
+            title = "Immersive Album",
+            subtitle = "Artist Name",
+            artwork = "art://album",
+            songs = emptyList(),
+        )
+        val track = Song(1, "Track 1", "Guest Artist", "", uri = "local:1")
+        val resolved = representativeAlbumMotionSong(collection, listOf(track), "Artist Name")
+        assertEquals("Immersive Album", resolved?.album)
+        assertEquals("Artist Name", resolved?.albumArtist)
+        assertTrue(shouldShowImmersiveAlbumHero(isArtist = false, albumAnimatedCoverEnabled = true, motionVideoPath = "/tmp/cover.mp4"))
+        assertFalse(shouldShowImmersiveAlbumHero(isArtist = true, albumAnimatedCoverEnabled = true, motionVideoPath = "/tmp/cover.mp4"))
+        assertFalse(shouldShowImmersiveAlbumHero(isArtist = false, albumAnimatedCoverEnabled = false, motionVideoPath = "/tmp/cover.mp4"))
+        assertFalse(shouldShowImmersiveAlbumHero(isArtist = false, albumAnimatedCoverEnabled = true, motionVideoPath = null))
+    }
+
+    @Test
+    fun artistTopSongsWidthAdaptsToMeasuredViewportAndFormatsSubtitle() {
+        val margin = 20.dp
+        val singleColumn = artistTopSongCardWidth(viewportWidth = 390.dp, margin = margin, columnCount = 1)
+        assertEquals(350f, singleColumn.value, .01f)
+
+        val phoneMultiColumn = artistTopSongCardWidth(viewportWidth = 390.dp, margin = margin, columnCount = 3)
+        assertEquals(330f, phoneMultiColumn.value, .01f)
+
+        val landscapeMultiColumn = artistTopSongCardWidth(viewportWidth = 840.dp, margin = margin, columnCount = 3)
+        assertEquals(394f, landscapeMultiColumn.value, .01f)
+
+        val withAlbumAndYear = Song(1, "Cruel Summer", "Taylor Swift", "Lover", year = 2019, uri = "local:1")
+        val withAlbumOnly = Song(2, "Love Story", "Taylor Swift", "Fearless", year = 0, uri = "local:2")
+        val withYearOnly = Song(3, "Single", "Taylor Swift", "", year = 2024, uri = "cloud:3", cloud = true)
+        assertEquals("Lover · 2019", formatArtistSongAlbumYear(withAlbumAndYear))
+        assertEquals("Fearless", formatArtistSongAlbumYear(withAlbumOnly))
+        assertEquals("2024", formatArtistSongAlbumYear(withYearOnly))
+    }
+
+    @Test
+    fun horizontalMoreIconHasThreeDots() {
+        assertEquals(24f, AuraMoreHorizontalIcon.viewportWidth, .001f)
+        assertEquals(24f, AuraMoreHorizontalIcon.viewportHeight, .001f)
+        assertEquals(3, AuraMoreHorizontalIcon.root.size)
+    }
 }

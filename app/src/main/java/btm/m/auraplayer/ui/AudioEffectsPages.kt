@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import btm.m.auraplayer.AuraApplication
+import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.audio.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -519,7 +520,7 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
     PresetDraftDialog(store, saving, onDismiss = { saving = false }, onSaved = { saving = false })
 }
 
-@Composable fun AudioPreferencesPage(padding: PaddingValues) {
+@Composable fun AudioPreferencesPage(model: AuraViewModel, padding: PaddingValues) {
     val app = LocalContext.current.applicationContext as AuraApplication
     val store = app.effects
     val auraMix by app.auraMix.state.collectAsState()
@@ -529,7 +530,11 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
     }
     val transition = updateTransition(state.fade, label = "audio-fade-setting")
     val blur by transition.animateFloat(transitionSpec = { tween(220) }, label = "blur") { if (it) 0f else 8f }
-    LazyColumn(pageContentModifier(), contentPadding = padding) {
+    LazyColumn(
+        pageContentModifier(),
+        contentPadding = padding,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         item { EffectsCard {
             SwitchPreference(tr("audio_fade", "音频淡入淡出"), tr("audio_fade_summary", "播放与暂停时平滑调整音量"), state.fade) {
                 store.audio(fade = it)
@@ -552,5 +557,6 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
             }
             SwitchPreference(tr("audio_always_play", "始终播放"), tr("audio_always_play_summary", "当有其他内容播放时，在后台保持播放"), state.alwaysPlay) { store.audio(always = it) }
         } }
+        item { AudioScanGroup(model) }
     }
 }

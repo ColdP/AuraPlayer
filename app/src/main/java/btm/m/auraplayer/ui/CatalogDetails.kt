@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
@@ -25,6 +26,10 @@ import androidx.compose.ui.unit.*
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.R
 import btm.m.auraplayer.data.*
+import btm.m.auraplayer.playback.NowPlayingConfig
+import btm.m.auraplayer.ui.player.AnimatedMotionCoverVideo
+import btm.m.auraplayer.ui.player.CatalogNowPlayingBackground
+import btm.m.auraplayer.ui.player.rememberCatalogPlayerThemeTokens
 import btm.m.auraplayer.ui.player.rememberPlayerMonetPalette
 import btm.m.auraplayer.ui.player.LocalSongActions
 import btm.m.auraplayer.ui.player.SongActionRequest
@@ -37,10 +42,26 @@ import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop as rememberMiuixLayerBackdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop as miuixLayerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.icon.extended.Download
 import top.yukonga.miuix.kmp.icon.extended.ChevronForward
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+internal const val ArtistTopSongMinCardWidthDp = 220
+
+internal fun artistTopSongCardWidth(viewportWidth: Dp, margin: Dp, columnCount: Int): Dp {
+    val contentWidth = (viewportWidth - margin * 2).coerceAtLeast(ArtistTopSongMinCardWidthDp.dp)
+    if (columnCount <= 1) return contentWidth
+    return if (viewportWidth >= 600.dp) {
+        ((contentWidth - 12.dp) / 2f).coerceIn(280.dp, 460.dp)
+    } else {
+        (contentWidth - 20.dp).coerceAtLeast(ArtistTopSongMinCardWidthDp.dp)
+    }
+}
+
+internal fun formatArtistSongAlbumYear(song: Song): String =
+    listOf(song.album, song.year.takeIf { it > 0 }?.toString().orEmpty())
+        .filter { it.isNotBlank() }
+        .joinToString(" · ")
 
 internal fun MusicCollection.isCatalog() = key.startsWith("album:") || key.startsWith("artist:") || key.startsWith("cloud:album:") || key.startsWith("cloud:artist:")
 internal fun MusicCollection.isArtist() = key.startsWith("artist:") || key.startsWith("cloud:artist:")
@@ -90,12 +111,143 @@ internal fun formatAlbumReleaseSummary(dateLabel: String?, durationLabel: String
         .takeIf { it.isNotEmpty() }
         ?.joinToString(", ")
 
+internal fun representativeAlbumMotionSong(
+    collection: MusicCollection,
+    tracks: List<Song>,
+    albumArtist: String,
+): Song? {
+    val first = tracks.firstOrNull()
+    val effectiveAlbum = first?.album?.trim()?.takeIf(String::isNotEmpty) ?: collection.title.trim()
+    val effectiveArtist = albumArtist.trim()
+        .ifEmpty { first?.albumArtist?.trim().orEmpty() }
+        .ifEmpty { first?.artist?.trim().orEmpty() }
+    if (effectiveAlbum.isEmpty() || effectiveArtist.isEmpty()) return null
+    return first?.copy(
+        album = effectiveAlbum,
+        albumArtist = effectiveArtist,
+    ) ?: Song(
+        id = 0L,
+        title = effectiveAlbum,
+        artist = effectiveArtist,
+        album = effectiveAlbum,
+        albumId = 0L,
+        artistId = 0L,
+        uri = "",
+        artwork = collection.artwork,
+        albumArtist = effectiveArtist,
+        cloud = collection.key.startsWith("cloud:"),
+    )
+}
+
+internal fun shouldShowImmersiveAlbumHero(
+    isArtist: Boolean,
+    albumAnimatedCoverEnabled: Boolean,
+    motionVideoPath: String?,
+): Boolean = !isArtist && albumAnimatedCoverEnabled && !motionVideoPath.isNullOrBlank()
+
 @Composable
-internal fun CatalogBackground(collection: MusicCollection?, modifier: Modifier = Modifier) {
+internal fun rememberCatalogMotionCoverPath(
+    collection: MusicCollection?,
+    tracks: List<Song>,
+    enabled: Boolean,
+): String? {
+    val context = LocalContext.current
+    val isArtist = collection?.isArtist() == true
+    val albumArtist = remember(collection?.key, collection?.subtitle, tracks) {
+        if (collection == null) "" else resolveAlbumArtist(null, collection.subtitle, tracks)
+    }
+    val probeSong = remember(collection?.key, tracks, albumArtist, enabled) {
+        if (collection == null || isArtist || !enabled) null
+        else representativeAlbumMotionSong(collection, tracks, albumArtist)
+    }
+    var motionFile by remember(probeSong?.key, probeSong?.album, probeSong?.albumArtist, enabled) {
+        mutableStateOf(
+            if (enabled && probeSong != null) {
+                AppleMusicMotionCoverManager.peekCachedFile(context, probeSong)
+            } else {
+                null
+            },
+        )
+    }
+    LaunchedEffect(probeSong?.key, probeSong?.album, probeSong?.albumArtist, enabled) {
+        val target = probeSong
+        if (!enabled || target == null) {
+            motionFile = null
+            return@LaunchedEffect
+        }
+        val cached = AppleMusicMotionCoverManager.peekCachedFile(context, target)
+        if (cached != null) {
+            motionFile = cached
+            return@LaunchedEffect
+        }
+        motionFile = null
+        motionFile = AppleMusicMotionCoverManager.resolve(
+            context = context,
+            song = target,
+            activePlayingPath = motionFile?.absolutePath,
+        )
+    }
+    return if (enabled && !isArtist) {
+        motionFile?.takeIf { it.isFile && it.length() > 0L }?.absolutePath
+    } else {
+        null
+    }
+}
+
+@Composable
+internal fun rememberCatalogArtistMedia(
+    collection: MusicCollection?,
+    needLogo: Boolean,
+    needArtwork: Boolean,
+    needMotionVideo: Boolean,
+): ResolvedArtistMedia {
+    val context = LocalContext.current
+    val isArtist = collection?.isArtist() == true
+    val artistName = collection?.title.orEmpty()
+    val initialMotion = remember(isArtist, artistName, needMotionVideo) {
+        if (isArtist && needMotionVideo && artistName.isNotBlank()) {
+            AppleMusicArtistLogoManager.peekCachedArtistMotionPath(context, artistName)
+        } else {
+            null
+        }
+    }
+    var media by remember(isArtist, collection?.key, artistName, needLogo, needArtwork, needMotionVideo) {
+        mutableStateOf(ResolvedArtistMedia(motionVideoPath = initialMotion))
+    }
+    LaunchedEffect(isArtist, collection?.key, artistName, needLogo, needArtwork, needMotionVideo) {
+        if (!isArtist || artistName.isBlank() || (!needLogo && !needArtwork && !needMotionVideo)) {
+            media = ResolvedArtistMedia()
+            return@LaunchedEffect
+        }
+        val activePath = media.motionVideoPath ?: initialMotion
+        media = AppleMusicArtistLogoManager.resolveArtistMedia(
+            context = context,
+            artistName = artistName,
+            needLogo = needLogo,
+            needArtwork = needArtwork,
+            needMotionVideo = needMotionVideo,
+            activePlayingVideoPath = activePath,
+        )
+    }
+    return media
+}
+
+@Composable
+internal fun CatalogBackground(
+    collection: MusicCollection?,
+    modifier: Modifier = Modifier,
+    nowPlayingConfig: NowPlayingConfig = NowPlayingConfig(),
+    immersiveAlbum: Boolean = false,
+) {
     collection ?: return
-    val palette = rememberPlayerMonetPalette(collection.artwork)
     val dark = MiuixTheme.colorScheme.surface.luminance() < .5f
-    Box(modifier.background(Color(palette.a2.tone(if (collection.isArtist() || dark) 16 else 90))))
+    CatalogNowPlayingBackground(
+        artwork = collection.artwork,
+        config = nowPlayingConfig,
+        fallbackDarkSurface = dark,
+        forceHeroSurface = collection.isArtist() || immersiveAlbum,
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -116,9 +268,21 @@ internal fun AlbumInfoBackground(collection: MusicCollection, modifier: Modifier
 }
 
 @Composable
-internal fun CatalogDetailPage(model: AuraViewModel, padding: PaddingValues, collection: MusicCollection, cloud: CloudPlaylistContent?,
-    destinationId: Long = 0L, open: (String) -> Unit = {}) {
+internal fun CatalogDetailPage(
+    model: AuraViewModel,
+    padding: PaddingValues,
+    collection: MusicCollection,
+    cloud: CloudPlaylistContent?,
+    destinationId: Long = 0L,
+    open: (String) -> Unit = {},
+    nowPlayingConfig: NowPlayingConfig = NowPlayingConfig(),
+    motionVideoPath: String? = null,
+    artistLogoUrl: String? = null,
+    artistMotionVideoPath: String? = null,
+) {
     val artist = collection.isArtist()
+    val immersiveAlbum = shouldShowImmersiveAlbumHero(artist, nowPlayingConfig.albumAnimatedCover, motionVideoPath)
+    val hasImmersiveHero = artist || immersiveAlbum
     val openSongActions = LocalSongActions.current
     val songActionsBackdrop = LocalToolbarBackdrop.current
     val tracks = cloud?.songs ?: collection.songs
@@ -126,13 +290,20 @@ internal fun CatalogDetailPage(model: AuraViewModel, padding: PaddingValues, col
     val albumArtist = remember(info?.artist, collection.subtitle, tracks) {
         resolveAlbumArtist(info?.artist, collection.subtitle, tracks)
     }
-    val palette = rememberPlayerMonetPalette(collection.artwork)
-    val dark = artist || MiuixTheme.colorScheme.surface.luminance() < .5f
-    val foreground = if (dark) Color.White else Color(palette.a1.tone(10))
-    val muted = foreground.copy(alpha = .66f)
-    val accent = Color(palette.a1.tone(if (dark) 80 else 25))
+    val systemDark = MiuixTheme.colorScheme.surface.luminance() < .5f
+    val tokens = rememberCatalogPlayerThemeTokens(
+        artwork = collection.artwork,
+        config = nowPlayingConfig,
+        fallbackDarkSurface = systemDark,
+        forceHeroSurface = hasImmersiveHero,
+    )
+    val foreground = tokens.foreground
+    val muted = tokens.muted
+    val accent = tokens.accent
+    val onAccent = tokens.onAccent
+    val heroCardFill = tokens.cardFill
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
-    val margin = if (artist) LocalAuraLayout.current.pageMargin else (configuration.screenWidthDp * .058f * 1.15f).dp
+    val margin = if (hasImmersiveHero) LocalAuraLayout.current.pageMargin else (configuration.screenWidthDp * .058f * 1.15f).dp
     val related = info?.albums ?: model.songs.filter { song -> tracks.any { it.artistId == song.artistId } }
         .groupBy { it.albumId }.values.map { album -> val first = album.first()
             CatalogAlbum(first.albumId, first.album, first.artwork, first.artistId, first.artist, count = album.size) }
@@ -145,51 +316,193 @@ internal fun CatalogDetailPage(model: AuraViewModel, padding: PaddingValues, col
     LazyColumn(pageContentModifier(), contentPadding = PaddingValues(bottom = padding.calculateBottomPadding()),
         verticalArrangement = Arrangement.spacedBy(0.dp)) {
         if (artist) item("hero") {
-            val base = Color(palette.a2.tone(if (dark) 16 else 90))
             val heroHeight = (LocalAuraLayout.current.width.dp / .95f).coerceIn(360.dp, 500.dp) * ArtistHeroHeightScale
-            Box(Modifier.fillMaxWidth().height(heroHeight).background(base)) {
+            Box(Modifier.fillMaxWidth().height(heroHeight)) {
                 val heroBackdrop = rememberMiuixLayerBackdrop { drawContent() }
-                Box(Modifier.matchParentSize().miuixLayerBackdrop(heroBackdrop)) {
-                    if (collection.artwork.isNotBlank()) AsyncImage(collection.artwork, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                }
-                // Keep the image sharp through the upper part of the hero. The MIUIX
-                // progressive effect is allowed to render at full resolution, then an
-                // explicit bottom mask controls the transition over a predictable range.
-                Box(Modifier.matchParentSize()
-                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                    .progressiveTextureBlur(
-                        backdrop = heroBackdrop,
-                        shape = RectangleShape,
-                        blurRadius = 3.6f,
-                        gradient = ProgressiveBlur.Bottom,
-                    ).drawWithContent {
-                        drawContent()
-                        drawRect(
-                            Brush.verticalGradient(
-                                0f to Color.Transparent,
-                                .56f to Color.Transparent,
-                                .94f to Color.White,
-                                1f to Color.White,
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .drawWithContent {
+                            drawContent()
+                            drawRect(
+                                Brush.verticalGradient(
+                                    0f to Color.Black,
+                                    .58f to Color.Black,
+                                    .86f to Color.Black.copy(alpha = .36f),
+                                    1f to Color.Transparent,
+                                ),
+                                blendMode = BlendMode.DstIn,
+                            )
+                        },
+                ) {
+                    Box(Modifier.matchParentSize().miuixLayerBackdrop(heroBackdrop)) {
+                        if (collection.artwork.isNotBlank()) AsyncImage(collection.artwork, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        if (nowPlayingConfig.artistAnimatedCover && !artistMotionVideoPath.isNullOrBlank()) {
+                            AnimatedMotionCoverVideo(
+                                videoPath = artistMotionVideoPath,
+                                playing = true,
+                                visibleAlpha = 1f,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+                    // Keep the upper hero crisp; apply MIUIX bottom progressive blur + NowPlaying gradient mix.
+                    Box(Modifier.matchParentSize()
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .progressiveTextureBlur(
+                            backdrop = heroBackdrop,
+                            shape = RectangleShape,
+                            blurRadius = 3.8f,
+                            gradient = ProgressiveBlur.Bottom,
+                        ).drawWithContent {
+                            drawContent()
+                            drawRect(
+                                Brush.verticalGradient(
+                                    0f to Color.Transparent,
+                                    .52f to Color.Transparent,
+                                    .92f to Color.White,
+                                    1f to Color.White,
+                                ),
+                                blendMode = BlendMode.DstIn,
+                            )
+                        })
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    0f to Color.Transparent,
+                                    .46f to Color.Transparent,
+                                    .72f to tokens.heroMixTint.copy(alpha = .34f),
+                                    .96f to tokens.surface.copy(alpha = .74f),
+                                    1f to tokens.surface.copy(alpha = .92f),
+                                ),
                             ),
-                            blendMode = BlendMode.DstIn,
-                        )
-                    })
-                Box(Modifier.matchParentSize().drawWithContent {
-                    drawContent()
-                    drawRect(Brush.verticalGradient(0f to Color.Transparent, (1f - (1f - .4f) * ArtistHeroTransitionScale) to Color.Transparent, 1f to base,
-                        startY = 0f, endY = size.height))
-                })
+                    )
+                }
                 Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = margin, vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(collection.title, color = Color.White, style = MiuixTheme.textStyles.title2, fontWeight = FontWeight.Bold, maxLines = 2)
+                    val effectiveLogoUrl = if (nowPlayingConfig.artistWordmarkLogo) artistLogoUrl else null
+                    var logoLoaded by remember(effectiveLogoUrl) { mutableStateOf(false) }
+                    var logoFailed by remember(effectiveLogoUrl) { mutableStateOf(false) }
+                    val showLogo = !effectiveLogoUrl.isNullOrBlank() && !logoFailed
+                    Box(contentAlignment = Alignment.Center) {
+                        if (!showLogo || !logoLoaded) {
+                            Text(collection.title, color = foreground, style = MiuixTheme.textStyles.title2, fontWeight = FontWeight.Bold, maxLines = 2)
+                        }
+                        if (showLogo) {
+                            AsyncImage(
+                                model = effectiveLogoUrl,
+                                contentDescription = collection.title,
+                                modifier = Modifier
+                                    .widthIn(max = 280.dp)
+                                    .heightIn(max = 76.dp)
+                                    .alpha(if (logoLoaded) 1f else 0f),
+                                contentScale = ContentScale.Fit,
+                                onSuccess = { logoLoaded = true },
+                                onError = { logoFailed = true },
+                            )
+                        }
+                    }
                     Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                        IconButton({ descriptionOpen = true }, Modifier.size(42.dp).background(Color.White.copy(alpha = .1f), CircleShape)) { Text("i", color = Color.White) }
-                        IconButton({ model.playCollection(tracks, content = cloud) }, Modifier.size(60.dp).background(Color.White, CircleShape), enabled = tracks.isNotEmpty()) {
-                            Image(painterResource(R.drawable.ic_player_play), tr("play", "播放"), Modifier.size(32.dp), colorFilter = ColorFilter.tint(Color(palette.n1.tone(12))))
+                        IconButton({ descriptionOpen = true }, Modifier.size(42.dp).background(heroCardFill, CircleShape)) { Text("i", color = foreground) }
+                        IconButton({ model.playCollection(tracks, content = cloud) }, Modifier.size(60.dp).background(accent, CircleShape), enabled = tracks.isNotEmpty()) {
+                            Image(painterResource(R.drawable.ic_player_play), tr("play", "播放"), Modifier.size(32.dp), colorFilter = ColorFilter.tint(onAccent))
                         }
                         IconButton({ artistFavorite = !artistFavorite; favoritePrefs.edit().putBoolean(collection.key, artistFavorite).apply() },
-                            Modifier.size(42.dp).background(Color.White.copy(alpha = .1f), CircleShape)) {
+                            Modifier.size(42.dp).background(heroCardFill, CircleShape)) {
                             Image(painterResource(if (artistFavorite) R.drawable.ic_player_favorite_on else R.drawable.ic_player_favorite),
-                                tr("favorite_artist", "收藏艺术家"), Modifier.size(24.dp), colorFilter = ColorFilter.tint(Color.White))
+                                tr("favorite_artist", "收藏艺术家"), Modifier.size(24.dp), colorFilter = ColorFilter.tint(foreground))
+                        }
+                    }
+                }
+            }
+        } else if (immersiveAlbum && motionVideoPath != null) item("album_immersive_hero") {
+            val heroHeight = (LocalAuraLayout.current.width.dp * 1.12f).coerceIn(360.dp, 540.dp)
+            Box(Modifier.fillMaxWidth().height(heroHeight)) {
+                val heroBackdrop = rememberMiuixLayerBackdrop { drawContent() }
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .drawWithContent {
+                            drawContent()
+                            drawRect(
+                                Brush.verticalGradient(
+                                    0f to Color.Black,
+                                    .58f to Color.Black,
+                                    .88f to Color.Black.copy(alpha = .32f),
+                                    1f to Color.Transparent,
+                                ),
+                                blendMode = BlendMode.DstIn,
+                            )
+                        },
+                ) {
+                    Box(Modifier.matchParentSize().miuixLayerBackdrop(heroBackdrop)) {
+                        if (collection.artwork.isNotBlank()) AsyncImage(collection.artwork, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        AnimatedMotionCoverVideo(
+                            videoPath = motionVideoPath,
+                            playing = true,
+                            visibleAlpha = 1f,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    Box(Modifier.matchParentSize()
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .progressiveTextureBlur(
+                            backdrop = heroBackdrop,
+                            shape = RectangleShape,
+                            blurRadius = 3.8f,
+                            gradient = ProgressiveBlur.Bottom,
+                        ).drawWithContent {
+                            drawContent()
+                            drawRect(
+                                Brush.verticalGradient(
+                                    0f to Color.Transparent,
+                                    .52f to Color.Transparent,
+                                    .92f to Color.White,
+                                    1f to Color.White,
+                                ),
+                                blendMode = BlendMode.DstIn,
+                            )
+                        })
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    0f to Color.Transparent,
+                                    .46f to Color.Transparent,
+                                    .72f to tokens.heroMixTint.copy(alpha = .36f),
+                                    .96f to tokens.surface.copy(alpha = .76f),
+                                    1f to tokens.surface.copy(alpha = .92f),
+                                ),
+                            ),
+                    )
+                }
+                Row(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = margin, vertical = 18.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text(collection.title, style = MiuixTheme.textStyles.title2, fontWeight = FontWeight.Bold, color = foreground, maxLines = 2)
+                        Text(albumArtist, color = muted,
+                            modifier = Modifier.padding(top = 4.dp).clickable { tracks.firstOrNull()?.let(model::openSongArtist) }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Box(Modifier.size(42.dp).clip(CircleShape).clickable { if (destinationId > 0) open("albumInfo:$destinationId") }
+                        .background(heroCardFill), contentAlignment = Alignment.Center) {
+                        Image(painterResource(R.drawable.ic_album_info), tr("album_details", "专辑详情"), Modifier.size(26.dp),
+                            colorFilter = ColorFilter.tint(foreground))
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Box(Modifier.height(42.dp).clip(RoundedCornerShape(999.dp)).clickable(enabled = tracks.isNotEmpty()) {
+                        model.playCollection(tracks, content = cloud)
+                    }.background(accent).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(painterResource(R.drawable.ic_player_play), tr("play", "播放"), Modifier.size(18.dp),
+                                colorFilter = ColorFilter.tint(onAccent))
+                            Spacer(Modifier.width(5.dp))
+                            Text(tr("play", "播放"), color = onAccent)
                         }
                     }
                 }
@@ -214,9 +527,9 @@ internal fun CatalogDetailPage(model: AuraViewModel, padding: PaddingValues, col
                     }.background(accent).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Image(painterResource(R.drawable.ic_player_play), tr("play", "播放"), Modifier.size(18.dp),
-                                colorFilter = ColorFilter.tint(if (accent.luminance() > .5f) Color.Black else Color.White))
+                                colorFilter = ColorFilter.tint(onAccent))
                             Spacer(Modifier.width(5.dp))
-                            Text(tr("play", "播放"), color = if (accent.luminance() > .5f) Color.Black else Color.White)
+                            Text(tr("play", "播放"), color = onAccent)
                         }
                     }
                 }
@@ -225,7 +538,7 @@ internal fun CatalogDetailPage(model: AuraViewModel, padding: PaddingValues, col
         if (artist && related.isNotEmpty()) item("new_release") {
             val release = related.maxByOrNull { it.published }!!
             Row(Modifier.padding(horizontal = margin, vertical = 8.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp))
-                .background(Color.White.copy(alpha = .09f)).clickable { openAlbum(release) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                .background(heroCardFill).clickable { openAlbum(release) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Artwork(release.artwork, Modifier.size(74.dp), cornerRadius = 20.dp - 12.dp)
                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                     Text(if (release.published > 0) dateText(release.published) else tr("latest_release", "最新发行"), color = muted, fontSize = 11.sp)
@@ -239,19 +552,55 @@ internal fun CatalogDetailPage(model: AuraViewModel, padding: PaddingValues, col
             CatalogSectionLink(tr("top_songs", "热门歌曲"), margin, foreground) { open("artistSongs:$destinationId") }
             val popular = tracks.take(15)
             val columnCount = if (popular.size < 5) minOf(1, popular.size) else 3
-            val cardWidth = ((configuration.screenWidthDp.dp - margin * 2 - 24.dp) / 3).coerceAtLeast(124.dp) * 1.8f
             val rowHeight = 48.dp * 1.35f * .92f * .93f
-            LazyRow(contentPadding = PaddingValues(horizontal = margin), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(columnCount) { column ->
-                    Column(Modifier.width(cardWidth), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (index in column until popular.size step columnCount) {
-                            val song = popular[index]
-                            Row(Modifier.fillMaxWidth().height(rowHeight).clickable {
-                                model.playCollection(tracks, index, cloud)
-                            }, verticalAlignment = Alignment.CenterVertically) {
-                                Artwork(song.artwork, Modifier.size(40.dp * 1.35f * .88f * .93f), cornerRadius = ListArtworkCornerRadius)
-                                Text(song.title, color = foreground, fontSize = 12.sp * 1.35f, maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(start = 8.dp))
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val cardWidth = artistTopSongCardWidth(maxWidth, margin, columnCount)
+                LazyRow(contentPadding = PaddingValues(horizontal = margin), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(columnCount) { column ->
+                        Column(Modifier.width(cardWidth), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for (index in column until popular.size step columnCount) {
+                                val song = popular[index]
+                                val albumYearSubtitle = formatArtistSongAlbumYear(song)
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = rowHeight)
+                                        .clickable { model.playCollection(tracks, index, cloud) },
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Artwork(song.artwork, Modifier.size(40.dp * 1.35f * .88f * .93f), cornerRadius = ListArtworkCornerRadius)
+                                    Column(Modifier.weight(1f).padding(start = 10.dp, end = 4.dp)) {
+                                        Text(
+                                            song.title,
+                                            color = if (model.current?.key == song.key) accent else foreground,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        if (albumYearSubtitle.isNotEmpty()) {
+                                            Text(
+                                                albumYearSubtitle,
+                                                color = muted,
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.padding(top = 2.dp),
+                                            )
+                                        }
+                                    }
+                                    IconButton(
+                                        onClick = { openSongActions(SongActionRequest(song, songActionsBackdrop)) },
+                                        modifier = Modifier.size(44.dp),
+                                    ) {
+                                        Image(
+                                            AuraMoreHorizontalIcon,
+                                            tr("more", "更多"),
+                                            Modifier.size(20.dp),
+                                            colorFilter = ColorFilter.tint(muted),
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -272,13 +621,13 @@ internal fun CatalogDetailPage(model: AuraViewModel, padding: PaddingValues, col
                     Column(Modifier.weight(1f).padding(start = if (artist) 12.dp else 0.dp)) {
                         Text(song.title, color = if (model.current?.key == song.key) accent else foreground, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                        if (artist) Text(listOf(song.album, song.year.takeIf { it > 0 }?.toString().orEmpty()).filter { it.isNotBlank() }.joinToString(" · "),
+                        if (artist) Text(formatArtistSongAlbumYear(song),
                             color = muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         else if (showTrackArtist) Text(song.artist.trim(), color = foreground.copy(alpha = .56f), fontSize = 11.sp,
                             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 1.dp))
                     }
                     IconButton(onClick = { openSongActions(SongActionRequest(song, songActionsBackdrop)) }, modifier = Modifier.size(44.dp)) {
-                        Image(MiuixIcons.Regular.More, tr("more", "更多"), Modifier.size(20.dp), colorFilter = ColorFilter.tint(muted))
+                        Image(AuraMoreHorizontalIcon, tr("more", "更多"), Modifier.size(20.dp), colorFilter = ColorFilter.tint(muted))
                     }
                 }
             }
