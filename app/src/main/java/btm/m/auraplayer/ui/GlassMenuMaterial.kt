@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -43,6 +44,13 @@ internal fun Modifier.glassMenuSurface(backdrop: Backdrop?, shape: Shape): Modif
     val lensAmount = if (isOne) 4.dp else 28.dp
     val chromatic = !isOne
     val highlightAlpha = .70f
+    val advancedMaterial = LocalAdvancedMaterialEnabled.current && top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported()
+    if (!advancedMaterial) {
+        val solidTint = tint.copy(alpha = 1f)
+        return shadow(10.dp, shape, clip = false, ambientColor = Color.Black.copy(alpha = if (light) .16f else .35f), spotColor = Color.Black.copy(alpha = if (light) .16f else .35f))
+            .clip(shape)
+            .background(solidTint, shape)
+    }
     return if (backdrop == null) background(tint, shape) else drawBackdrop(
         backdrop = backdrop, shape = { shape },
         effects = {

@@ -28,7 +28,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun Modifier.miniPlayerMaterial(backdrop: Backdrop, style: String, shape: Shape, expansion: Float = 0f): Modifier {
     val dark = MiuixTheme.colorScheme.surface.luminance() < .5f
-    if (style == "material" || btm.m.auraplayer.ui.LocalAppUiStyle.current == btm.m.auraplayer.ui.AppUiStyle.MATERIAL) {
+    val chromeStyle = btm.m.auraplayer.ui.resolveBottomBarChromeUiStyle(style)
+    if (chromeStyle == btm.m.auraplayer.ui.AppUiStyle.MATERIAL) {
         val expressive = LocalAuraExpressiveScheme.current ?: rememberAuraExpressiveScheme(DEFAULT_MATERIAL_EXPRESSIVE_SEED, dark)
         val fade = (1f - expansion).coerceIn(0f, 1f)
         val container = expressive.surfaceContainerHigh
@@ -43,7 +44,7 @@ internal fun Modifier.miniPlayerMaterial(backdrop: Backdrop, style: String, shap
             .background(container, shape)
             .border(BorderStroke(1.dp, expressive.outlineVariant.copy(alpha = (if (dark) .32f else .5f) * fade)), shape)
     }
-    if (style == "one" || btm.m.auraplayer.ui.LocalAppUiStyle.current == btm.m.auraplayer.ui.AppUiStyle.ONE) {
+    if (chromeStyle == btm.m.auraplayer.ui.AppUiStyle.ONE) {
         val onePalette = btm.m.auraplayer.ui.rememberActiveOneUiPalette()
         val fade = (1f - expansion).coerceIn(0f, 1f)
         val container = Color(onePalette.card)
@@ -57,6 +58,19 @@ internal fun Modifier.miniPlayerMaterial(backdrop: Backdrop, style: String, shap
             )
             .background(container, shape)
             .border(BorderStroke(0.75.dp, Color(onePalette.divider).copy(alpha = fade)), shape)
+    }
+    if (!btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled.current) {
+        val fade = (1f - expansion).coerceIn(0f, 1f)
+        val solidContainer = if (dark) Color(0xFF242424) else Color(0xFFF5F5F5)
+        return this
+            .shadow(
+                elevation = (6 * fade).dp,
+                shape = shape,
+                clip = false,
+                ambientColor = Color.Black.copy(alpha = .35f * fade),
+                spotColor = Color.Black.copy(alpha = .35f * fade),
+            )
+            .background(solidContainer, shape)
     }
     val material = rememberModuleNavigationMaterial(style)
     val liquid = style == "liquid_glass"

@@ -27,6 +27,8 @@ import btm.m.auraplayer.lyrics.LyricSize
 import btm.m.auraplayer.playback.LyricTheme
 import btm.m.auraplayer.playback.PlayerTheme
 import btm.m.auraplayer.playback.PlayerWeather
+import btm.m.auraplayer.playback.TokyoSceneLandmark
+import btm.m.auraplayer.playback.TokyoSceneTime
 import btm.m.auraplayer.playback.shouldPromptLyricThemePowerNotice
 import btm.m.auraplayer.rear.RearColorMode
 import btm.m.auraplayer.rear.RearLyricSpacing
@@ -58,6 +60,8 @@ fun RearScreenSettingsPage(padding: PaddingValues) {
     var showKeepAwakeDialog by remember { mutableStateOf(false) }
     var pendingLyricTheme by remember { mutableStateOf<LyricTheme?>(null) }
     val lyricThemeItems = lyricThemeLabels()
+    val tokyoSceneTimeItems = tokyoSceneTimeLabels()
+    val tokyoSceneLandmarkItems = tokyoSceneLandmarkLabels()
 
     LaunchedEffect(Unit) {
         privilegeManager.refresh(forceRootProbe = true)
@@ -315,6 +319,38 @@ fun RearScreenSettingsPage(padding: PaddingValues) {
                             } else {
                                 store.update { it.copy(lyricTheme = picked) }
                             }
+                        },
+                    )
+                }
+
+                BlurAnimatedVisibility(
+                    visible = !config.followMainTheme && config.lyricTheme == LyricTheme.TOKYO_CITYSCAPE,
+                    label = "rearScreenTokyoSceneTime",
+                ) {
+                    GlassDropdownPreference(
+                        title = tr("lyric_theme_tokyo_time", "东京景色时段"),
+                        items = tokyoSceneTimeItems,
+                        selectedIndex = TokyoSceneTime.entries.indexOf(config.tokyoSceneTime).coerceAtLeast(0),
+                        enabled = isAuthorized,
+                        backdrop = backdrop,
+                        onSelectedIndexChange = { index ->
+                            store.update { it.copy(tokyoSceneTime = TokyoSceneTime.entries[index]) }
+                        },
+                    )
+                }
+
+                BlurAnimatedVisibility(
+                    visible = !config.followMainTheme && config.lyricTheme == LyricTheme.TOKYO_CITYSCAPE,
+                    label = "rearScreenTokyoSceneLandmark",
+                ) {
+                    GlassDropdownPreference(
+                        title = tr("lyric_theme_tokyo_landmark", "东京景色"),
+                        items = tokyoSceneLandmarkItems,
+                        selectedIndex = TokyoSceneLandmark.entries.indexOf(config.tokyoSceneLandmark).coerceAtLeast(0),
+                        enabled = isAuthorized,
+                        backdrop = backdrop,
+                        onSelectedIndexChange = { index ->
+                            store.update { it.copy(tokyoSceneLandmark = TokyoSceneLandmark.entries[index]) }
                         },
                     )
                 }

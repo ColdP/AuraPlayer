@@ -734,6 +734,7 @@ fun RearPlayerScreen(
                             keepScreenOn = displayMode == RearDisplayMode.LYRICS && rearConfig.keepLyricsAwake,
                             lyricsInteractive = displayMode == RearDisplayMode.LYRICS,
                             lyricTheme = resolvedAppearance.lyricTheme,
+                            tokyoLandmark = resolvedAppearance.tokyoSceneLandmark,
                             ink = ink,
                             onSeek = model::seekTo,
                             modifier = Modifier.fillMaxSize(),
@@ -1006,6 +1007,7 @@ private fun RearEmbeddedLyricView(
     keepScreenOn: Boolean,
     lyricsInteractive: Boolean,
     lyricTheme: btm.m.auraplayer.playback.LyricTheme,
+    tokyoLandmark: btm.m.auraplayer.playback.TokyoSceneLandmark,
     ink: Color,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
@@ -1034,6 +1036,7 @@ private fun RearEmbeddedLyricView(
             }
             view.onSeek = { targetMs -> latestOnSeek(targetMs) }
             view.lyricTheme(lyricTheme)
+            view.tokyoLandmark(tokyoLandmark)
             view.inkColor(ink.toArgb())
             view.submit(
                 lines = lyrics,

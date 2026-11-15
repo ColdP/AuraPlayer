@@ -9,6 +9,8 @@ import btm.m.auraplayer.playback.MaterialPlayerBackground
 import btm.m.auraplayer.playback.NowPlayingConfig
 import btm.m.auraplayer.playback.PlayerTheme
 import btm.m.auraplayer.playback.PlayerWeather
+import btm.m.auraplayer.playback.TokyoSceneLandmark
+import btm.m.auraplayer.playback.TokyoSceneTime
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,12 +44,16 @@ data class RearScreenConfig(
     val showPronunciation: Boolean = false,
     val weather: PlayerWeather = PlayerWeather.NONE,
     val lyricTheme: LyricTheme = LyricTheme.BLUR,
+    val tokyoSceneTime: TokyoSceneTime = TokyoSceneTime.FOLLOW_SYSTEM,
+    val tokyoSceneLandmark: TokyoSceneLandmark = TokyoSceneLandmark.CITY_WALK,
 )
 
 data class RearScreenResolvedAppearance(
     val theme: PlayerTheme,
     val weather: PlayerWeather,
     val lyricTheme: LyricTheme,
+    val tokyoSceneTime: TokyoSceneTime = TokyoSceneTime.FOLLOW_SYSTEM,
+    val tokyoSceneLandmark: TokyoSceneLandmark = TokyoSceneLandmark.CITY_WALK,
     val blur: Int,
     val materialBackground: MaterialPlayerBackground,
     val materialColorMix: Int,
@@ -59,6 +65,8 @@ data class RearScreenResolvedAppearance(
             theme = theme,
             weather = weather,
             lyricTheme = lyricTheme,
+            tokyoSceneTime = tokyoSceneTime,
+            tokyoSceneLandmark = tokyoSceneLandmark,
             blur = blur,
             materialBackground = materialBackground,
             materialColorMix = materialColorMix,
@@ -74,10 +82,14 @@ fun RearScreenConfig.resolveAppearance(main: NowPlayingConfig): RearScreenResolv
     val activeTheme = if (followMainTheme) main.theme else theme
     val activeWeather = if (followMainTheme) main.weather else weather
     val activeLyricTheme = if (followMainTheme) main.lyricTheme else lyricTheme
+    val activeTokyoSceneTime = if (followMainTheme) main.tokyoSceneTime else tokyoSceneTime
+    val activeTokyoSceneLandmark = if (followMainTheme) main.tokyoSceneLandmark else tokyoSceneLandmark
     return RearScreenResolvedAppearance(
         theme = activeTheme,
         weather = activeWeather,
         lyricTheme = activeLyricTheme,
+        tokyoSceneTime = activeTokyoSceneTime,
+        tokyoSceneLandmark = activeTokyoSceneLandmark,
         blur = main.blur,
         materialBackground = main.materialBackground,
         materialColorMix = main.materialColorMix,
@@ -102,6 +114,8 @@ object RearScreenCodec {
         .put("showPronunciation", config.showPronunciation)
         .put("weather", config.weather.name)
         .put("lyricTheme", config.lyricTheme.name)
+        .put("tokyoSceneTime", config.tokyoSceneTime.name)
+        .put("tokyoSceneLandmark", config.tokyoSceneLandmark.name)
         .toString()
 
     fun decode(raw: String?): RearScreenConfig {
@@ -134,6 +148,12 @@ object RearScreenCodec {
             },
             lyricTheme = json.optString("lyricTheme").let { name ->
                 LyricTheme.entries.firstOrNull { it.name == name } ?: defaults.lyricTheme
+            },
+            tokyoSceneTime = json.optString("tokyoSceneTime").let { name ->
+                TokyoSceneTime.entries.firstOrNull { it.name == name } ?: defaults.tokyoSceneTime
+            },
+            tokyoSceneLandmark = json.optString("tokyoSceneLandmark").let { name ->
+                TokyoSceneLandmark.entries.firstOrNull { it.name == name } ?: defaults.tokyoSceneLandmark
             },
         )
     }

@@ -16,8 +16,11 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import btm.m.auraplayer.playback.LyricTheme
+import btm.m.auraplayer.playback.TokyoSceneLandmark
+import btm.m.auraplayer.ui.player.CityWalkBillboardStyle
 import btm.m.auraplayer.ui.player.LyricPvEffect
 import btm.m.auraplayer.ui.player.lyricThemeSpec
+import btm.m.auraplayer.ui.player.resolveCityWalkBillboardStyle
 import kotlinx.coroutines.*
 import kotlin.math.*
 
@@ -138,6 +141,8 @@ class PlayerLyricView(context: Context) : View(context) {
     private var builtHorizontalInsetDp = -1f
     private var lyricTheme: LyricTheme = LyricTheme.BLUR
     private var builtLyricTheme: LyricTheme = LyricTheme.BLUR
+    private var tokyoLandmark: TokyoSceneLandmark = TokyoSceneLandmark.CITY_WALK
+    private var tokyoBillboardStyle: CityWalkBillboardStyle? = null
     private var themeSpec = lyricThemeSpec(LyricTheme.BLUR)
     private var spatialEnabled = false
     private var spatialTiltX = 0f
@@ -232,6 +237,12 @@ class PlayerLyricView(context: Context) : View(context) {
         timestampPaint.typeface = themedTypeface(themeSpec.subWeight, themeSpec.italicSub)
         masks.evictAll()
         rebuild()
+        invalidate()
+    }
+
+    fun tokyoLandmark(landmark: TokyoSceneLandmark) {
+        if (tokyoLandmark == landmark) return
+        tokyoLandmark = landmark
         invalidate()
     }
 
@@ -463,6 +474,9 @@ class PlayerLyricView(context: Context) : View(context) {
         val focusAnchorY = height * .22f
         val timeSec = now / 1000f
         val unit = min(width, height).toFloat().coerceAtLeast(1f) / 360f
+        val isTokyoCityWalk = lyricTheme == LyricTheme.TOKYO_CITYSCAPE
+        val cityWalkStyle = if (isTokyoCityWalk) resolveCityWalkBillboardStyle(tokyoLandmark, timeSec) else null
+        tokyoBillboardStyle = cityWalkStyle
         var hasPrevStar = false
         var prevStarX = 0f
         var prevStarY = 0f
@@ -528,13 +542,39 @@ class PlayerLyricView(context: Context) : View(context) {
             } else {
                 0f
             }
+            val walkStyle = cityWalkStyle
+            val walkSide = if (row.line.opposite || i % 2 == 1) 1f else -1f
+            val walkShuttleX = if (walkStyle != null && pvWeight > 0f) {
+                // Distant upcoming lines emerge along the central corridor; passed lines sweep outward past shoulders.
+                val aheadPull = -walkSide * max(0f, normY) * 26f * d * unfocused
+                val passedSweep = walkSide * max(0f, -normY) * 34f * d * unfocused
+                val gentleSway = sin(walkStyle.strideCadence * 0.5f + i * 0.6f) * 2.2f * d
+                (aheadPull + passedSweep + gentleSway) * pvWeight
+            } else {
+                0f
+            }
+            val walkFootBobY = if (walkStyle != null && pvWeight > 0f) {
+                (abs(sin(walkStyle.strideCadence + i * 0.35f)) - 0.5f) * 3.8f * d * pvWeight * (0.35f + 0.65f * unfocused)
+            } else {
+                0f
+            }
+            val walkZoomScale = if (walkStyle != null && pvWeight > 0f) {
+                val distScale = if (normY > 0f) {
+                    1f - (normY * 0.22f).coerceIn(0f, 0.22f)
+                } else {
+                    1f + (-normY * 0.14f).coerceIn(0f, 0.14f)
+                }
+                1f + (distScale - 1f) * unfocused * pvWeight
+            } else {
+                1f
+            }
             val spatialActive = spatialEnabled && (abs(spatialTiltX) > 0.001f || abs(spatialTiltY) > 0.001f)
             val spatialMix = if (spatialEnabled) (1f - browseAlpha * 0.65f).coerceIn(0f, 1f) else 0f
             val rowDepthZ = emphasis[i] * 1.15f - focusDistance.coerceAtMost(4) * 0.24f
             val spatialRowDx = if (spatialActive) spatialTiltX * 10.5f * d * rowDepthZ * spatialMix else 0f
             val spatialRowDy = if (spatialActive) spatialTiltY * 7.5f * d * rowDepthZ * spatialMix else 0f
-            val baseRowX = horizontalInsetDp * d + staggerX + entryVectorX + swayX + arcX + spatialRowDx
-            val baseRowY = y + buoyancyY + spatialRowDy
+            val baseRowX = horizontalInsetDp * d + staggerX + entryVectorX + swayX + arcX + walkShuttleX + spatialRowDx
+            val baseRowY = y + buoyancyY + walkFootBobY + spatialRowDy
             val contentStartX = if (row.line.opposite) (row.main.width - row.contentWidth).coerceAtLeast(0f) else 0f
             val contentEndX = contentStartX + row.contentWidth
             val localPivotX = if (row.line.opposite) {
@@ -569,16 +609,28 @@ class PlayerLyricView(context: Context) : View(context) {
 
             val rowTiltDeg = if (pvWeight > 0f) pvTiltDegFor(i) * pvWeight else 0f
             val spatialHeroPop = if (spatialEnabled) 1f + 0.03f * emphasis[i] * spatialMix else 1f
-            val rowScale = scales[i] * (1f + (themeSpec.heroScale - 1f) * emphasis[i] * pvWeight) * spatialHeroPop
+            val rowScale = scales[i] * walkZoomScale * (1f + (themeSpec.heroScale - 1f) * emphasis[i] * pvWeight) * spatialHeroPop
             val save = canvas.save()
             canvas.translate(baseRowX, baseRowY)
             canvas.scale(rowScale, rowScale, localPivotX, localPivotY)
             if (abs(rowTiltDeg) > 0.01f) {
                 canvas.rotate(rowTiltDeg, localPivotX, localPivotY)
             }
-            val themeCamX = if (lyricTheme != LyricTheme.BLUR && unfocused > 0.01f) -normY * themeSpec.cameraTiltXDeg * unfocused else 0f
-            val themeCamY = if (lyricTheme != LyricTheme.BLUR && unfocused > 0.01f) themeSpec.cameraTiltYDeg * unfocused * (if (row.line.opposite) -1f else 1f) else 0f
-            val themeCamZ = if (lyricTheme != LyricTheme.BLUR && unfocused > 0.01f) abs(normY) * themeSpec.cameraDepthZ * unfocused * d else 0f
+            val themeCamX: Float
+            val themeCamY: Float
+            val themeCamZ: Float
+            if (walkStyle != null && pvWeight > 0f) {
+                // Architectural billboard tilt hugging left/right street walls, subtly opening toward your gaze when focused.
+                val archFactor = (1f - emphasis[i] * 0.66f) * pvWeight
+                val wallSign = -walkSide // Left wall (+rotationY) faces street center; right wall (-rotationY) faces center.
+                themeCamY = wallSign * walkStyle.wallTiltYDeg * archFactor
+                themeCamX = (-normY * walkStyle.wallTiltXDeg * unfocused + walkStyle.pitchBiasDeg) * pvWeight
+                themeCamZ = (abs(normY) * themeSpec.cameraDepthZ * unfocused - emphasis[i] * 28f * pvWeight) * d
+            } else {
+                themeCamX = if (lyricTheme != LyricTheme.BLUR && unfocused > 0.01f) -normY * themeSpec.cameraTiltXDeg * unfocused else 0f
+                themeCamY = if (lyricTheme != LyricTheme.BLUR && unfocused > 0.01f) themeSpec.cameraTiltYDeg * unfocused * (if (row.line.opposite) -1f else 1f) else 0f
+                themeCamZ = if (lyricTheme != LyricTheme.BLUR && unfocused > 0.01f) abs(normY) * themeSpec.cameraDepthZ * unfocused * d else 0f
+            }
             val spatialCamX = if (spatialActive) -spatialTiltY * 10.5f * spatialMix else 0f
             val spatialCamY = if (spatialActive) spatialTiltX * 13.5f * spatialMix else 0f
             val spatialCamZ = if (spatialActive) (-emphasis[i] * 26f + focusDistance.coerceAtMost(4) * 14f) * d * spatialMix else 0f
@@ -617,7 +669,7 @@ class PlayerLyricView(context: Context) : View(context) {
                     row = row,
                     contentStartX = contentStartX,
                     contentEndX = contentEndX,
-                    emphasis = emphasis[i],
+                    emphasis = if (themeSpec.pvEffect == LyricPvEffect.TOKYO_SKYLINE) max(emphasis[i], 0.24f) else emphasis[i],
                     pvAlpha = pvWeight * alpha,
                     timeSec = timeSec,
                     ms = ms,
@@ -707,7 +759,8 @@ class PlayerLyricView(context: Context) : View(context) {
         }
         canvas.restoreToCount(lyricLayer)
         lastPosition = ms.toLong()
-        if (playing || moving || pending.isNotEmpty()) postInvalidateOnAnimation()
+        val keepCityWalkAlive = lyricTheme == LyricTheme.TOKYO_CITYSCAPE && browseAlpha < 0.95f
+        if (playing || moving || keepCityWalkAlive || pending.isNotEmpty()) postInvalidateOnAnimation()
         else if (browsing && !dragging) postInvalidateDelayed((manualUntil - now + 1).coerceAtLeast(1))
     }
 
@@ -1116,6 +1169,74 @@ class PlayerLyricView(context: Context) : View(context) {
                 pvTextPaint.alpha = (emphasis * pvAlpha * 0.65f * 255).toInt().coerceIn(0, 255)
                 pvTextPaint.textAlign = Paint.Align.RIGHT
                 canvas.drawText(smpte, right, top - 2.5f * unit, pvTextPaint)
+            }
+
+            LyricPvEffect.TOKYO_SKYLINE -> {
+                val style = tokyoBillboardStyle
+                val accentMain = style?.accentArgb ?: themeSpec.accentArgb
+                val accentSec = style?.secondaryAccentArgb ?: themeSpec.secondaryAccentArgb
+                val left = contentStartX - padX * 1.15f
+                val right = contentEndX + padX * 1.15f
+                val top = -padY * 0.72f
+                val bottom = row.height + padY * 0.55f
+                val radius = 5.5f * unit
+                val celShadowShift = 2.8f * unit
+
+                // Crisp cel-shaded signboard drop shadow (deep indigo ink tint)
+                pvRect.set(left + celShadowShift, top + celShadowShift, right + celShadowShift, bottom + celShadowShift)
+                pvPaint.color = 0xFF141C38.toInt()
+                pvPaint.alpha = (emphasis * pvAlpha * 0.52f * 255).toInt().coerceIn(0, 255)
+                canvas.drawRoundRect(pvRect, radius, radius, pvPaint)
+
+                // Clean translucent anime signboard backing inside the 3D tilted plane
+                pvRect.set(left, top, right, bottom)
+                pvPaint.color = 0xFF18223C.toInt()
+                pvPaint.alpha = (emphasis * pvAlpha * 0.64f * 255).toInt().coerceIn(0, 255)
+                canvas.drawRoundRect(pvRect, radius, radius, pvPaint)
+
+                // Crisp diagonal anime glass reflection streak across signboard interior
+                val sheenX = left + (right - left) * 0.16f
+                val sheenW = 10f * unit
+                pvPath.reset()
+                pvPath.moveTo(sheenX, bottom - 2f * unit)
+                pvPath.lineTo(sheenX + sheenW, top + 2f * unit)
+                pvPath.lineTo(sheenX + sheenW + 6f * unit, top + 2f * unit)
+                pvPath.lineTo(sheenX + 6f * unit, bottom - 2f * unit)
+                pvPath.close()
+                pvPaint.color = Color.WHITE
+                pvPaint.alpha = (emphasis * pvAlpha * 0.10f * 255).toInt().coerceIn(0, 255)
+                canvas.drawPath(pvPath, pvPaint)
+
+                // Outer anime dark-indigo contour outline + inner warm/cool rim-light bevel
+                pvStrokePaint.color = 0xFF151C36.toInt()
+                pvStrokePaint.strokeWidth = max(1.2f, 1.85f * unit)
+                pvStrokePaint.alpha = (emphasis * pvAlpha * 0.90f * 255).toInt().coerceIn(0, 255)
+                canvas.drawRoundRect(pvRect, radius, radius, pvStrokePaint)
+
+                pvStrokePaint.color = accentMain
+                pvStrokePaint.strokeWidth = max(0.95f, 1.25f * unit)
+                pvStrokePaint.alpha = (emphasis * pvAlpha * 0.80f * 255).toInt().coerceIn(0, 255)
+                pvRect.set(left + 1.2f * unit, top + 1.2f * unit, right - 1.2f * unit, bottom - 1.2f * unit)
+                canvas.drawRoundRect(pvRect, max(2f, radius - unit), max(2f, radius - unit), pvStrokePaint)
+
+                pvStrokePaint.color = accentSec
+                pvStrokePaint.strokeWidth = max(1.1f, 1.65f * unit)
+                pvStrokePaint.alpha = (emphasis * pvAlpha * 0.90f * 255).toInt().coerceIn(0, 255)
+                val barSpan = min((right - left) * 0.34f, 42f * unit)
+                canvas.drawLine(left + radius, top, left + radius + barSpan, top, pvStrokePaint)
+                canvas.drawLine(right - radius - barSpan, bottom, right - radius, bottom, pvStrokePaint)
+
+                // Crisp anime district badge plaque tag above focused lines
+                if (style != null && emphasis > 0.38f) {
+                    pvTextPaint.set(row.underPaint)
+                    pvTextPaint.clearShadowLayer()
+                    pvTextPaint.textSize = max(6.8f * unit, 8.0f * d)
+                    pvTextPaint.color = accentSec
+                    pvTextPaint.alpha = ((emphasis - 0.35f) * pvAlpha * 0.94f * 255).toInt().coerceIn(0, 255)
+                    pvTextPaint.textAlign = if (row.line.opposite) Paint.Align.RIGHT else Paint.Align.LEFT
+                    val tagX = if (row.line.opposite) right - 6f * unit else left + 6f * unit
+                    canvas.drawText(style.districtTag, tagX, top - 2.6f * unit, pvTextPaint)
+                }
             }
         }
     }

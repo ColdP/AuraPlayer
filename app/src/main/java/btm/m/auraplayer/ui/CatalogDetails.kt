@@ -254,6 +254,10 @@ internal fun CatalogBackground(
 internal fun AlbumInfoBackground(collection: MusicCollection, modifier: Modifier = Modifier) {
     val palette = rememberPlayerMonetPalette(collection.artwork)
     val base = Color(palette.a2.tone(14))
+    if (!LocalAdvancedMaterialEnabled.current) {
+        Box(modifier.background(base))
+        return
+    }
     Box(modifier.clipToBounds().background(base)) {
         if (collection.artwork.isNotBlank()) AsyncImage(
             model = collection.artwork,
@@ -348,25 +352,27 @@ internal fun CatalogDetailPage(
                         }
                     }
                     // Keep the upper hero crisp; apply MIUIX bottom progressive blur + NowPlaying gradient mix.
-                    Box(Modifier.matchParentSize()
-                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                        .progressiveTextureBlur(
-                            backdrop = heroBackdrop,
-                            shape = RectangleShape,
-                            blurRadius = 3.8f,
-                            gradient = ProgressiveBlur.Bottom,
-                        ).drawWithContent {
-                            drawContent()
-                            drawRect(
-                                Brush.verticalGradient(
-                                    0f to Color.Transparent,
-                                    .52f to Color.Transparent,
-                                    .92f to Color.White,
-                                    1f to Color.White,
-                                ),
-                                blendMode = BlendMode.DstIn,
-                            )
-                        })
+                    if (LocalAdvancedMaterialEnabled.current) {
+                        Box(Modifier.matchParentSize()
+                            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                            .progressiveTextureBlur(
+                                backdrop = heroBackdrop,
+                                shape = RectangleShape,
+                                blurRadius = 3.8f,
+                                gradient = ProgressiveBlur.Bottom,
+                            ).drawWithContent {
+                                drawContent()
+                                drawRect(
+                                    Brush.verticalGradient(
+                                        0f to Color.Transparent,
+                                        .52f to Color.Transparent,
+                                        .92f to Color.White,
+                                        1f to Color.White,
+                                    ),
+                                    blendMode = BlendMode.DstIn,
+                                )
+                            })
+                    }
                     Box(
                         Modifier
                             .matchParentSize()
@@ -447,25 +453,27 @@ internal fun CatalogDetailPage(
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
-                    Box(Modifier.matchParentSize()
-                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                        .progressiveTextureBlur(
-                            backdrop = heroBackdrop,
-                            shape = RectangleShape,
-                            blurRadius = 3.8f,
-                            gradient = ProgressiveBlur.Bottom,
-                        ).drawWithContent {
-                            drawContent()
-                            drawRect(
-                                Brush.verticalGradient(
-                                    0f to Color.Transparent,
-                                    .52f to Color.Transparent,
-                                    .92f to Color.White,
-                                    1f to Color.White,
-                                ),
-                                blendMode = BlendMode.DstIn,
-                            )
-                        })
+                    if (LocalAdvancedMaterialEnabled.current) {
+                        Box(Modifier.matchParentSize()
+                            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                            .progressiveTextureBlur(
+                                backdrop = heroBackdrop,
+                                shape = RectangleShape,
+                                blurRadius = 3.8f,
+                                gradient = ProgressiveBlur.Bottom,
+                            ).drawWithContent {
+                                drawContent()
+                                drawRect(
+                                    Brush.verticalGradient(
+                                        0f to Color.Transparent,
+                                        .52f to Color.Transparent,
+                                        .92f to Color.White,
+                                        1f to Color.White,
+                                    ),
+                                    blendMode = BlendMode.DstIn,
+                                )
+                            })
+                    }
                     Box(
                         Modifier
                             .matchParentSize()

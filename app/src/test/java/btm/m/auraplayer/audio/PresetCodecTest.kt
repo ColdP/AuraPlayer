@@ -72,4 +72,11 @@ class PresetCodecTest {
         val customPng = generateSoundPresetFileName(extension = "png", randomDigits = 42)
         assertTrue(Regex("^AuraSoundPreset_\\d{14}_0042\\.png$").matches(customPng))
     }
+
+    @Test fun effectsStateCodecDefaultsAndRoundTripsNativePreviousBehavior() {
+        val defaults = EffectsStateCodec.decode("{}")
+        assertTrue(defaults.nativePreviousBehavior)
+        val disabled = defaults.copy(nativePreviousBehavior = false)
+        assertFalse(EffectsStateCodec.decode(EffectsStateCodec.encode(disabled)).nativePreviousBehavior)
+    }
 }

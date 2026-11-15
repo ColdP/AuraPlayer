@@ -229,18 +229,22 @@ internal fun HomeSearchOverlay(
             }
         }
         // Unmasked cards remain available to the field and progressive header material.
-        Box(Modifier.fillMaxWidth().height(fieldTop + 112.dp + filtersHeight)
-            .graphicsLayer { alpha = contentAlpha }
-            .drawPlainBackdrop(
-                backdrop = foregroundBackdrop, shape = { RectangleShape },
-                effects = {
-                    blur(3.6.dp.toPx())
-                    runtimeShaderEffect("search-header-fade", SearchHeaderFadeShader, "content") {
-                        setFloatUniform("height", size.height)
-                        setFloatUniform("fadeHeight", 104.dp.toPx())
-                    }
-                },
-            ))
+        if (LocalAdvancedMaterialEnabled.current) {
+            Box(
+                Modifier.fillMaxWidth().height(fieldTop + 112.dp + filtersHeight)
+                    .graphicsLayer { alpha = contentAlpha }
+                    .drawPlainBackdrop(
+                        backdrop = foregroundBackdrop, shape = { RectangleShape },
+                        effects = {
+                            blur(3.6.dp.toPx())
+                            runtimeShaderEffect("search-header-fade", SearchHeaderFadeShader, "content") {
+                                setFloatUniform("height", size.height)
+                                setFloatUniform("fadeHeight", 104.dp.toPx())
+                            }
+                        },
+                    ),
+            )
+        }
         Text(searchTitle,
             modifier = Modifier.offset(y = topInset + 12.dp).fillMaxWidth().height(40.dp)
                 .searchContentMotion(contentAlpha).wrapContentSize(Alignment.Center),
@@ -357,8 +361,8 @@ internal fun SearchRoundButton(
     motionBlur: Dp = 0.dp,
     onClick: () -> Unit,
 ) {
-    val useOneSurface = navigationStyle == "one" || LocalAppUiStyle.current == AppUiStyle.ONE
-    if (iconRes == null && useOneSurface) {
+    val chromeStyle = resolveBottomBarChromeUiStyle(navigationStyle)
+    if (iconRes == null && chromeStyle == AppUiStyle.ONE) {
         OneUiSearchButton(
             size = size,
             primary = primary,
@@ -371,8 +375,7 @@ internal fun SearchRoundButton(
         )
         return
     }
-    val useMaterialSurface = navigationStyle == "material" || LocalAppUiStyle.current == AppUiStyle.MATERIAL
-    if (iconRes == null && useMaterialSurface) {
+    if (iconRes == null && chromeStyle == AppUiStyle.MATERIAL) {
         MaterialExpressiveSearchButton(
             size = size,
             primary = primary,
@@ -410,18 +413,20 @@ internal fun SearchRoundButton(
     val liquid = navigationStyle == "liquid_glass"
     val harmony = navigationStyle == "harmony_os_floating"
     val floating = harmony || navigationStyle == "hyper_os_floating"
-    val useEffects = isRuntimeShaderSupported()
+    val advancedMaterial = LocalAdvancedMaterialEnabled.current
+    val useEffects = advancedMaterial && isRuntimeShaderSupported()
     // Match CustomNavigation's container, including the material preference multipliers.
     // Search fields/cards deliberately keep their own searchGlass recipe.
     val baseTint = when {
-        primary -> MiuixTheme.colorScheme.primary.copy(alpha = .42f)
+        primary -> MiuixTheme.colorScheme.primary.copy(alpha = if (useEffects) .42f else 1f)
+        !advancedMaterial -> if (dark) Color(0xFF242424) else Color(0xFFF5F5F5)
         liquid -> (if (dark) Color(0xFF121212) else Color(0xFFFAFAFA)).copy(alpha = .4f)
         !useEffects -> (if (dark) Color(0xFF242424) else Color(0xFFF5F5F5))
             .copy(alpha = if (dark) .88f else .82f)
         else -> (if (dark) Color.Black else Color(0xFFF5F5F5))
             .copy(alpha = if (harmony) { if (dark) .36f else .48f } else { if (dark) .30f else .42f })
     }
-    val tint = baseTint.copy(alpha = material.alpha(baseTint.alpha))
+    val tint = if (advancedMaterial) baseTint.copy(alpha = material.alpha(baseTint.alpha)) else baseTint
     val surface = if (useEffects) Modifier.drawBackdrop(
         backdrop = backdrop, shape = { CircleShape },
         effects = {
@@ -477,6 +482,7 @@ internal fun SearchRoundButton(
     }
 }
 
+@Composable
 private fun Modifier.searchGlass(
     backdrop: Backdrop,
     shape: Shape,
@@ -490,6 +496,10 @@ private fun Modifier.searchGlass(
         val tone = if (dark) Color(0xFF282430) else Color(0xFFECE6F0)
         return shadow(6.dp, shape, clip = false, ambientColor = Color.Black.copy(alpha = if (dark) .4f else .15f), spotColor = Color.Black.copy(alpha = if (dark) .4f else .15f))
             .background(tone, shape)
+    }
+    if (!LocalAdvancedMaterialEnabled.current) {
+        val solidTone = if (dark) Color(0xFF242424) else Color(0xFFF5F5F5)
+        return background(solidTone, shape)
     }
     val spec = resolveFloatingGlassMaterialSpec(navigationStyle, material, dark, colorStyle)
     val tint = surfaceColor.copy(alpha = spec.surfaceAlpha)

@@ -195,3 +195,18 @@ internal fun rememberSpatialGyroTilt(enabled: Boolean): State<Offset> {
 
     return tiltState
 }
+
+/**
+ * Scales normalized [-1f, 1f] gyroscope tilt by user sensitivity so subtle tilts feel
+ * livelier at higher settings while peak deflection remains smoothly bounded.
+ */
+internal fun scaleSpatialParallaxTilt(tilt: Offset, sensitivity: Float): Offset {
+    if (tilt == Offset.Zero) return Offset.Zero
+    val gain = sensitivity.takeIf { it.isFinite() }?.coerceIn(0.2f, 2.5f) ?: 1.0f
+    if (gain == 1.0f) return tilt
+    val maxReach = (0.72f + 0.34f * gain).coerceIn(0.2f, 1.55f)
+    return Offset(
+        x = tanh((tilt.x * gain / maxReach).toDouble()).toFloat() * maxReach,
+        y = tanh((tilt.y * gain / maxReach).toDouble()).toFloat() * maxReach,
+    )
+}

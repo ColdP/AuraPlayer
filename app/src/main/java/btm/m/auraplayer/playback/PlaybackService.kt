@@ -113,11 +113,22 @@ class PlaybackService : MediaSessionService() {
         }
         serviceScope.launch {
             val prefs = PlaybackPreferences(this@PlaybackService)
+            var lastSavedPosition = -1L
+            var elapsedTicks = 0
             while (true) {
                 val deadline = prefs.sleepDeadline
                 if (deadline > 0 && android.os.SystemClock.elapsedRealtime() >= deadline) {
                     prefs.sleepDeadline = 0L
                     transport.pause()
+                }
+                elapsedTicks++
+                if (elapsedTicks >= 4 && player.isPlaying) {
+                    elapsedTicks = 0
+                    val pos = player.currentPosition.coerceAtLeast(0L)
+                    if (kotlin.math.abs(pos - lastSavedPosition) >= 1500L) {
+                        lastSavedPosition = pos
+                        state.edit().putLong("position", pos).apply()
+                    }
                 }
                 kotlinx.coroutines.delay(500)
             }
@@ -171,7 +182,8 @@ class PlaybackService : MediaSessionService() {
         val position = state.getLong("position", 0L).coerceAtLeast(0L)
         player.setMediaItems(items, index, position)
         player.prepare()
-        player.playWhenReady = state.getBoolean("playing", false)
+        // Never resume auto-play on cold relaunch after exiting while playing; keep restored track and progress.
+        player.playWhenReady = false
     }
 
     private fun saveState(player: androidx.media3.common.Player) {

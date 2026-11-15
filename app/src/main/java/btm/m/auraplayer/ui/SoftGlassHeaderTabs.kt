@@ -110,7 +110,8 @@ internal fun SoftGlassHeaderTabs(
     )
     val surfaceTint by animateColorAsState(colors.surfaceTint, tween(320, easing = FastOutSlowInEasing), label = "tabsSurfaceTint")
     val shape = remember { Capsule() }
-    val glass = if (backdrop != null && isRuntimeShaderSupported()) Modifier.drawBackdrop(
+    val advancedMaterial = LocalAdvancedMaterialEnabled.current
+    val glass = if (advancedMaterial && backdrop != null && isRuntimeShaderSupported()) Modifier.drawBackdrop(
         backdrop = backdrop,
         shape = { shape },
         effects = {
@@ -130,7 +131,7 @@ internal fun SoftGlassHeaderTabs(
         },
         highlight = { Highlight.Default.copy(alpha = glassSpec?.highlightAlpha ?: .62f) },
         onDrawSurface = { drawRect(surfaceTint.copy(alpha = glassSpec?.surfaceAlpha ?: .6f)) },
-    ) else Modifier.background(surfaceTint, shape)
+    ) else Modifier.background(if (!advancedMaterial) surfaceTint.copy(alpha = 1f) else surfaceTint, shape)
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val tabsWidth = ((maxWidth - LocalAuraLayout.current.pageMargin * 2).coerceAtLeast(0.dp) * widthScale).coerceAtMost(maxWidth) * finalWidthScale
         BoxWithConstraints(Modifier.align(Alignment.Center).width(tabsWidth).padding(vertical = 8.dp)) {

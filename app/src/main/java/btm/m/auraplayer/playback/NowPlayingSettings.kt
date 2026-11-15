@@ -4,12 +4,14 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
 enum class PlayerTheme { AURORA, AURORA_BLUR, BLUR, COLOR, FULLSCREEN, MATERIAL, ONE }
 enum class GlowProgressStyle { OFF, HYPER, ONE }
 enum class MaterialPlayerBackground { MATERIAL, BLUR, AURORA, AURORA_BLUR }
 enum class PlayerWeather { NONE, SNOW, RAIN }
 enum class CoverAnimation { DEFAULT, CARD, BLUR, COVER, PAGE, STACK, VERTICAL_FLIP, HORIZONTAL_FLIP }
+enum class CoverTheme { SQUARE, COVERFLOW, TILED }
 enum class LyricTheme {
     BLUR,
     DEEP_STAR_SEA,
@@ -22,6 +24,34 @@ enum class LyricTheme {
     LIME_SODA,
     MONET_GARDEN,
     FADED_FILM,
+    TOKYO_CITYSCAPE,
+}
+
+enum class TokyoSceneTime {
+    FOLLOW_SYSTEM,
+    DAWN,
+    MORNING,
+    NOON,
+    DUSK,
+    NIGHT,
+}
+
+enum class TokyoSceneLandmark {
+    CITY_WALK,
+    SHIBUYA_CROSSING,
+    TOKYO_TOWER,
+    SHINJUKU_NEON,
+    ASAKUSA_LANTERN,
+    ODAIBA_BAY,
+}
+
+internal const val PARALLAX_SENSITIVITY_MIN = 0.2f
+internal const val PARALLAX_SENSITIVITY_MAX = 2.5f
+internal const val PARALLAX_SENSITIVITY_DEFAULT = 1.0f
+
+internal fun clampParallaxSensitivity(value: Float): Float {
+    if (!value.isFinite()) return PARALLAX_SENSITIVITY_DEFAULT
+    return ((value.coerceIn(PARALLAX_SENSITIVITY_MIN, PARALLAX_SENSITIVITY_MAX) * 10f).roundToInt() / 10f)
 }
 
 internal fun shouldPromptLyricThemePowerNotice(
@@ -50,6 +80,13 @@ data class NowPlayingConfig(
     val appleMusicArtistArtwork: Boolean = false,
     val artistAnimatedCover: Boolean = false,
     val artistWordmarkLogo: Boolean = true,
+    val coverTheme: CoverTheme = CoverTheme.SQUARE,
+    val tiledSwitchDwellSeconds: Float = 2.0f,
+    val coverflowParallax: Boolean = false,
+    val coverflowParallaxSensitivity: Float = PARALLAX_SENSITIVITY_DEFAULT,
+    val tiledParallax: Boolean = false,
+    val tiledParallaxSensitivity: Float = PARALLAX_SENSITIVITY_DEFAULT,
+    val landscapeAutoCoverflow: Boolean = false,
     val showVolume: Boolean = true,
     val openFromNotification: Boolean = true,
     val keepLyricsAwake: Boolean = false,
@@ -62,10 +99,14 @@ data class NowPlayingConfig(
     val materialColorMix: Int = 50,
     val glowProgress: GlowProgressStyle = GlowProgressStyle.OFF,
     val lyricTheme: LyricTheme = LyricTheme.BLUR,
+    val tokyoSceneTime: TokyoSceneTime = TokyoSceneTime.FOLLOW_SYSTEM,
+    val tokyoSceneLandmark: TokyoSceneLandmark = TokyoSceneLandmark.CITY_WALK,
     val lyricThemePowerNoticeDismissed: Boolean = false,
     val spatialLyrics: Boolean = false,
+    val spatialLyricsSensitivity: Float = PARALLAX_SENSITIVITY_DEFAULT,
     val spatialLyricsPowerNoticeDismissed: Boolean = false,
     val spatialCover: Boolean = false,
+    val spatialCoverSensitivity: Float = PARALLAX_SENSITIVITY_DEFAULT,
     val spatialCoverPowerNoticeDismissed: Boolean = false,
     val spatialCoverDepthModel: String = "depth_anything_v2_small",
     val spatialCoverMattingModel: String = "matting_u2netp",
@@ -96,6 +137,11 @@ class NowPlayingSettings(context: Context) {
                 blur = it.blur.coerceIn(-64, 96),
                 immersiveSeconds = it.immersiveSeconds.coerceIn(0, 30),
                 materialColorMix = it.materialColorMix.coerceIn(0, 100),
+                tiledSwitchDwellSeconds = ((it.tiledSwitchDwellSeconds.coerceIn(0.1f, 5.0f) * 10f).roundToInt() / 10f),
+                coverflowParallaxSensitivity = clampParallaxSensitivity(it.coverflowParallaxSensitivity),
+                tiledParallaxSensitivity = clampParallaxSensitivity(it.tiledParallaxSensitivity),
+                spatialLyricsSensitivity = clampParallaxSensitivity(it.spatialLyricsSensitivity),
+                spatialCoverSensitivity = clampParallaxSensitivity(it.spatialCoverSensitivity),
             )
         }
         mutable.value = next
@@ -113,10 +159,14 @@ internal object NowPlayingCodec {
         put("fullscreenGlass", c.fullscreenGlass); put("materialBackground", c.materialBackground.name)
         put("materialColorMix", c.materialColorMix); put("glowProgress", c.glowProgress.name)
         put("lyricTheme", c.lyricTheme.name)
+        put("tokyoSceneTime", c.tokyoSceneTime.name)
+        put("tokyoSceneLandmark", c.tokyoSceneLandmark.name)
         put("lyricThemePowerNoticeDismissed", c.lyricThemePowerNoticeDismissed)
         put("spatialLyrics", c.spatialLyrics)
+        put("spatialLyricsSensitivity", c.spatialLyricsSensitivity.toDouble())
         put("spatialLyricsPowerNoticeDismissed", c.spatialLyricsPowerNoticeDismissed)
         put("spatialCover", c.spatialCover)
+        put("spatialCoverSensitivity", c.spatialCoverSensitivity.toDouble())
         put("spatialCoverPowerNoticeDismissed", c.spatialCoverPowerNoticeDismissed)
         put("spatialCoverDepthModel", c.spatialCoverDepthModel)
         put("spatialCoverMattingModel", c.spatialCoverMattingModel)
@@ -126,6 +176,13 @@ internal object NowPlayingCodec {
         put("appleMusicArtistArtwork", c.appleMusicArtistArtwork)
         put("artistAnimatedCover", c.artistAnimatedCover)
         put("artistWordmarkLogo", c.artistWordmarkLogo)
+        put("coverTheme", c.coverTheme.name)
+        put("tiledSwitchDwellSeconds", c.tiledSwitchDwellSeconds.toDouble())
+        put("coverflowParallax", c.coverflowParallax)
+        put("coverflowParallaxSensitivity", c.coverflowParallaxSensitivity.toDouble())
+        put("tiledParallax", c.tiledParallax)
+        put("tiledParallaxSensitivity", c.tiledParallaxSensitivity.toDouble())
+        put("landscapeAutoCoverflow", c.landscapeAutoCoverflow)
     }.toString()
     fun decode(raw: String): NowPlayingConfig = runCatching {
         val j = JSONObject(raw); val defaults = NowPlayingConfig()
@@ -147,10 +204,20 @@ internal object NowPlayingCodec {
             materialColorMix = j.optInt("materialColorMix", defaults.materialColorMix).coerceIn(0, 100),
             glowProgress = GlowProgressStyle.entries.firstOrNull { it.name == j.optString("glowProgress") } ?: defaults.glowProgress,
             lyricTheme = LyricTheme.entries.firstOrNull { it.name == j.optString("lyricTheme") } ?: defaults.lyricTheme,
+            tokyoSceneTime = TokyoSceneTime.entries.firstOrNull { it.name == j.optString("tokyoSceneTime") } ?: defaults.tokyoSceneTime,
+            tokyoSceneLandmark = TokyoSceneLandmark.entries.firstOrNull { it.name == j.optString("tokyoSceneLandmark") } ?: defaults.tokyoSceneLandmark,
             lyricThemePowerNoticeDismissed = j.optBoolean("lyricThemePowerNoticeDismissed", defaults.lyricThemePowerNoticeDismissed),
             spatialLyrics = j.optBoolean("spatialLyrics", defaults.spatialLyrics),
+            spatialLyricsSensitivity = j.optDouble(
+                "spatialLyricsSensitivity",
+                defaults.spatialLyricsSensitivity.toDouble(),
+            ).toFloat().let(::clampParallaxSensitivity),
             spatialLyricsPowerNoticeDismissed = j.optBoolean("spatialLyricsPowerNoticeDismissed", defaults.spatialLyricsPowerNoticeDismissed),
             spatialCover = j.optBoolean("spatialCover", defaults.spatialCover),
+            spatialCoverSensitivity = j.optDouble(
+                "spatialCoverSensitivity",
+                defaults.spatialCoverSensitivity.toDouble(),
+            ).toFloat().let(::clampParallaxSensitivity),
             spatialCoverPowerNoticeDismissed = j.optBoolean("spatialCoverPowerNoticeDismissed", defaults.spatialCoverPowerNoticeDismissed),
             spatialCoverDepthModel = j.optString("spatialCoverDepthModel", defaults.spatialCoverDepthModel).ifBlank { defaults.spatialCoverDepthModel },
             spatialCoverMattingModel = j.optString("spatialCoverMattingModel", defaults.spatialCoverMattingModel).ifBlank { defaults.spatialCoverMattingModel },
@@ -160,6 +227,19 @@ internal object NowPlayingCodec {
             appleMusicArtistArtwork = j.optBoolean("appleMusicArtistArtwork", defaults.appleMusicArtistArtwork),
             artistAnimatedCover = j.optBoolean("artistAnimatedCover", defaults.artistAnimatedCover),
             artistWordmarkLogo = j.optBoolean("artistWordmarkLogo", defaults.artistWordmarkLogo),
+            coverTheme = CoverTheme.entries.firstOrNull { it.name == j.optString("coverTheme") } ?: defaults.coverTheme,
+            tiledSwitchDwellSeconds = ((j.optDouble("tiledSwitchDwellSeconds", defaults.tiledSwitchDwellSeconds.toDouble()).toFloat().coerceIn(0.1f, 5.0f) * 10f).roundToInt() / 10f),
+            coverflowParallax = j.optBoolean("coverflowParallax", defaults.coverflowParallax),
+            coverflowParallaxSensitivity = j.optDouble(
+                "coverflowParallaxSensitivity",
+                defaults.coverflowParallaxSensitivity.toDouble(),
+            ).toFloat().let(::clampParallaxSensitivity),
+            tiledParallax = j.optBoolean("tiledParallax", defaults.tiledParallax),
+            tiledParallaxSensitivity = j.optDouble(
+                "tiledParallaxSensitivity",
+                defaults.tiledParallaxSensitivity.toDouble(),
+            ).toFloat().let(::clampParallaxSensitivity),
+            landscapeAutoCoverflow = j.optBoolean("landscapeAutoCoverflow", defaults.landscapeAutoCoverflow),
         )
     }.getOrDefault(NowPlayingConfig())
 }

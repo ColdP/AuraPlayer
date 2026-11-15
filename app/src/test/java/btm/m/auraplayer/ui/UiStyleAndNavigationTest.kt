@@ -57,4 +57,60 @@ class UiStyleAndNavigationTest {
         assertEquals(2, OneUiWidgets.stepFor(20))
         assertEquals(5, OneUiWidgets.stepFor(100))
     }
+
+    @Test
+    fun disableAdvancedMaterialDefaultsToFalse() {
+        val defaults = Appearance()
+        assertFalse(defaults.disableAdvancedMaterial)
+        assertTrue(defaults.copy(disableAdvancedMaterial = true).disableAdvancedMaterial)
+    }
+
+    @Test
+    fun bottomChromeFollowsNavigationStyleRegardlessOfUiStyle() {
+        assertEquals(AppUiStyle.HYPER, resolveBottomBarChromeUiStyle("hyper_os_floating"))
+        assertEquals(AppUiStyle.HYPER, resolveBottomBarChromeUiStyle("harmony_os_floating"))
+        assertEquals(AppUiStyle.HYPER, resolveBottomBarChromeUiStyle("liquid_glass"))
+        assertEquals(AppUiStyle.MATERIAL, resolveBottomBarChromeUiStyle("material"))
+        assertEquals(AppUiStyle.ONE, resolveBottomBarChromeUiStyle("one"))
+    }
+
+    @Test
+    fun materialTabCentersIconWhenUnselectedAndAlignsVerticallyWhenSelected() {
+        assertEquals(11f * 1.08f, MATERIAL_NAV_SELECTED_LABEL_SP, 0.0001f)
+
+        val unselected = computeMaterialTabPlacement(
+            slotWidth = 120,
+            slotHeight = 60,
+            iconWidth = 24,
+            iconHeight = 24,
+            labelWidth = 36,
+            labelHeight = 14,
+            gapPx = 4,
+            slideOffsetPx = 8f,
+            spatialReveal = 0f,
+        )
+        assertEquals((120 - 24) / 2, unselected.iconX)
+        assertEquals((60 - 24) / 2, unselected.iconY)
+
+        val selected = computeMaterialTabPlacement(
+            slotWidth = 120,
+            slotHeight = 60,
+            iconWidth = 24,
+            iconHeight = 24,
+            labelWidth = 36,
+            labelHeight = 14,
+            gapPx = 4,
+            slideOffsetPx = 8f,
+            spatialReveal = 1f,
+        )
+        assertEquals((120 - (24 + 4 + 36)) / 2, selected.iconX)
+        assertEquals(selected.iconX + 24 + 4, selected.labelX)
+        assertEquals(60 / 2f, selected.iconY + 24 / 2f, 0.5f)
+        assertEquals(60 / 2f, selected.labelY + 14 / 2f, 0.5f)
+    }
+
+    @Test
+    fun solidTopBarHeightFactorIs12PercentShorterThanProgressiveFactor() {
+        assertEquals(PROGRESSIVE_TOP_BAR_HEIGHT_FACTOR * 0.88f, SOLID_TOP_BAR_HEIGHT_FACTOR, 0.0001f)
+    }
 }

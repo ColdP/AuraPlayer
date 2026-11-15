@@ -25,6 +25,7 @@ data class Appearance(
     val durationFilter: Boolean = false,
     val minimumSeconds: Int = 0,
     val blacklist: Set<String> = emptySet(),
+    val disableAdvancedMaterial: Boolean = false,
 )
 
 class AuraSettings(context: Context) {
@@ -47,6 +48,7 @@ class AuraSettings(context: Context) {
         durationFilter = prefs.getBoolean("durationFilter", false),
         minimumSeconds = prefs.getInt("minimumSeconds", 0).coerceIn(0, 60),
         blacklist = prefs.getStringSet("blacklist", emptySet())!!.toSet(),
+        disableAdvancedMaterial = prefs.getBoolean("disableAdvancedMaterial", false),
     )
     fun update(transform: (Appearance) -> Appearance) {
         val v = transform(value).let { it.copy(uiStyle = normalizeUiStyle(it.uiStyle)) }
@@ -57,7 +59,8 @@ class AuraSettings(context: Context) {
             .putString("language", v.language).putBoolean("whitelist", v.whitelist)
             .putString("homeContent", v.homeContent)
             .putBoolean("durationFilter", v.durationFilter).putInt("minimumSeconds", v.minimumSeconds)
-            .putStringSet("blacklist", v.blacklist).apply()
+            .putStringSet("blacklist", v.blacklist)
+            .putBoolean("disableAdvancedMaterial", v.disableAdvancedMaterial).apply()
         value = v
     }
 

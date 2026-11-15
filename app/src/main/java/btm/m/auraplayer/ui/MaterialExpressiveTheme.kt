@@ -64,7 +64,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
@@ -100,8 +102,10 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -135,6 +139,15 @@ import kotlin.math.roundToInt
 enum class AppUiStyle { HYPER, MATERIAL, ONE }
 
 val LocalAppUiStyle = staticCompositionLocalOf { AppUiStyle.HYPER }
+
+val LocalAdvancedMaterialEnabled = staticCompositionLocalOf { true }
+
+/** 底部导航栏、导航搜索按钮及胶囊迷你播放器仅跟随导航栏样式，不随 One/Material 界面风格变化。 */
+internal fun resolveBottomBarChromeUiStyle(navigationStyle: String): AppUiStyle = when (navigationStyle) {
+    "one" -> AppUiStyle.ONE
+    "material" -> AppUiStyle.MATERIAL
+    else -> AppUiStyle.HYPER
+}
 
 @Immutable
 internal data class AuraExpressiveScheme(
@@ -1077,45 +1090,130 @@ internal fun MaterialExpressiveNavigationBar(
                         animationSpec = m3ExpressiveSpatialSpring(),
                         label = "m3eNavIconScale",
                     )
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clickable(interactionSource = null, indication = null, role = Role.Tab) {
-                                if (index != latestSelected) {
-                                    view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-                                    dragAnimation.animateToValue(index.toFloat())
-                                    latestTabs[index].onClick()
+                    val adaptiveLabelMode = showIcons && showLabels && !tab.iconOnly
+                    val spatialReveal by animateFloatAsState(
+                        targetValue = if (!adaptiveLabelMode || selected) 1f else 0f,
+                        animationSpec = m3ExpressiveSpatialSpring(),
+                        label = "m3eNavLabelSpatial",
+                    )
+                    val effectReveal by animateFloatAsState(
+                        targetValue = if (!adaptiveLabelMode || selected) 1f else 0f,
+                        animationSpec = m3ExpressiveEffectsSpring(),
+                        label = "m3eNavLabelEffect",
+                    )
+                    val revealClamped = effectReveal.coerceIn(0f, 1f)
+                    val labelAlpha = if (adaptiveLabelMode) ((revealClamped - 0.12f) / 0.88f).coerceIn(0f, 1f) else 1f
+                    val labelBlurDp = if (adaptiveLabelMode) (1f - revealClamped) * 7f else 0f
+                    val tabModifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable(interactionSource = null, indication = null, role = Role.Tab) {
+                            if (index != latestSelected) {
+                                view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                                dragAnimation.animateToValue(index.toFloat())
+                                latestTabs[index].onClick()
+                            }
+                        }
+                    if (adaptiveLabelMode) {
+                        val gapPx = with(density) { 4.dp.roundToPx() }
+                        val slideOffsetPx = with(density) { 8.dp.toPx() }
+                        Layout(
+                            modifier = tabModifier,
+                            content = {
+                                Box(
+                                    modifier = Modifier.graphicsLayer { scaleX = iconScale; scaleY = iconScale },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    when {
+                                        tabImageVector != null -> Image(
+                                            imageVector = tabImageVector(index),
+                                            contentDescription = tab.label,
+                                            colorFilter = ColorFilter.tint(contentColor),
+                                            modifier = Modifier.size(22.dp),
+                                        )
+                                        tabIconContent != null -> tabIconContent(index, contentColor)
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .graphicsLayer { alpha = labelAlpha }
+                                        .then(
+                                            if (labelBlurDp > 0.1f) {
+                                                Modifier.blur(labelBlurDp.dp, BlurredEdgeTreatment.Unbounded)
+                                            } else {
+                                                Modifier
+                                            }
+                                        ),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    BasicText(
+                                        text = tab.label,
+                                        maxLines = 1,
+                                        style = TextStyle(
+                                            color = contentColor,
+                                            fontSize = MATERIAL_NAV_SELECTED_LABEL_SP.sp,
+                                            lineHeight = MATERIAL_NAV_SELECTED_LABEL_SP.sp,
+                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                            textAlign = TextAlign.Center,
+                                            platformStyle = PlatformTextStyle(includeFontPadding = false),
+                                            lineHeightStyle = LineHeightStyle(
+                                                alignment = LineHeightStyle.Alignment.Center,
+                                                trim = LineHeightStyle.Trim.Both,
+                                            ),
+                                        ),
+                                    )
                                 }
                             },
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        if (showIcons || tab.iconOnly) {
-                            Box(Modifier.graphicsLayer { scaleX = iconScale; scaleY = iconScale }) {
-                                when {
-                                    tabImageVector != null -> Image(
-                                        imageVector = tabImageVector(index),
-                                        contentDescription = tab.label,
-                                        colorFilter = ColorFilter.tint(contentColor),
-                                        modifier = Modifier.size(if (showLabels && !tab.iconOnly) 22.dp else 25.dp),
-                                    )
-                                    tabIconContent != null -> tabIconContent(index, contentColor)
+                        ) { measurables, constraints ->
+                            val loose = constraints.copy(minWidth = 0, minHeight = 0)
+                            val iconPlaceable = measurables[0].measure(loose)
+                            val labelPlaceable = measurables[1].measure(loose)
+                            val slotWidth = constraints.maxWidth
+                            val slotHeight = constraints.maxHeight
+                            val placement = computeMaterialTabPlacement(
+                                slotWidth = slotWidth,
+                                slotHeight = slotHeight,
+                                iconWidth = iconPlaceable.width,
+                                iconHeight = iconPlaceable.height,
+                                labelWidth = labelPlaceable.width,
+                                labelHeight = labelPlaceable.height,
+                                gapPx = gapPx,
+                                slideOffsetPx = slideOffsetPx,
+                                spatialReveal = spatialReveal,
+                            )
+                            layout(slotWidth, slotHeight) {
+                                iconPlaceable.placeRelative(placement.iconX, placement.iconY)
+                                if (labelAlpha > 0.001f) {
+                                    labelPlaceable.placeRelative(placement.labelX, placement.labelY)
                                 }
                             }
                         }
-                        if (showLabels && !tab.iconOnly) {
-                            Spacer(Modifier.height(1.dp))
-                            BasicText(
-                                text = tab.label,
-                                maxLines = 1,
-                                style = TextStyle(
-                                    color = contentColor,
-                                    fontSize = if (showIcons) 11.sp else 13.5.sp,
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                                    textAlign = TextAlign.Center,
-                                ),
-                            )
+                    } else {
+                        Box(tabModifier, contentAlignment = Alignment.Center) {
+                            if (showIcons || tab.iconOnly) {
+                                Box(Modifier.graphicsLayer { scaleX = iconScale; scaleY = iconScale }) {
+                                    when {
+                                        tabImageVector != null -> Image(
+                                            imageVector = tabImageVector(index),
+                                            contentDescription = tab.label,
+                                            colorFilter = ColorFilter.tint(contentColor),
+                                            modifier = Modifier.size(25.dp),
+                                        )
+                                        tabIconContent != null -> tabIconContent(index, contentColor)
+                                    }
+                                }
+                            } else if (showLabels) {
+                                BasicText(
+                                    text = tab.label,
+                                    maxLines = 1,
+                                    style = TextStyle(
+                                        color = contentColor,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                        textAlign = TextAlign.Center,
+                                    ),
+                                )
+                            }
                         }
                     }
                 }
@@ -1123,6 +1221,34 @@ internal fun MaterialExpressiveNavigationBar(
             Box(Modifier.fillMaxSize().then(dragAnimation.modifier))
         }
     }
+}
+
+internal const val MATERIAL_NAV_BASE_LABEL_SP: Float = 11f
+internal const val MATERIAL_NAV_SELECTED_LABEL_SP: Float = MATERIAL_NAV_BASE_LABEL_SP * 1.08f
+
+internal data class MaterialTabItemPlacement(
+    val iconX: Int,
+    val iconY: Int,
+    val labelX: Int,
+    val labelY: Int,
+)
+
+internal fun computeMaterialTabPlacement(
+    slotWidth: Int,
+    slotHeight: Int,
+    iconWidth: Int,
+    iconHeight: Int,
+    labelWidth: Int,
+    labelHeight: Int,
+    gapPx: Int,
+    slideOffsetPx: Float,
+    spatialReveal: Float,
+): MaterialTabItemPlacement {
+    val iconX = ((slotWidth - iconWidth - (gapPx + labelWidth) * spatialReveal) / 2f).roundToInt()
+    val iconY = (slotHeight - iconHeight) / 2
+    val labelX = (iconX + iconWidth + gapPx - (1f - spatialReveal) * slideOffsetPx).roundToInt()
+    val labelY = (slotHeight - labelHeight) / 2
+    return MaterialTabItemPlacement(iconX, iconY, labelX, labelY)
 }
 
 @Composable

@@ -1,4 +1,4 @@
-Aura Player 0.1.0
+Aura Player 1.0.0
 Copyright 2026 btm_m
 Distributed under AGPL-3.0-or-later. See licenses/AGPL-3.0-or-later.txt.
 
@@ -17,12 +17,12 @@ Copyright Hemanth Savarala and contributors, GPL-3.0-or-later.
 Home page structure adapted from fragment_home.xml, home_content.xml,
 abs_playlists.xml and HomeFragment.kt to MIUIX Compose. No Material UI is used.
 
-Backdrop — https://github.com/Kyant0/AndroidLiquidGlass
+Backdrop / Shapes — https://github.com/Kyant0/AndroidLiquidGlass
 Copyright Kyant and contributors, Apache-2.0.
-LiquidBottomTabs interaction portions retain the upstream attribution in source.
+LiquidBottomTabs interaction portions retain the upstream attribution in source; Shapes powers rounded squircle geometry.
 MIUIX — https://github.com/miuix-kotlin-multiplatform/miuix
 Copyright Yukonga and contributors, Apache-2.0.
-AndroidX / Media3 — Copyright The Android Open Source Project, Apache-2.0.
+AndroidX / Media3 / JetBrains Compose Multiplatform — Copyright The Android Open Source Project / JetBrains s.r.o., Apache-2.0.
 Coil — https://github.com/coil-kt/coil, Apache-2.0.
 OkHttp — https://github.com/square/okhttp, Apache-2.0.
 
@@ -119,3 +119,6 @@ Optional Spatial Cover ONNX Models (not bundled in the APK; downloaded on demand
 
 Shizuku 13.1.5 — https://github.com/RikkaApps/Shizuku (Apache-2.0)
 Used unmodified (`dev.rikka.shizuku:api`, `dev.rikka.shizuku:provider`) for optional rear-display launch support. Full license: licenses/Apache-2.0.txt.
+
+Aura Player 1.0.0 Original Components (AGPL-3.0-or-later, Copyright 2026 btm_m):
+Cover themes (Square, 3D Coverflow, and Tiled Cover Wall with MIUIX highlight outline, dwell switching, and gyroscope tilt parallax), multi-account NetEase session manager and WebView login (`OfficialLoginActivity.kt`, `CloudAccountSession.kt`, `SwitchUserPage.kt`), custom AGSL lyric theme shaders (`PlayerLyricThemeShaders.kt`), 3D Cel-Shaded Tokyo cityscape and City Walk mode (`PlayerTokyoCityPrimitives.kt`, `PlayerTokyoCityScene.kt`), global solid-color material fallback, and local audio detail inspection.

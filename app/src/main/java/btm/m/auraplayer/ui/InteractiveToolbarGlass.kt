@@ -44,29 +44,35 @@ internal fun InteractiveToolbarGlass(
             Offset(offset.x.coerceIn(0f, size.width), offset.y.coerceIn(0f, size.height))
         }
     }
+    val advancedMaterial = LocalAdvancedMaterialEnabled.current && top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported()
+    val surfaceModifier = if (backdrop == null || !advancedMaterial) {
+        Modifier.background(tint.copy(alpha = if (!LocalAdvancedMaterialEnabled.current) 1f else tint.alpha), shape)
+    } else {
+        Modifier.drawBackdrop(
+            backdrop = backdrop, shape = { shape },
+            effects = {
+                vibrancy(); blur(blurRadius.toPx())
+                lens((16.dp + 4.dp * drag.pressProgress).toPx(),
+                    (32.dp + 8.dp * drag.pressProgress).toPx() * opticalStrength * refractionScale,
+                    depthEffect = true,
+                    chromaticAberration = opticalStrength >= .75f && refractionScale >= .75f)
+            },
+            highlight = { toolbarGlassHighlight(drag.pressProgress).let { it.copy(alpha = it.alpha * opticalStrength) } },
+            shadow = { Shadow.Default.copy(radius = 5.dp, color = Color.Black, alpha = .24f) },
+            innerShadow = null,
+            layerBlock = {
+                scaleX = drag.scaleX; scaleY = drag.scaleY
+                val velocity = abs(drag.velocity.coerceIn(-1f, 1f))
+                scaleX *= 1f + velocity * .12f; scaleY /= 1f + velocity * .08f
+                translationX = drag.value * 5.dp.toPx()
+            }, onDrawSurface = { drawRect(tint) },
+        )
+    }
     Box(modifier.then(highlight.gestureModifier).then(drag.modifier)
         .clickable(interactionSource = null, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center) {
         Box(Modifier.matchParentSize().graphicsLayer { alpha = glassAlpha }
-            .then(if (backdrop == null) Modifier.background(tint, shape) else Modifier.drawBackdrop(
-                backdrop = backdrop, shape = { shape },
-                effects = {
-                    vibrancy(); blur(blurRadius.toPx())
-                    lens((16.dp + 4.dp * drag.pressProgress).toPx(),
-                        (32.dp + 8.dp * drag.pressProgress).toPx() * opticalStrength * refractionScale,
-                        depthEffect = true,
-                        chromaticAberration = opticalStrength >= .75f && refractionScale >= .75f)
-                },
-                highlight = { toolbarGlassHighlight(drag.pressProgress).let { it.copy(alpha = it.alpha * opticalStrength) } },
-                shadow = { Shadow.Default.copy(radius = 5.dp, color = Color.Black, alpha = .24f) },
-                innerShadow = null,
-                layerBlock = {
-                    scaleX = drag.scaleX; scaleY = drag.scaleY
-                    val velocity = abs(drag.velocity.coerceIn(-1f, 1f))
-                    scaleX *= 1f + velocity * .12f; scaleY /= 1f + velocity * .08f
-                    translationX = drag.value * 5.dp.toPx()
-                }, onDrawSurface = { drawRect(tint) },
-            )).then(highlight.modifier))
+            .then(surfaceModifier).then(highlight.modifier))
         content()
     }
 }

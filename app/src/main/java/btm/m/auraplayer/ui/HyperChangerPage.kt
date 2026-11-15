@@ -307,6 +307,7 @@ private fun ProgressiveTopBarMaterial(
     content: @Composable BoxScope.() -> Unit,
 ) {
     val density = LocalDensity.current
+    val advancedMaterial = LocalAdvancedMaterialEnabled.current
     val minimumContentHeightPx = with(density) { PROGRESSIVE_TOP_BAR_MINIMUM_CONTENT_HEIGHT.dp.roundToPx() }
     SubcomposeLayout(Modifier.fillMaxWidth()) { constraints ->
         val foreground = subcompose("progressive-top-bar-foreground") {
@@ -319,7 +320,8 @@ private fun ProgressiveTopBarMaterial(
         // Extend only the Miuix material; keep the title-bar layout height unchanged.
         val baseMaterialHeight = height.coerceAtLeast(minimumContentHeightPx)
         val materialHeight = if (legacyBackdrop == null) {
-            (baseMaterialHeight * PROGRESSIVE_TOP_BAR_HEIGHT_FACTOR).toInt()
+            val factor = if (advancedMaterial) PROGRESSIVE_TOP_BAR_HEIGHT_FACTOR else SOLID_TOP_BAR_HEIGHT_FACTOR
+            (baseMaterialHeight * factor).toInt()
         } else {
             baseMaterialHeight
         }
@@ -328,6 +330,7 @@ private fun ProgressiveTopBarMaterial(
                 LegacyProgressiveTopBarBackground(
                     backdrop = legacyBackdrop,
                     progress = collapsedFraction,
+                    tint = tint,
                     blurRadius = legacyBlurRadius,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -352,10 +355,15 @@ private fun ProgressiveTopBarMaterial(
 private fun LegacyProgressiveTopBarBackground(
     backdrop: LayerBackdrop,
     progress: Float,
+    tint: ComposeColor,
     blurRadius: Dp = LEGACY_PROGRESSIVE_TOP_BAR_BLUR,
     modifier: Modifier = Modifier,
 ) {
     if (progress <= 0f) return
+    if (!LocalAdvancedMaterialEnabled.current) {
+        Box(modifier.graphicsLayer { alpha = progress }.background(tint))
+        return
+    }
     Box(modifier.graphicsLayer { alpha = progress }) {
         Box(
             Modifier.matchParentSize()
@@ -385,6 +393,10 @@ private fun ProgressiveTopBarBackground(
     modifier: Modifier = Modifier,
 ) {
     if (progress <= 0f) return
+    if (!LocalAdvancedMaterialEnabled.current) {
+        Box(modifier.graphicsLayer { alpha = progress }.background(tint))
+        return
+    }
     Box(modifier.graphicsLayer { alpha = progress }) {
         Box(
             Modifier.matchParentSize().progressiveTextureBlur(
@@ -414,7 +426,8 @@ private const val PROGRESSIVE_TOP_BAR_BLUR_FADE_START = 0.60f
 private const val PROGRESSIVE_TOP_BAR_OVERLAY_ALPHA = 0.94f
 private const val PROGRESSIVE_TOP_BAR_OVERLAY_END = 0.80f
 private const val PROGRESSIVE_TOP_BAR_MINIMUM_CONTENT_HEIGHT = 56f
-private const val PROGRESSIVE_TOP_BAR_HEIGHT_FACTOR = 1.22f
+internal const val PROGRESSIVE_TOP_BAR_HEIGHT_FACTOR = 1.22f
+internal const val SOLID_TOP_BAR_HEIGHT_FACTOR = PROGRESSIVE_TOP_BAR_HEIGHT_FACTOR * 0.88f
 private const val TOP_BAR_MATERIAL_HEIGHT_FACTOR = 1.4926275f
 private const val TOOLBAR_GLASS_SURFACE_ALPHA = .80f
 internal val TOOLBAR_GLASS_BLUR_RADIUS = 2.dp

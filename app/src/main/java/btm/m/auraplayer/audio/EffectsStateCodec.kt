@@ -9,6 +9,7 @@ internal object EffectsStateCodec {
         put("selected", s.selected); put("style", s.style.name); put("custom", PresetCodec.configJson(s.custom))
         put("counts", JSONObject(s.counts)); put("recent", JSONObject(s.recent))
         put("fade", s.fade); put("fadeMs", s.fadeMs); put("alwaysPlay", s.alwaysPlay)
+        put("nativePreviousBehavior", s.nativePreviousBehavior)
         put("draftDirty", s.draftDirty); put("draftBase", s.draftBase)
         s.draftOriginal?.let { put("draftOriginal", PresetCodec.configJson(it)) }
         // Pending confirmation belongs to the live UI, never resume an action after process death.
@@ -29,6 +30,7 @@ internal object EffectsStateCodec {
                 PresetCodec.decode(row.getJSONObject("preset").toString()).copy(id = id)
             }.distinctBy { it.id }, counts = longs("counts").mapValues { it.value.coerceAtMost(1000000).toInt() }, recent = longs("recent"),
             fade = j.optBoolean("fade"), fadeMs = j.optInt("fadeMs", 600).coerceIn(100, 3000), alwaysPlay = j.optBoolean("alwaysPlay"),
+            nativePreviousBehavior = j.optBoolean("nativePreviousBehavior", defaults.nativePreviousBehavior),
             draftDirty = j.optBoolean("draftDirty"), draftBase = j.optString("draftBase", "reference"), draftOriginal = j.optJSONObject("draftOriginal")?.let(PresetCodec::readConfig))
             .let { s -> if (s.presets.any { it.id == s.selected }) s.copy(draftDirty = s.draftDirty && s.selected == "custom") else s.copy(selected = "reference", draftDirty = false) }
     }.getOrDefault(EffectsState())

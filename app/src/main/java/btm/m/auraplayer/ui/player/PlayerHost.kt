@@ -40,6 +40,7 @@ import btm.m.auraplayer.R
 import btm.m.auraplayer.data.AppleMusicMotionCoverManager
 import btm.m.auraplayer.lyrics.PlayerLyricView
 import btm.m.auraplayer.lyrics.rememberSpatialGyroTilt
+import btm.m.auraplayer.lyrics.scaleSpatialParallaxTilt
 import btm.m.auraplayer.spatialcover.SpatialCoverAssets
 import btm.m.auraplayer.spatialcover.SpatialCoverManager
 import btm.m.auraplayer.spatialcover.SpatialCoverRenderer
@@ -52,6 +53,7 @@ import btm.m.auraplayer.playback.MaterialPlayerBackground
 import btm.m.auraplayer.playback.PlayerTheme
 import btm.m.auraplayer.playback.GlowProgressStyle
 import btm.m.auraplayer.playback.CoverAnimation
+import btm.m.auraplayer.playback.CoverTheme
 import btm.m.auraplayer.ui.*
 import btm.m.auraplayer.ui.GlassIconDropdownMenu
 import coil3.compose.AsyncImage
@@ -84,7 +86,7 @@ import top.yukonga.miuix.kmp.blur.layerBackdrop as miuixLayerBackdrop
 import kotlin.math.*
 
 private const val PlayerPaddingScale = 1.15f
-private const val PlayerIconScale = .85f
+internal const val PlayerIconScale = .85f
 
 /** Shared geometry for the floating navigation + search envelope and its mini player. */
 internal object PlayerNavigationGeometry {
@@ -277,10 +279,20 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
             },
         )
     }
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val hostActiveCoverTheme = resolveActiveCoverTheme(
+        appearance.coverTheme,
+        isLandscapePlayerLayout(configuration.screenWidthDp.dp, configuration.screenHeightDp.dp),
+        appearance.landscapeAutoCoverflow,
+    )
+    val stageGyroParallaxActive = open && foreground && !compactOpen && !shareActive && (
+        (hostActiveCoverTheme == CoverTheme.COVERFLOW && appearance.coverflowParallax) ||
+            (hostActiveCoverTheme == CoverTheme.TILED && appearance.tiledParallax)
+        )
     val spatialLyricsActive = appearance.spatialLyrics && open && foreground && lyricsOpen && !queueOpen && !shareActive
     val spatialCoverActive = spatialCoverEligible && spatialCoverRequested &&
         spatialCoverState is SpatialCoverResolveState.Ready && open && foreground && !compactOpen && !shareActive
-    val spatialActive = spatialLyricsActive || spatialCoverActive
+    val spatialActive = spatialLyricsActive || spatialCoverActive || stageGyroParallaxActive
     val spatialTilt by rememberSpatialGyroTilt(enabled = spatialActive)
     val hostAlpha by animateFloatAsState(if (miniVisible || open) 1f else 0f, tween(280, easing = FastOutSlowInEasing), label = "playerHostVisibility")
     val chromeExitDistance = PlayerNavigationGeometry.barHeight +
@@ -381,7 +393,11 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                     if (e > 0f) PlayerThemeBackground(song.artwork, coverPalette, appearance, lyricProgress.value.coerceIn(0f, 1f),
                         animate = open && foreground && !gesturing && !shareActive,
                         queueBlend = queueBlend.value.coerceIn(0f, 1f),
-                        spatialTilt = if (appearance.spatialLyrics) spatialTilt * lyricProgress.value.coerceIn(0f, 1f) else Offset.Zero,
+                        spatialTilt = if (appearance.spatialLyrics) {
+                            scaleSpatialParallaxTilt(spatialTilt, appearance.spatialLyricsSensitivity) * lyricProgress.value.coerceIn(0f, 1f)
+                        } else {
+                            Offset.Zero
+                        },
                         expressive = activeExpressive,
                         oneUi = activeOneUi,
                         modifier = Modifier.fillMaxSize().graphicsLayer { alpha = e * shareBgAlpha }.blur(shareBgBlur).layerBackdrop(playerBackdrop).miuixLayerBackdrop(miuixBackdrop))
@@ -585,6 +601,10 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         val w = maxWidth; val h = maxHeight
         val fullscreen = appearance.theme == PlayerTheme.FULLSCREEN
         val landscape = isLandscapePlayerLayout(w, h)
+        val activeCoverTheme = resolveActiveCoverTheme(appearance.coverTheme, landscape, appearance.landscapeAutoCoverflow)
+        val coverflowActive = activeCoverTheme != CoverTheme.SQUARE
+        val squareCardFullscreen = fullscreen && !coverflowActive
+        val usesStageDock = coverflowActive && landscape
         val compactWindow = isCompactPlayerWindow(w, h, isMultiWindow)
         val compactScale = if (compactWindow) (h.value / 640f).coerceIn(0.78f, 1.0f) else 1f
         val (portraitColX, portraitColW) = portraitControlColumnRange(w, w * (if (compactWindow) .055f else .058f * PlayerPaddingScale))
@@ -606,7 +626,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         val portraitNav = effectiveBottomInset
         val fullCard = fullscreenPlayerCard(w, h, effectiveStatus, portraitNav)
         val normalMargin = w * (if (compactWindow) .055f else .058f * PlayerPaddingScale)
-        fun controlSize(cardSize: Dp, normalSize: Dp): Dp = if (fullscreen) cardSize + (normalSize - cardSize) * p else normalSize
+        fun controlSize(cardSize: Dp, normalSize: Dp): Dp = if (squareCardFullscreen) cardSize + (normalSize - cardSize) * p else normalSize
         val margin = controlSize(fullCard.left + 16.dp, normalMargin)
         val coverY = if (compactWindow) {
             effectiveStatus + 34.dp
@@ -635,7 +655,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             fullscreen = fullscreen,
             hasLandscapeGeometry = landscapeGeom != null,
         )
-        val immGeom = if (immersiveCover) {
+        val immGeom = if (immersiveCover && !coverflowActive) {
             if (landscapeGeom != null) {
                 computeLandscapeImmersiveCoverGeometry(
                     width = w,
@@ -665,10 +685,14 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         val smallY = effectiveStatus + (if (compactWindow) 14.dp else 48.dp * PlayerPaddingScale)
         val smallX = if (compactWindow) normalMargin else 26.dp * PlayerPaddingScale
         val e = expansion.coerceIn(0f, 1f)
+        val coverflowReveal = if (coverflowActive) ((e - 0.12f) / 0.88f).coerceIn(0f, 1f) * (1f - p) else 0f
+        val stageRevealAlpha = if (coverflowActive) smoothstep01(0.16f, 0.90f, coverflowReveal) else 0f
+        val stageHeroContentAlpha = if (coverflowActive) smoothstep01(0.68f, 0.90f, coverflowReveal) else 1f
+        val coverflowSharedVis = if (coverflowActive) 1f - smoothstep01(0.76f, 0.97f, coverflowReveal) else 1f
         val normalSeekY = immGeom?.seekY ?: maxOf(normalTitleY + titleToSeek, h * .637f).coerceAtMost(seekCeiling)
         val seekY = controlSize(fullCard.top + 64.dp, normalSeekY)
-        val titleY = if (fullscreen && !landscape) fullCard.top + 14.dp else normalTitleY
-        val portraitControlsScale = if (fullscreen) {
+        val titleY = if (squareCardFullscreen && !landscape) fullCard.top + 14.dp else normalTitleY
+        val portraitControlsScale = if (squareCardFullscreen) {
             ((fullCard.height - 76.dp) / 180.dp).coerceIn(.5f, 1.12f)
         } else {
             compactScale
@@ -676,7 +700,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         var textHeight by remember { mutableIntStateOf(0) }
         val fullWidthPx = with(density) { w.toPx() }
         val glassCardRect = when {
-            !fullscreen -> null
+            !fullscreen || coverflowActive -> null
             landscapeGeom != null -> FullscreenPlayerCard(
                 left = (landscapeGeom.rightPaneX - 16.dp).coerceAtLeast(landscapeGeom.leftPaneX + landscapeGeom.leftPaneWidth + 6.dp),
                 top = (landscapeGeom.controlStackTop - 16.dp).coerceAtLeast(landscapeGeom.usableTop),
@@ -693,19 +717,20 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             val cardHeightPx = with(density) { glassCardRect.height.toPx() }
             val localTouch = touchPoint - Offset(cardLeftPx, cardTopPx)
             val touchInside = touching && localTouch.x in 0f..cardWidthPx && localTouch.y in 0f..cardHeightPx
-            val touchLight by animateFloatAsState(if (appearance.fullscreenGlass && touchInside) .19f else 0f,
+            val useFullscreenGlass = appearance.fullscreenGlass && btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled.current
+            val touchLight by animateFloatAsState(if (useFullscreenGlass && touchInside) .19f else 0f,
                 tween(if (touchInside) 100 else 320), label = "playerCardTouchLight")
-            val cardMaterial = if (appearance.fullscreenGlass) Modifier.drawBackdrop(
+            val cardMaterial = if (useFullscreenGlass) Modifier.drawBackdrop(
                 backdrop = backdrop, shape = { RoundedCornerShape(30.dp) }, effects = {
                     vibrancy(); backdropBlur(5.dp.toPx()); lens(28.dp.toPx(), 42.dp.toPx(), chromaticAberration = true)
                 }, highlight = { Highlight.Default.copy(alpha = .60f) },
                 onDrawSurface = { drawRect(menuTint.copy(alpha = .18f)) })
             else Modifier.playerMenuMaterial(miuixBackdrop, menuTint, 30.dp)
             Box(Modifier.offset(glassCardRect.left, glassTop).size(glassCardRect.width, glassCardRect.height)
-                .graphicsLayer { this.alpha = alpha * (1f - p) * shareChromeAlpha }.blur(shareChromeBlur)
+                .graphicsLayer { this.alpha = if (coverflowActive) 0f else alpha * (1f - p) * shareChromeAlpha }.blur(shareChromeBlur)
                 .then(cardMaterial).clip(RoundedCornerShape(30.dp)).drawWithContent {
                     drawContent()
-                    if (appearance.fullscreenGlass && touchLight > .001f) {
+                    if (useFullscreenGlass && touchLight > .001f) {
                         val radius = size.width * .65f
                         drawRect(Brush.radialGradient(listOf(Color.White.copy(alpha = touchLight), Color.White.copy(alpha = touchLight * .32f), Color.Transparent),
                             center = localTouch, radius = radius.coerceAtLeast(1f)))
@@ -715,20 +740,48 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 .playerTrackSwipe(appearance.swipeTracks && active, model::next, model::previous))
         }
         val showSmallLandscapeCover = p * controlsVisibility
+        val coverflowMetrics = if (activeCoverTheme == CoverTheme.COVERFLOW) {
+            remember(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, appearance.showVolume) {
+                computeCoverflowMetrics(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, appearance.showVolume)
+            }
+        } else null
+        val tiledWallMetrics = if (activeCoverTheme == CoverTheme.TILED) {
+            remember(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, model.queue.size, appearance.showVolume) {
+                computeTiledWallMetrics(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, model.queue.size.coerceAtLeast(1), appearance.showVolume)
+            }
+        } else null
+        val stageCoverHeroSize = when {
+            coverflowMetrics != null -> coverflowMetrics.cardSize
+            tiledWallMetrics != null -> tiledWallMetrics.tileSize * 1.825f
+            landscapeGeom != null -> landscapeGeom.heroCoverSize
+            else -> coverSize
+        }
+        val stageCoverHeroX = when {
+            coverflowMetrics != null -> (w - coverflowMetrics.cardSize) / 2f
+            tiledWallMetrics != null -> (w - stageCoverHeroSize) / 2f
+            landscapeGeom != null -> landscapeGeom.heroCoverX
+            else -> coverX
+        }
+        val stageCoverHeroY = when {
+            coverflowMetrics != null -> effectiveStatus + coverflowMetrics.carouselTopPadding
+            tiledWallMetrics != null -> h * tiledWallMetrics.focusYFraction - stageCoverHeroSize / 2f
+            landscapeGeom != null -> landscapeGeom.heroCoverY
+            else -> coverY
+        }
         val fullCoverSize = if (landscapeGeom != null) {
-            lerp(landscapeGeom.heroCoverSize, landscapeGeom.lyricsCompactCoverSize, showSmallLandscapeCover)
+            lerp(stageCoverHeroSize, landscapeGeom.lyricsCompactCoverSize, showSmallLandscapeCover)
         } else {
-            coverSize + (small - coverSize) * p
+            stageCoverHeroSize + (small - stageCoverHeroSize) * p
         }
         val targetCoverX = if (landscapeGeom != null) {
-            lerp(landscapeGeom.heroCoverX, landscapeGeom.lyricsCompactCoverX, showSmallLandscapeCover)
+            lerp(stageCoverHeroX, landscapeGeom.lyricsCompactCoverX, showSmallLandscapeCover)
         } else {
-            coverX + (smallX - coverX) * p
+            stageCoverHeroX + (smallX - stageCoverHeroX) * p
         }
         val targetCoverY = if (landscapeGeom != null) {
-            lerp(landscapeGeom.heroCoverY, landscapeGeom.lyricsCompactCoverY, showSmallLandscapeCover)
+            lerp(stageCoverHeroY, landscapeGeom.lyricsCompactCoverY, showSmallLandscapeCover)
         } else {
-            coverY + (smallY - coverY) * p
+            stageCoverHeroY + (smallY - stageCoverHeroY) * p
         }
         val miniScale = miniHeight / PlayerNavigationGeometry.miniHeight
         val miniCoverSize = 44.dp * miniScale
@@ -747,7 +800,17 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             appleMusicAnimatedCoverEnabled = appearance.appleMusicAnimatedCover,
             motionVideoPath = motionVideoPath,
         )
+        val hasCubeOnTitleRow = spatialCoverAllowed
+        val buttonSize = CoverThemeHeaderTouchHeight
+        val cubeGap = CoverThemeSpatialCubeGap
+        val coverThemeHeaderTopPad = coverThemeHeaderTopPadding(landscape || compactWindow)
+        val coverThemeHeaderTop = effectiveStatus + coverThemeHeaderTopPad
         val spatialCoverRendering = spatialCoverAllowed && spatialCoverRequested && p < .99f && e > .25f
+        val spatialCoverTilt = if (spatialCoverRendering) {
+            scaleSpatialParallaxTilt(spatialTilt, appearance.spatialCoverSensitivity)
+        } else {
+            Offset.Zero
+        }
         val effLyricsProgress = if (landscapeGeom != null) showSmallLandscapeCover else p
         val motionOverlayAlpha = computeMotionCoverOverlayAlpha(
             expansion = e,
@@ -802,30 +865,30 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                     .size(immCurW, immCurH)
                     .graphicsLayer {
                         translationX = miniShift
-                        this.alpha = miniAlpha * shareChromeAlpha
+                        this.alpha = miniAlpha * (1f - coverflowReveal) * shareChromeAlpha
                     }
                     .blur(shareChromeBlur)
-                    .playerTrackSwipe(appearance.swipeTracks && active && p < .01f, model::next, model::previous),
+                    .playerTrackSwipe(appearance.swipeTracks && active && p < .01f && !coverflowActive, model::next, model::previous),
                 radius = immCurTopStartRadius,
                 topEndRadius = immCurTopEndRadius,
                 bottomRadius = immCurBottomStartRadius,
                 bottomEndRadius = immCurBottomEndRadius,
-                onClick = { if (!shareActive) sharedClick() },
+                onClick = { if (!shareActive && coverflowReveal < 0.5f) sharedClick() },
                 animation = appearance.coverAnimation,
-                animate = active && e > .99f,
+                animate = active && e > .99f && coverflowReveal < 0.5f,
                 transitionKey = song.key,
                 mixVisual = mixVisual,
                 placeholderTint = activeInk.copy(alpha = .3f),
                 spatialState = spatialCoverState,
-                spatialActive = spatialCoverRendering,
-                spatialTilt = spatialTilt,
+                spatialActive = spatialCoverRendering && coverflowReveal < 0.5f,
+                spatialTilt = spatialCoverTilt,
                 immersiveFeather = immFeather,
                 immersiveHorizontal = landscapeGeom != null,
                 motionVideoPath = motionVideoPath,
-                motionPlaying = motionVideoAllowed && motionOverlayAlpha > 0.01f && mixVisual == null,
-                motionOverlayAlpha = motionOverlayAlpha,
+                motionPlaying = motionVideoAllowed && motionOverlayAlpha > 0.01f && coverflowReveal < 0.5f && mixVisual == null,
+                motionOverlayAlpha = motionOverlayAlpha * (1f - coverflowReveal),
             )
-            val immScrimStrength = alpha * (1f - effLyricsProgress)
+            val immScrimStrength = alpha * (1f - effLyricsProgress) * (1f - coverflowReveal)
             if (immScrimStrength > 0.001f) {
                 val scrimTone = when {
                     expressive != null -> expressive.surface
@@ -883,7 +946,12 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             val sharedX = lerp(miniCoverX, targetCoverX, e)
             val sharedY = lerp(miniCoverY, targetCoverY, e)
             val sharedScale = sharedSize / coverSize
-            val sharedRadius = lerp(13.dp * miniScale, baseCoverRadius + (9.dp - baseCoverRadius) * p, e)
+            val stageCoverHeroRadius = when {
+                coverflowMetrics != null -> (coverflowMetrics.cardSize * 0.088f).coerceIn(16.dp, 26.dp)
+                tiledWallMetrics != null -> tiledWallMetrics.cornerRadius * 1.825f
+                else -> baseCoverRadius
+            }
+            val sharedRadius = lerp(13.dp * miniScale, stageCoverHeroRadius + (9.dp - stageCoverHeroRadius) * p, e)
             Cover(
                 uri = song.artwork,
                 modifier = Modifier
@@ -892,25 +960,81 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                     .graphicsLayer {
                         transformOrigin = TransformOrigin(0f, 0f); scaleX = sharedScale; scaleY = sharedScale
                         translationX = miniShift
-                        val portraitFullscreenHidden = fullscreen && !landscape
-                        this.alpha = miniAlpha * (if (portraitFullscreenHidden) 1f - e * (1f - p) else 1f) * shareChromeAlpha
+                        val portraitFullscreenHidden = fullscreen && !landscape && !coverflowActive
+                        this.alpha = miniAlpha * (if (portraitFullscreenHidden) 1f - e * (1f - p) else 1f) * coverflowSharedVis * shareChromeAlpha
                     }
                     .blur(shareChromeBlur)
-                    .playerTrackSwipe(appearance.swipeTracks && active && p < .01f && !fullscreen, model::next, model::previous),
+                    .playerTrackSwipe(appearance.swipeTracks && active && p < .01f && !fullscreen && !coverflowActive, model::next, model::previous),
                 radius = sharedRadius / sharedScale,
-                onClick = { if (!shareActive) sharedClick() },
+                onClick = { if (!shareActive && coverflowSharedVis > 0.5f) sharedClick() },
                 animation = appearance.coverAnimation,
-                animate = active && e > .99f,
+                animate = active && e > .99f && coverflowSharedVis > 0.05f,
                 transitionKey = song.key,
                 mixVisual = mixVisual,
                 placeholderTint = activeInk.copy(alpha = .3f),
                 spatialState = spatialCoverState,
-                spatialActive = spatialCoverRendering,
+                spatialActive = spatialCoverRendering && coverflowSharedVis > 0.05f,
+                spatialTilt = spatialCoverTilt,
+                motionVideoPath = motionVideoPath,
+                motionPlaying = motionVideoAllowed && motionOverlayAlpha > 0.01f && coverflowSharedVis > 0.05f && mixVisual == null,
+                motionOverlayAlpha = motionOverlayAlpha * coverflowSharedVis,
+            )
+        }
+        var tiledWallDragging by remember { mutableStateOf(false) }
+        val tiledChromeVis = remember { Animatable(1f) }
+        LaunchedEffect(activeCoverTheme, active, tiledWallDragging, p < 0.05f) {
+            if (activeCoverTheme != CoverTheme.TILED || !active) tiledWallDragging = false
+            val target = if (activeCoverTheme == CoverTheme.TILED && active && tiledWallDragging && p < 0.05f) 0f else 1f
+            tiledChromeVis.animateTo(target, tween(180))
+        }
+        if (coverflowActive && e > 0.05f) {
+            val stageMod = Modifier
+                .fillMaxSize()
+                .graphicsLayer { this.alpha = stageRevealAlpha * shareChromeAlpha }
+                .blur(((1f - stageRevealAlpha) * 14f).dp + shareChromeBlur)
+            val stageInteractive = !shareActive && stageRevealAlpha > 0.45f
+            val stageMotionAllowed = motionVideoAllowed && stageRevealAlpha > 0.30f
+            val stageParams = CoverThemeStageParams(
+                model = model,
+                song = song,
+                appearance = appearance,
+                coverPalette = coverPalette,
+                expressive = expressive,
+                oneUi = oneUi,
+                backdrop = backdrop,
+                miuixBackdrop = miuixBackdrop,
+                menuTint = menuTint,
+                activeInk = activeInk,
+                secondaryInk = secondaryInk,
+                mixVisual = mixVisual,
+                spatialCoverState = spatialCoverState,
+                spatialCoverRendering = spatialCoverRendering,
                 spatialTilt = spatialTilt,
                 motionVideoPath = motionVideoPath,
-                motionPlaying = motionVideoAllowed && motionOverlayAlpha > 0.01f && mixVisual == null,
-                motionOverlayAlpha = motionOverlayAlpha,
+                motionVideoAllowed = stageMotionAllowed,
+                active = active,
+                interactive = stageInteractive,
+                lyricsOpen = lyricsOpen,
+                queueOpen = queueOpen,
+                topInset = effectiveStatus,
+                leftInset = effectiveLeftInset,
+                rightInset = effectiveRightInset,
+                bottomInset = effectiveBottomInset,
+                headerTopPadding = coverThemeHeaderTopPad,
+                reserveSpatialCubeSlot = hasCubeOnTitleRow,
+                maxWidth = w,
+                maxHeight = h,
+                heroContentAlpha = stageHeroContentAlpha,
+                onLyrics = onLyrics,
+                onQueue = onQueue,
+                onQualityMenuExpanded = { qualityMenuOpen = it },
+                onDragActiveChange = { tiledWallDragging = it },
             )
+            when (activeCoverTheme) {
+                CoverTheme.COVERFLOW -> PlayerCoverflowStage(params = stageParams, modifier = stageMod)
+                CoverTheme.TILED -> PlayerTiledStage(params = stageParams, modifier = stageMod)
+                CoverTheme.SQUARE -> Unit
+            }
         }
         // Only controls and secondary content blur/fade; artwork, metadata, and exiting lyrics transform independently.
         if (alpha > 0f) Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha * shareChromeAlpha }
@@ -921,12 +1045,13 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 else -> 1f
             }
             val handleY = when {
+                coverflowActive -> coverThemeHeaderTop + (buttonSize - 28.dp) / 2f
                 landscape || compactWindow -> effectiveStatus + 2.dp
                 immGeom != null -> effectiveStatus + 6.dp
                 else -> effectiveStatus + 12.dp * PlayerPaddingScale
             }
             Box(Modifier.align(Alignment.TopCenter).offset(y = handleY).size(104.dp, 28.dp)
-                .graphicsLayer { this.alpha = handleAlpha }
+                .graphicsLayer { this.alpha = handleAlpha * tiledChromeVis.value }
                 .clip(RoundedCornerShape(50))
                 .semantics { contentDescription = tr("collapse_player", "收起播放器") }
                 .playerSurfaceClick(onClose), contentAlignment = Alignment.Center) {
@@ -966,7 +1091,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             }
             if (landscapeGeom != null) {
                 // Landscape Normal Controls inside Right Column
-                val normalCtrlAlpha = ((1f - p) * controlsVisibility).coerceIn(0f, 1f)
+                val normalCtrlAlpha = if (coverflowActive) 0f else ((1f - p) * controlsVisibility).coerceIn(0f, 1f)
                 val landscapeHeaderReserve = with(density) {
                     maxOf(46.dp, if (textHeight > 0) textHeight.toDp() else 48.dp)
                 }
@@ -998,7 +1123,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                             queueOpen = queueOpen,
                             controlsVisibility = normalCtrlAlpha,
                             sliderHeight = sliderH,
-                            footerHeight = 22.dp * lScale.coerceAtLeast(0.84f),
+                            footerHeight = (26.dp * lScale.coerceAtLeast(0.88f)).coerceAtLeast(24.dp),
                             horizontalInset = 0.dp,
                             onQualityMenuExpanded = { qualityMenuOpen = it },
                             modifier = Modifier.graphicsLayer { this.alpha = 1f - queueBlend },
@@ -1097,82 +1222,85 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                         )
                     }
                 }
-            } else if (controlsVisibility > .001f) {
-                Column(
-                    Modifier
-                        .offset(y = seekY)
-                        .fillMaxWidth()
-                        .graphicsLayer { this.alpha = controlsVisibility }
-                        .blur(((1f - controlsVisibility) * 14f).dp, BlurredEdgeTreatment.Unbounded)
-                        .height(
-                            controlSize(
-                                (fullCard.height - 76.dp).coerceAtLeast(1.dp),
-                                (h - normalSeekY - portraitNav - 10.dp).coerceAtLeast(baseControlsHeight),
-                            ),
-                        )
-                        .padding(horizontal = margin),
-                ) {
-                    val sliderNormalHeight = when (appearance.glowProgress) {
-                        GlowProgressStyle.ONE -> 36.dp
-                        GlowProgressStyle.HYPER -> 30.dp
-                        GlowProgressStyle.OFF -> 24.dp
-                    } * compactScale
-                    val sliderFullHeight = when (appearance.glowProgress) {
-                        GlowProgressStyle.ONE -> 31.dp
-                        GlowProgressStyle.HYPER -> 26.dp
-                        GlowProgressStyle.OFF -> 20.dp
-                    } * portraitControlsScale
-                    val footerNormal = 26.dp * compactScale
-                    val footerFull = 20.dp * portraitControlsScale
-                    val sliderInset = 0.dp
-                    PlayerProgressSection(
-                        model = model,
-                        song = song,
-                        appearance = appearance,
-                        coverPalette = coverPalette,
-                        expressive = expressive,
-                        oneUi = oneUi,
-                        backdrop = backdrop,
-                        active = active,
-                        queueOpen = queueOpen,
-                        controlsVisibility = controlsVisibility,
-                        sliderHeight = controlSize(sliderFullHeight, sliderNormalHeight),
-                        footerHeight = controlSize(footerFull, footerNormal),
-                        horizontalInset = sliderInset,
-                        onQualityMenuExpanded = { qualityMenuOpen = it },
-                        modifier = Modifier.graphicsLayer { this.alpha = 1f - queueBlend },
-                    )
-                    Spacer(Modifier.weight(1f))
-                    PlayerTransportSection(
-                        model = model,
-                        expressive = expressive,
-                        oneUi = oneUi,
-                        scale = portraitControlsScale,
-                        rowHeight = controlSize(64.dp * portraitControlsScale, 100.dp * compactScale),
-                    )
-                    Spacer(Modifier.weight(1f))
-                    if (appearance.showVolume) {
-                        PlayerVolumeSection(
+            } else {
+                val portraitCtrlVis = (controlsVisibility * (if (usesStageDock) p else 1f)).coerceIn(0f, 1f)
+                if (portraitCtrlVis > .001f) {
+                    Column(
+                        Modifier
+                            .offset(y = seekY)
+                            .fillMaxWidth()
+                            .graphicsLayer { this.alpha = portraitCtrlVis * tiledChromeVis.value }
+                            .blur(((1f - portraitCtrlVis) * 14f).dp, BlurredEdgeTreatment.Unbounded)
+                            .height(
+                                controlSize(
+                                    (fullCard.height - 76.dp).coerceAtLeast(1.dp),
+                                    (h - normalSeekY - portraitNav - 10.dp).coerceAtLeast(baseControlsHeight),
+                                ),
+                            )
+                            .padding(horizontal = margin),
+                    ) {
+                        val sliderNormalHeight = when (appearance.glowProgress) {
+                            GlowProgressStyle.ONE -> 36.dp
+                            GlowProgressStyle.HYPER -> 30.dp
+                            GlowProgressStyle.OFF -> 24.dp
+                        } * compactScale
+                        val sliderFullHeight = when (appearance.glowProgress) {
+                            GlowProgressStyle.ONE -> 31.dp
+                            GlowProgressStyle.HYPER -> 26.dp
+                            GlowProgressStyle.OFF -> 20.dp
+                        } * portraitControlsScale
+                        val footerNormal = 26.dp * compactScale
+                        val footerFull = 20.dp * portraitControlsScale
+                        val sliderInset = 0.dp
+                        PlayerProgressSection(
+                            model = model,
+                            song = song,
+                            appearance = appearance,
+                            coverPalette = coverPalette,
                             expressive = expressive,
                             oneUi = oneUi,
-                            height = controlSize(32.dp * portraitControlsScale, 44.dp * compactScale),
+                            backdrop = backdrop,
+                            active = active,
+                            queueOpen = queueOpen,
+                            controlsVisibility = portraitCtrlVis,
+                            sliderHeight = controlSize(sliderFullHeight, sliderNormalHeight),
+                            footerHeight = controlSize(footerFull, footerNormal),
+                            horizontalInset = sliderInset,
+                            onQualityMenuExpanded = { qualityMenuOpen = it },
+                            modifier = Modifier.graphicsLayer { this.alpha = 1f - queueBlend },
+                        )
+                        Spacer(Modifier.weight(1f))
+                        PlayerTransportSection(
+                            model = model,
+                            expressive = expressive,
+                            oneUi = oneUi,
+                            scale = portraitControlsScale,
+                            rowHeight = controlSize(64.dp * portraitControlsScale, 100.dp * compactScale),
+                        )
+                        Spacer(Modifier.weight(1f))
+                        if (appearance.showVolume) {
+                            PlayerVolumeSection(
+                                expressive = expressive,
+                                oneUi = oneUi,
+                                height = controlSize(32.dp * portraitControlsScale, 44.dp * compactScale),
+                            )
+                        }
+                        val bottomTouch = controlSize(40.dp * portraitControlsScale, 48.dp * compactScale)
+                        val bottomIcon = controlSize(27.dp * portraitControlsScale, 32.dp * compactScale)
+                        PlayerBottomActionsSection(
+                            model = model,
+                            song = song,
+                            lyricsOpen = lyricsOpen,
+                            queueOpen = queueOpen,
+                            expressive = expressive,
+                            oneUi = oneUi,
+                            rowHeight = controlSize(44.dp * portraitControlsScale, 56.dp * compactScale),
+                            bottomTouch = bottomTouch,
+                            bottomIcon = bottomIcon,
+                            onLyrics = onLyrics,
+                            onQueue = onQueue,
                         )
                     }
-                    val bottomTouch = controlSize(40.dp * portraitControlsScale, 48.dp * compactScale)
-                    val bottomIcon = controlSize(27.dp * portraitControlsScale, 32.dp * compactScale)
-                    PlayerBottomActionsSection(
-                        model = model,
-                        song = song,
-                        lyricsOpen = lyricsOpen,
-                        queueOpen = queueOpen,
-                        expressive = expressive,
-                        oneUi = oneUi,
-                        rowHeight = controlSize(44.dp * portraitControlsScale, 56.dp * compactScale),
-                        bottomTouch = bottomTouch,
-                        bottomIcon = bottomIcon,
-                        onLyrics = onLyrics,
-                        onQueue = onQueue,
-                    )
                 }
             }
         }
@@ -1247,9 +1375,15 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 if (model.lyrics.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(if (model.lyricsLoading) tr("lyrics_loading", "正在获取歌词…") else tr("lyrics_empty", "暂无歌词"), color = lyricInk.copy(alpha = .55f), fontSize = 20.sp)
                 } else AndroidView(factory = { PlayerLyricView(it) }, update = {
+                    val lyricTilt = if (appearance.spatialLyrics) {
+                        scaleSpatialParallaxTilt(spatialTilt, appearance.spatialLyricsSensitivity)
+                    } else {
+                        Offset.Zero
+                    }
                     it.lyricTheme(appearance.lyricTheme)
+                    it.tokyoLandmark(appearance.tokyoSceneLandmark)
                     it.spatialLyrics(appearance.spatialLyrics)
-                    it.spatialTilt(spatialTilt.x, spatialTilt.y)
+                    it.spatialTilt(lyricTilt.x, lyricTilt.y)
                     it.inkColor(lyricInk.toArgb())
                     it.submit(
                         lines = model.lyrics,
@@ -1265,50 +1399,116 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 }, modifier = Modifier.fillMaxSize())
             }
         }
-        val metadataSize = if (fullscreen && !landscape) 1f - .12f * e * (1f - p) else 1f
+        val metadataSize = if (squareCardFullscreen && !landscape) 1f - .12f * e * (1f - p) else 1f
         val measuredTextHeight = with(density) { if (textHeight > 0) textHeight.toDp() else (46.sp * metadataSize).toDp() }
         val miniTextX = 66.dp * miniScale
         val miniTextWidth = (miniWidth - miniTextX - miniControlClearance).coerceAtLeast(24.dp)
         val miniTextY = (miniHeight - measuredTextHeight * .7f * miniScale) / 2
-        val textScale = if (landscapeGeom != null) {
-            .7f * miniScale + ((1f - .14f * p) - .7f * miniScale) * e
+        val coverThemeDockLayout = if (usesStageDock) {
+            resolveCoverThemeDockLayout(
+                isLandscape = landscapeGeom != null,
+                dockCompact = coverflowMetrics?.dockCompact ?: tiledWallMetrics?.dockCompact ?: false,
+                showCardContainer = false,
+                glowProgress = appearance.glowProgress,
+                hasExpressive = expressive != null,
+                hasOneUi = oneUi != null,
+                playing = model.playbackRequested,
+            )
         } else {
-            .7f * miniScale + ((1f - .22f * p) - .7f * miniScale) * e
+            null
         }
-        val hasCubeOnTitleRow = spatialCoverAllowed
-        val buttonSize = 46.dp
-        val cubeGap = 4.dp
+        val compactTargetTextScale = 1f - (if (landscapeGeom != null) .14f else .22f)
+        val dockMetaScale = coverThemeDockLayout?.let { it.titleSizeSp / 20f }
+        val expandedTextScale = dockMetaScale?.let { it + (compactTargetTextScale - it) * p }
+            ?: (1f - (if (landscapeGeom != null) .14f else .22f) * p)
+        val textScale = .7f * miniScale + (expandedTextScale - .7f * miniScale) * e
+        val dockHorizontalMargin = coverflowMetrics?.dockHorizontalMargin ?: tiledWallMetrics?.dockHorizontalMargin ?: 0.dp
+        val dockBottomPadding = coverflowMetrics?.dockBottomPadding ?: tiledWallMetrics?.dockBottomPadding ?: 0.dp
+        val dockIncludeVolume = coverflowMetrics?.includeVolumeInDock ?: tiledWallMetrics?.includeVolumeInDock ?: false
+        val dockMetaX = if (coverThemeDockLayout != null) {
+            effectiveLeftInset + dockHorizontalMargin + coverThemeDockLayout.horizontalPad
+        } else {
+            0.dp
+        }
+        val dockMetaH = if (coverThemeDockLayout != null) measuredTextHeight * (dockMetaScale ?: 1f) else 0.dp
+        val dockMetaY = if (coverThemeDockLayout != null) {
+            val dockBottom = h - effectiveBottomInset - dockBottomPadding
+            if (landscapeGeom != null) {
+                val row2H = maxOf(dockMetaH, coverThemeDockLayout.transportHeight)
+                dockBottom - coverThemeDockLayout.verticalPad - row2H + (row2H - dockMetaH) / 2f
+            } else {
+                val progressH = coverThemeDockLayout.sliderHeight + maxOf(coverThemeDockLayout.footerHeight, 24.dp)
+                val volumeHAndGap = if (dockIncludeVolume) coverThemeDockLayout.itemGap + coverThemeDockLayout.volumeHeight else 0.dp
+                dockBottom -
+                    coverThemeDockLayout.verticalPad -
+                    coverThemeDockLayout.actionHeight -
+                    coverThemeDockLayout.itemGap -
+                    volumeHAndGap -
+                    coverThemeDockLayout.transportHeight -
+                    coverThemeDockLayout.itemGap -
+                    progressH -
+                    coverThemeDockLayout.itemGap -
+                    dockMetaH
+            }
+        } else {
+            0.dp
+        }
+        val dockMetaRowW = if (coverThemeDockLayout != null) {
+            val dockInnerW = (w - effectiveLeftInset - effectiveRightInset - dockHorizontalMargin * 2 - coverThemeDockLayout.horizontalPad * 2)
+                .coerceAtLeast(24.dp)
+            if (landscapeGeom != null) {
+                (dockInnerW - coverThemeDockLayout.transportWidth - coverThemeDockLayout.landscapeMetaRowGap).coerceAtLeast(24.dp)
+            } else {
+                dockInnerW
+            }
+        } else {
+            0.dp
+        }
+        val dockMetaW = if (coverThemeDockLayout != null) {
+            val cubeReserve = if (hasCubeOnTitleRow) buttonSize + cubeGap else 0.dp
+            (dockMetaRowW - cubeReserve).coerceAtLeast(24.dp)
+        } else {
+            0.dp
+        }
         val fullTextX = if (landscapeGeom != null) {
-            val normalMetaX = landscapeGeom.rightPaneX
+            val normalMetaX = if (coverThemeDockLayout != null) dockMetaX else landscapeGeom.rightPaneX
             val compactMetaX = landscapeGeom.lyricsCompactCoverX + landscapeGeom.lyricsCompactCoverSize + 12.dp
             lerp(normalMetaX, compactMetaX, p)
         } else {
             val compactTextX = smallX + small + 12.dp * PlayerPaddingScale
-            val expandedTextX = if (fullscreen) fullCard.left + 16.dp else portraitColX
+            val expandedTextX = when {
+                coverThemeDockLayout != null -> dockMetaX
+                squareCardFullscreen -> fullCard.left + 16.dp
+                else -> portraitColX
+            }
             expandedTextX + (compactTextX - expandedTextX) * p
         }
         val fullTextY = if (landscapeGeom != null) {
-            val normalMetaY = landscapeGeom.controlStackTop
+            val normalMetaY = if (coverThemeDockLayout != null) dockMetaY else landscapeGeom.controlStackTop
             val compactMetaY = landscapeGeom.lyricsCompactCoverY + (landscapeGeom.lyricsCompactCoverSize - measuredTextHeight * .86f) / 2
             lerp(normalMetaY, compactMetaY, p)
         } else {
             val compactTextY = smallY + (small - measuredTextHeight * .78f) / 2
-            titleY + (compactTextY - titleY) * p
+            val expandedTextY = if (coverThemeDockLayout != null) dockMetaY else titleY
+            expandedTextY + (compactTextY - expandedTextY) * p
         }
         val fullTextWidth = if (landscapeGeom != null) {
             val cubeReserve = if (hasCubeOnTitleRow) buttonSize + cubeGap else 0.dp
-            val normalMetaW = (landscapeGeom.rightPaneWidth - 52.dp - cubeReserve).coerceAtLeast(24.dp)
+            val normalMetaW = if (coverThemeDockLayout != null) {
+                dockMetaW
+            } else {
+                (landscapeGeom.rightPaneWidth - 52.dp - cubeReserve).coerceAtLeast(24.dp)
+            }
             val compactMetaW = (landscapeGeom.leftPaneWidth - landscapeGeom.lyricsCompactCoverSize - 12.dp - 48.dp).coerceAtLeast(24.dp)
             lerp(normalMetaW, compactMetaW, p)
         } else {
             val compactTextX = smallX + small + 12.dp * PlayerPaddingScale
             val cubeReserve = if (hasCubeOnTitleRow) buttonSize + cubeGap else 0.dp
-            val expandedTextWidth = if (fullscreen) {
-                (fullCard.width - 84.dp - cubeReserve).coerceAtLeast(24.dp)
-            } else if (immGeom != null) {
-                (portraitColW - buttonSize - 8.dp - cubeReserve).coerceAtLeast(24.dp)
-            } else {
-                (portraitColW - cubeReserve).coerceAtLeast(24.dp)
+            val expandedTextWidth = when {
+                coverThemeDockLayout != null -> dockMetaW
+                squareCardFullscreen -> (fullCard.width - 84.dp - cubeReserve).coerceAtLeast(24.dp)
+                immGeom != null -> (portraitColW - buttonSize - 8.dp - cubeReserve).coerceAtLeast(24.dp)
+                else -> (portraitColW - cubeReserve).coerceAtLeast(24.dp)
             }
             expandedTextWidth + ((w - compactTextX - 68.dp).coerceAtLeast(24.dp) - expandedTextWidth) * p
         }
@@ -1319,18 +1519,19 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         val mixProgress = mixVisual?.progress?.coerceIn(0f, 1f)
         val mixFromAlpha = mixProgress?.let { (1f - it).coerceIn(0f, 1f) } ?: 0f
         val mixToAlpha = mixProgress?.coerceIn(0f, 1f) ?: 0f
-        val landscapeMetaChrome = if (landscapeGeom != null) 1f - e * p * (1f - controlsVisibility) else 1f
+        val sharedMetaVis = if (usesStageDock) coverflowSharedVis else 1f
+        val landscapeMetaChrome = (if (landscapeGeom != null) 1f - e * p * (1f - controlsVisibility) else 1f) * sharedMetaVis
         Box(Modifier.offset(lerp(miniTextX, fullTextX, e), miniTextY + (fullTextY - miniTextY) * e)
             .width(textWidth).height(measuredTextHeight).graphicsLayer {
                 translationX = miniShift
-                this.alpha = miniAlpha * shareChromeAlpha * landscapeMetaChrome
-            }.blur(shareChromeBlur + if (landscapeGeom != null) ((1f - landscapeMetaChrome) * 14f).dp else 0.dp)) {
+                this.alpha = miniAlpha * shareChromeAlpha * landscapeMetaChrome * tiledChromeVis.value
+            }.blur(shareChromeBlur + if (landscapeGeom != null || usesStageDock) ((1f - landscapeMetaChrome) * (if (coverflowActive) 6f else 14f)).dp else 0.dp)) {
             Column(Modifier.fillMaxSize()
                 .width(textWidth).onSizeChanged { textHeight = it.height }.graphicsLayer {
                     transformOrigin = TransformOrigin(0f, 0f); scaleX = textScale; scaleY = textScale
                     this.alpha = miniAlpha * if (mixVisual == null) 1f else mixFromAlpha
                 }
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !shareActive && landscapeMetaChrome > 0.1f, onClick = sharedClick)) {
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !shareActive && !tiledWallDragging && landscapeMetaChrome > 0.1f && (!usesStageDock || coverflowSharedVis > 0.5f), onClick = sharedClick)) {
                 Text(mixVisual?.fromTitle ?: song.title, color = textColor, fontSize = 20.sp * metadataSize, lineHeight = 25.sp * metadataSize,
                     fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(mixVisual?.fromArtist ?: song.artist, color = artistColor, fontSize = 16.sp * metadataSize, lineHeight = 21.sp * metadataSize,
@@ -1346,7 +1547,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                     fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             /* Keep the normal click target over the two metadata layers. */
-            Box(Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !shareActive && landscapeMetaChrome > 0.1f, onClick = sharedClick))
+            Box(Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !shareActive && !tiledWallDragging && landscapeMetaChrome > 0.1f && (!usesStageDock || coverflowSharedVis > 0.5f), onClick = sharedClick))
         }
 
         // Action buttons live outside the content's blur layer so glass/blur remains sharp.
@@ -1356,15 +1557,25 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             val moreX: Dp
             val moreY: Dp
             if (landscapeGeom != null) {
-                val normalMoreX = landscapeGeom.rightPaneX + landscapeGeom.rightPaneWidth - buttonSize
+                val normalMoreX = if (coverflowActive) {
+                    w - effectiveRightInset - 20.dp - buttonSize
+                } else {
+                    landscapeGeom.rightPaneX + landscapeGeom.rightPaneWidth - buttonSize
+                }
                 val compactMoreX = landscapeGeom.leftPaneX + landscapeGeom.leftPaneWidth - buttonSize
-                val normalMoreY = landscapeGeom.controlStackTop + (measuredTextHeight - buttonSize) / 2
+                val normalMoreY = if (coverflowActive) {
+                    coverThemeHeaderTop
+                } else {
+                    landscapeGeom.controlStackTop + (measuredTextHeight - buttonSize) / 2
+                }
                 val compactMoreY = landscapeGeom.lyricsCompactCoverY + (landscapeGeom.lyricsCompactCoverSize - buttonSize) / 2
                 moreX = lerp(normalMoreX, compactMoreX, p)
                 moreY = lerp(normalMoreY, compactMoreY, p)
             } else {
-                val useRightCornerAnchor = fullscreen || compactWindow || coverSize < w * .66f
-                val bigX = if (fullscreen) {
+                val useRightCornerAnchor = squareCardFullscreen || compactWindow || coverSize < w * .66f
+                val bigX = if (coverflowActive) {
+                    w - effectiveRightInset - 20.dp - buttonSize
+                } else if (squareCardFullscreen) {
                     fullCard.left + fullCard.width - 16.dp - buttonSize
                 } else if (immGeom != null) {
                     portraitColX + portraitColW - buttonSize
@@ -1373,7 +1584,9 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 } else {
                     coverX + coverSize - buttonSize
                 }
-                val bigY = if (fullscreen || immGeom != null) {
+                val bigY = if (coverflowActive) {
+                    coverThemeHeaderTop
+                } else if (squareCardFullscreen || immGeom != null) {
                     titleY + (measuredTextHeight - buttonSize) / 2
                 } else {
                     effectiveStatus + (if (compactWindow) 2.dp else 8.dp)
@@ -1382,13 +1595,18 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 moreY = bigY + (compactY - bigY) * p
             }
             val cubeModeVis = (1f - (p / 0.72f).coerceIn(0f, 1f))
-            if (hasCubeOnTitleRow && cubeModeVis > 0.001f) {
+            val cubeRevealVis = if (usesStageDock) stageRevealAlpha else 1f
+            val cubeCombinedVis = cubeModeVis * cubeRevealVis
+            if (hasCubeOnTitleRow && cubeCombinedVis > 0.001f) {
                 val cubeX: Dp
                 val cubeY: Dp
-                if (landscapeGeom != null) {
+                if (coverThemeDockLayout != null) {
+                    cubeX = dockMetaX + dockMetaRowW - buttonSize
+                    cubeY = dockMetaY + (dockMetaH - buttonSize) / 2f
+                } else if (landscapeGeom != null) {
                     cubeX = landscapeGeom.rightPaneX + landscapeGeom.rightPaneWidth - buttonSize * 2 - cubeGap
                     cubeY = landscapeGeom.controlStackTop + (measuredTextHeight - buttonSize) / 2
-                } else if (fullscreen) {
+                } else if (squareCardFullscreen) {
                     cubeX = fullCard.left + fullCard.width - 16.dp - buttonSize * 2 - cubeGap
                     cubeY = titleY + (measuredTextHeight - buttonSize) / 2
                 } else if (immGeom != null) {
@@ -1398,7 +1616,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                     cubeX = portraitColX + portraitColW - buttonSize
                     cubeY = titleY + (measuredTextHeight - buttonSize) / 2
                 }
-                val cubeBlur = ((1f - cubeModeVis) * 14f).dp + shareChromeBlur
+                val cubeBlur = ((1f - cubeCombinedVis) * 14f).dp + shareChromeBlur
                 val cubeGenerating = spatialCoverState is SpatialCoverResolveState.Generating
                 PlayerSpatialCubeButton(
                     active = spatialCoverRequested,
@@ -1408,14 +1626,15 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                     miuixBackdrop = miuixBackdrop,
                     menuTint = menuTint,
                     inkColor = activeInk,
-                    enabled = !shareActive && cubeModeVis > 0.1f,
+                    enabled = !shareActive && !tiledWallDragging && cubeCombinedVis > 0.1f,
                     onClick = onToggleSpatialCover,
                     modifier = Modifier
                         .offset(cubeX, cubeY)
                         .size(buttonSize)
                         .graphicsLayer {
-                            this.alpha = alpha * shareChromeAlpha * cubeModeVis
-                            scaleX = 0.84f + 0.16f * cubeModeVis
+                            val visScale = cubeCombinedVis * tiledChromeVis.value
+                            this.alpha = alpha * shareChromeAlpha * visScale
+                            scaleX = 0.84f + 0.16f * visScale
                             scaleY = scaleX
                         }
                         .blur(cubeBlur, BlurredEdgeTreatment.Unbounded),
@@ -1428,13 +1647,13 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                     oneUi = oneUi,
                     miuixBackdrop = miuixBackdrop,
                     menuTint = menuTint,
-                    enabled = !shareActive && moreVis > 0.1f,
+                    enabled = !shareActive && !tiledWallDragging && moreVis > 0.1f,
                     onMore = onMore,
                     modifier = Modifier
                         .offset(moreX, moreY)
                         .size(buttonSize)
                         .graphicsLayer {
-                            this.alpha = alpha * shareChromeAlpha * moreVis
+                            this.alpha = alpha * shareChromeAlpha * moreVis * tiledChromeVis.value
                             scaleX = 1f - .08f * p
                             scaleY = scaleX
                         }
@@ -1446,7 +1665,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         if (alpha > 0f && p > 0f && queueBlend < .01f && controlsVisibility > .001f) {
             val menuAnchorX = if (landscapeGeom != null) {
                 landscapeGeom.rightPaneX
-            } else if (fullscreen) {
+            } else if (squareCardFullscreen) {
                 margin
             } else {
                 coverX
@@ -1475,7 +1694,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
 }
 
 @Composable
-private fun PlayerProgressSection(
+internal fun PlayerProgressSection(
     model: AuraViewModel,
     song: btm.m.auraplayer.data.Song,
     appearance: NowPlayingConfig,
@@ -1560,7 +1779,7 @@ private fun PlayerProgressSection(
             Modifier
                 .padding(horizontal = horizontalInset)
                 .fillMaxWidth()
-                .height(footerHeight),
+                .heightIn(min = maxOf(footerHeight, 24.dp)),
         ) {
             val timeColor = expressive?.timeInk ?: oneUi?.subText ?: Color.White.copy(alpha = .85f)
             val timeStyle = if (expressive != null || oneUi != null) {
@@ -1621,12 +1840,13 @@ private fun PlayerProgressSection(
                                     model.refreshQualities()
                                     toggle()
                                 }
-                                .padding(horizontal = if (badgeBg != null) 11.dp else 7.dp, vertical = 4.dp),
+                                .padding(horizontal = if (badgeBg != null) 11.dp else 7.dp, vertical = 2.dp),
                         ) {
                             Text(
                                 qualityName(actualQuality ?: model.quality),
                                 color = badgeFg,
                                 fontSize = 11.sp,
+                                lineHeight = 13.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 fontWeight = FontWeight.SemiBold,
@@ -1640,6 +1860,7 @@ private fun PlayerProgressSection(
                     localAudioText(model),
                     color = timeColor,
                     fontSize = 11.sp,
+                    lineHeight = 13.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     fontWeight = FontWeight.SemiBold,
@@ -1736,7 +1957,7 @@ private fun PlayerTransportSection(
 }
 
 @Composable
-private fun PlayerVolumeSection(
+internal fun PlayerVolumeSection(
     expressive: PlayerExpressiveColors?,
     oneUi: PlayerOneUiColors?,
     height: Dp,
@@ -1994,12 +2215,13 @@ internal fun computeMotionCoverOverlayAlpha(
 }
 
 @Composable
-private fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp = radius,
+internal fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp = radius,
                   topEndRadius: Dp = radius, bottomEndRadius: Dp = bottomRadius,
                   onClick: (() -> Unit)? = null,
                   animation: CoverAnimation = CoverAnimation.DEFAULT, animate: Boolean = false, transitionKey: String = uri,
                   mixVisual: btm.m.auraplayer.auramix.AuraMixVisualTransition? = null,
                   placeholderTint: Color = Color.White.copy(alpha = .3f),
+                  showPlaceholderBackground: Boolean = true,
                   spatialState: SpatialCoverResolveState = SpatialCoverResolveState.Idle,
                   spatialActive: Boolean = false,
                   spatialTilt: Offset = Offset.Zero,
@@ -2065,16 +2287,17 @@ private fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp 
     Box(modifier.clip(RoundedCornerShape(topStart = radius, topEnd = topEndRadius, bottomStart = bottomRadius, bottomEnd = bottomEndRadius))
         .then(if (onClick == null) Modifier else Modifier.playerSurfaceClick(onClick))
         .then(featherMask)
-        .background(Color.White.copy(alpha = .12f * (1f - feather))), contentAlignment = Alignment.Center) {
+        .then(if (showPlaceholderBackground) Modifier.background(Color.White.copy(alpha = .12f * (1f - feather))) else Modifier), contentAlignment = Alignment.Center) {
         if (mixVisual == null) {
             Box(Modifier.fillMaxSize().blur(coverBlurDp.dp)) {
+                val advancedMaterial = btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled.current
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .then(if (feather > 0.001f) Modifier.miuixLayerBackdrop(coverBackdrop) else Modifier),
+                        .then(if (feather > 0.001f && advancedMaterial) Modifier.miuixLayerBackdrop(coverBackdrop) else Modifier),
                 ) {
                     if (uri.isNotBlank()) AnimatedPlayerArtwork(uri, transitionKey, animation, animate)
-                    else Image(painterResource(R.drawable.ic_player_queue), null, Modifier.fillMaxSize(.3f * PlayerIconScale), colorFilter = ColorFilter.tint(placeholderTint))
+                    else if (showPlaceholderBackground) Image(painterResource(R.drawable.ic_player_queue), null, Modifier.fillMaxSize(.3f * PlayerIconScale), colorFilter = ColorFilter.tint(placeholderTint))
                     if (!motionVideoPath.isNullOrBlank()) {
                         AnimatedMotionCoverVideo(
                             videoPath = motionVideoPath,
@@ -2093,7 +2316,7 @@ private fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp 
                         }
                     }
                 }
-                if (feather > 0.01f) {
+                if (feather > 0.01f && advancedMaterial) {
                     Box(
                         Modifier
                             .matchParentSize()
@@ -2317,7 +2540,7 @@ private fun Modifier.playerSurfaceClick(onClick: () -> Unit): Modifier {
 }
 
 @Composable
-private fun PlayerButton(icon: Int, label: String, color: Color, iconSize: Dp, touchSize: Dp, onClick: () -> Unit) {
+internal fun PlayerButton(icon: Int, label: String, color: Color, iconSize: Dp, touchSize: Dp, onClick: () -> Unit) {
     Box(Modifier.size(touchSize).clip(RoundedCornerShape(50)).clickable(role = Role.Button, onClick = onClick)
         .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
         Image(painterResource(icon), null, Modifier.size(iconSize * PlayerIconScale), colorFilter = ColorFilter.tint(color))
@@ -2429,6 +2652,12 @@ internal fun qualityName(value: StreamQuality): String = when (value) {
 }
 
 private fun timeText(ms: Long) = "${ms.coerceAtLeast(0) / 60000}:${(ms.coerceAtLeast(0) / 1000 % 60).toString().padStart(2, '0')}"
+
+private fun smoothstep01(edge0: Float, edge1: Float, x: Float): Float {
+    val span = (edge1 - edge0).coerceAtLeast(1e-4f)
+    val t = ((x - edge0) / span).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
 
 private fun localAudioText(model: AuraViewModel): String = model.localAudioDetails?.let { detail ->
     buildList {

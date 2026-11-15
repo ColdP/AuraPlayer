@@ -341,7 +341,7 @@ internal fun CustomNavigation(
                 // Keep the existing preference scale while mapping its default 18 to the
                 // official LiquidBottomTabs blur radius of 8dp.
                 blurRadius = (blurRadius * 8f / 18f).dp,
-                advancedMaterial = advancedMaterial,
+                advancedMaterial = advancedMaterial && isRuntimeShaderSupported(),
                 suppressShadow = suppressFloatingShadow,
                 floatingShadow = floatingShadow,
                 softBackdropShadow = softBackdropShadow,
@@ -416,7 +416,7 @@ internal fun CustomNavigation(
                 showIcons = effectiveMode != LabelMode.TEXT_ONLY,
                 showLabels = effectiveMode != LabelMode.ICON_ONLY,
                 blurRadius = (blurRadius * 8f / 18f).dp,
-                advancedMaterial = advancedMaterial,
+                advancedMaterial = advancedMaterial && isRuntimeShaderSupported(),
                 suppressShadow = suppressFloatingShadow,
                 floatingShadow = floatingShadow,
                 softBackdropShadow = softBackdropShadow,
@@ -560,28 +560,26 @@ private fun TrailingActionButton(
         animationSpec = spring(stiffness = 700f, dampingRatio = 0.82f),
         label = "trailingActionPressProgress",
     )
-    val surface = if (liquid || useEffects) {
+    val surface = if (useEffects) {
         Modifier.drawBackdrop(
             backdrop = backdrop,
             shape = { CircleShape },
             effects = {
-                if (useEffects) {
-                    vibrancy()
-                    val radius = blurRadius.coerceIn(0, 40)
-                    blur(with(density) {
-                        when {
-                            liquid -> radius * 8f / 18f
-                            floating -> radius * if (harmony) 0.29f else 0.24f
-                            else -> radius.toFloat()
-                        }.dp.toPx() * material.blur / 100f
-                    })
-                    if (liquid) lens(24.dp.toPx() * material.thickness / 100f, 24.dp.toPx() * material.refraction / 100f, chromaticAberration = material.dispersion ?: false)
-                    else if (floating) {
-                        lens(16.dp.toPx() * material.thickness / 100f, 32.dp.toPx() * material.refraction / 100f, depthEffect = true, chromaticAberration = material.dispersion ?: false)
-                    }
+                vibrancy()
+                val radius = blurRadius.coerceIn(0, 40)
+                blur(with(density) {
+                    when {
+                        liquid -> radius * 8f / 18f
+                        floating -> radius * if (harmony) 0.29f else 0.24f
+                        else -> radius.toFloat()
+                    }.dp.toPx() * material.blur / 100f
+                })
+                if (liquid) lens(24.dp.toPx() * material.thickness / 100f, 24.dp.toPx() * material.refraction / 100f, chromaticAberration = material.dispersion ?: false)
+                else if (floating) {
+                    lens(16.dp.toPx() * material.thickness / 100f, 32.dp.toPx() * material.refraction / 100f, depthEffect = true, chromaticAberration = material.dispersion ?: false)
                 }
             },
-            highlight = if (useEffects) ({
+            highlight = {
                 Highlight.Default.copy(
                     alpha = material.light(when {
                         liquid -> 1f
@@ -589,7 +587,7 @@ private fun TrailingActionButton(
                         else -> 0.96f
                     })
                 )
-            }) else null,
+            },
             shadow = { floatingShadow },
             innerShadow = if (softBackdropShadow) ({
                 InnerShadow(
@@ -600,7 +598,8 @@ private fun TrailingActionButton(
             onDrawSurface = { drawRect(surfaceColor.copy(alpha = if (action.actionBackgroundColor == null) material.alpha(surfaceColor.alpha) else surfaceColor.alpha)) }
         )
     } else {
-        Modifier.background(surfaceColor.copy(alpha = if (action.actionBackgroundColor == null) material.alpha(surfaceColor.alpha) else surfaceColor.alpha), CircleShape)
+        val solidColor = action.actionBackgroundColor ?: if (isDarkTheme) Color(0xFF242424) else Color(0xFFF5F5F5)
+        Modifier.background(solidColor, CircleShape)
     }
     val floatingShadowModifier = if (floating && (!softBackdropShadow || !useEffects)) {
         val shadowColor = Color.Black.copy(alpha = if (softBackdropShadow) 0.1f else 0.35f)
@@ -1086,7 +1085,8 @@ private fun HyperFloatingNavigationBar(
                             },
                         )
                     } else {
-                        Modifier.clip(capsule).background(fallbackSurface.copy(alpha = material.alpha(fallbackSurface.alpha)))
+                        val solidBar = if (isDarkTheme) Color(0xFF242424) else Color(0xFFF5F5F5)
+                        Modifier.clip(capsule).background(solidBar, capsule)
                     }
                 )
         )
@@ -1612,29 +1612,36 @@ private fun LiquidBottomTabs(
             }
         }
 
+        val solidContainer = if (isLightTheme) Color(0xFFF5F5F5) else Color(0xFF242424)
         CompositionLocalProvider(LocalLiquidContentColor provides contentColor) {
             Row(
                 Modifier
                     .graphicsLayer { translationX = panelOffset }
-                    .drawBackdrop(
-                        backdrop = backdrop,
-                        shape = { cornerShape },
-                        effects = {
-                            if (advancedMaterial) {
-                                vibrancy()
-                                blur(blurRadius.toPx() * material.blur / 100f)
-                                lens(24.dp.toPx() * material.thickness / 100f, 24.dp.toPx() * material.refraction / 100f, chromaticAberration = material.dispersion ?: false)
-                            }
-                        },
-                        highlight = if (advancedMaterial) ({ Highlight.Default.copy(alpha = material.light(Highlight.Default.alpha)) }) else null,
-                        shadow = if (suppressShadow) null else ({ floatingShadow }),
-                        layerBlock = {
-                            val progress = dragAnimation.pressProgress
-                            val scale = lerp(1f, 1f + 16.dp.toPx() / size.width.coerceAtLeast(1f), progress)
-                            scaleX = scale
-                            scaleY = scale
-                        },
-                        onDrawSurface = { drawRect(containerColor.copy(alpha = material.alpha(containerColor.alpha))) }
+                    .then(
+                        if (advancedMaterial) {
+                            Modifier.drawBackdrop(
+                                backdrop = backdrop,
+                                shape = { cornerShape },
+                                effects = {
+                                    vibrancy()
+                                    blur(blurRadius.toPx() * material.blur / 100f)
+                                    lens(24.dp.toPx() * material.thickness / 100f, 24.dp.toPx() * material.refraction / 100f, chromaticAberration = material.dispersion ?: false)
+                                },
+                                highlight = { Highlight.Default.copy(alpha = material.light(Highlight.Default.alpha)) },
+                                shadow = if (suppressShadow) null else ({ floatingShadow }),
+                                layerBlock = {
+                                    val progress = dragAnimation.pressProgress
+                                    val scale = lerp(1f, 1f + 16.dp.toPx() / size.width.coerceAtLeast(1f), progress)
+                                    scaleX = scale
+                                    scaleY = scale
+                                },
+                                onDrawSurface = { drawRect(containerColor.copy(alpha = material.alpha(containerColor.alpha))) }
+                            )
+                        } else {
+                            (if (suppressShadow) Modifier else Modifier.shadow(6.dp, cornerShape, clip = false))
+                                .clip(cornerShape)
+                                .background(solidContainer, cornerShape)
+                        }
                     )
                     .then(interactiveHighlight.modifier)
                     .height(64.dp * heightScale)
@@ -1645,42 +1652,42 @@ private fun LiquidBottomTabs(
             )
         }
 
-        CompositionLocalProvider(
-            LocalLiquidBottomTabScale provides {
-                lerp(1f, 1.2f, dragAnimation.pressProgress)
-            },
-            LocalLiquidContentColor provides contentColor
-        ) {
-            Row(
-                Modifier
-                    .clearAndSetSemantics { }
-                    .alpha(0f)
-                    .layerBackdrop(tabsBackdrop)
-                    .graphicsLayer { translationX = panelOffset }
-                    .drawBackdrop(
-                        backdrop = backdrop,
-                        shape = { cornerShape },
-                        effects = {
-                            if (advancedMaterial) {
+        if (advancedMaterial) {
+            CompositionLocalProvider(
+                LocalLiquidBottomTabScale provides {
+                    lerp(1f, 1.2f, dragAnimation.pressProgress)
+                },
+                LocalLiquidContentColor provides contentColor
+            ) {
+                Row(
+                    Modifier
+                        .clearAndSetSemantics { }
+                        .alpha(0f)
+                        .layerBackdrop(tabsBackdrop)
+                        .graphicsLayer { translationX = panelOffset }
+                        .drawBackdrop(
+                            backdrop = backdrop,
+                            shape = { cornerShape },
+                            effects = {
                                 val progress = dragAnimation.pressProgress
                                 vibrancy()
                                 blur(blurRadius.toPx() * material.blur / 100f)
                                 lens(24.dp.toPx() * progress * material.pressBoost / 100f * material.thickness / 100f, 24.dp.toPx() * progress * material.pressBoost / 100f * material.refraction / 100f, chromaticAberration = material.dispersion ?: false)
-                            }
-                        },
-                        highlight = if (advancedMaterial) ({
-                            Highlight.Default.copy(alpha = material.light(dragAnimation.pressProgress))
-                        }) else null,
-                        onDrawSurface = { drawRect(containerColor.copy(alpha = material.alpha(containerColor.alpha))) }
-                    )
-                    .then(interactiveHighlight.modifier)
-                    .height(56.dp * heightScale)
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp)
-                    .graphicsLayer(colorFilter = ColorFilter.tint(accentColor)),
-                verticalAlignment = Alignment.CenterVertically,
-                content = content
-            )
+                            },
+                            highlight = {
+                                Highlight.Default.copy(alpha = material.light(dragAnimation.pressProgress))
+                            },
+                            onDrawSurface = { drawRect(containerColor.copy(alpha = material.alpha(containerColor.alpha))) }
+                        )
+                        .then(interactiveHighlight.modifier)
+                        .height(56.dp * heightScale)
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp)
+                        .graphicsLayer(colorFilter = ColorFilter.tint(accentColor)),
+                    verticalAlignment = Alignment.CenterVertically,
+                    content = content
+                )
+            }
         }
 
         Box(
@@ -1695,42 +1702,50 @@ private fun LiquidBottomTabs(
                 }
                 .then(interactiveHighlight.gestureModifier)
                 .then(dragAnimation.modifier)
-                .drawBackdrop(
-                    backdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop),
-                    shape = { cornerShape },
-                    effects = {
-                        val progress = dragAnimation.pressProgress
-                        lens(
-                            10.dp.toPx() * progress * material.pressBoost / 100f * material.thickness / 100f,
-                            14.dp.toPx() * progress * material.pressBoost / 100f * material.refraction / 100f,
-                            chromaticAberration = material.dispersion ?: true
+                .then(
+                    if (advancedMaterial) {
+                        Modifier.drawBackdrop(
+                            backdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop),
+                            shape = { cornerShape },
+                            effects = {
+                                val progress = dragAnimation.pressProgress
+                                lens(
+                                    10.dp.toPx() * progress * material.pressBoost / 100f * material.thickness / 100f,
+                                    14.dp.toPx() * progress * material.pressBoost / 100f * material.refraction / 100f,
+                                    chromaticAberration = material.dispersion ?: true
+                                )
+                            },
+                            highlight = {
+                                Highlight.Default.copy(alpha = material.light(dragAnimation.pressProgress))
+                            },
+                            shadow = if (suppressShadow) null else if (softBackdropShadow) ({
+                                Shadow(alpha = dragAnimation.pressProgress)
+                            }) else ({ floatingShadow }),
+                            innerShadow = if (suppressShadow || !softBackdropShadow) null else ({
+                                val progress = dragAnimation.pressProgress
+                                InnerShadow(radius = 8.dp * progress, alpha = progress)
+                            }),
+                            layerBlock = {
+                                scaleX = dragAnimation.scaleX
+                                scaleY = dragAnimation.scaleY
+                                val velocity = dragAnimation.velocity / 10f
+                                scaleX /= 1f - (velocity * 0.75f).fastCoerceIn(-0.2f, 0.2f)
+                                scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
+                            },
+                            onDrawSurface = {
+                                val progress = dragAnimation.pressProgress
+                                drawRect(
+                                    if (isLightTheme) Color.Black.copy(alpha = 0.1f)
+                                    else Color.White.copy(alpha = 0.1f),
+                                    alpha = 1f - progress
+                                )
+                                drawRect(Color.Black.copy(alpha = 0.03f * progress))
+                            }
                         )
-                    },
-                    highlight = if (advancedMaterial) ({
-                        Highlight.Default.copy(alpha = material.light(dragAnimation.pressProgress))
-                    }) else null,
-                    shadow = if (suppressShadow) null else if (softBackdropShadow) ({
-                        Shadow(alpha = dragAnimation.pressProgress)
-                    }) else ({ floatingShadow }),
-                    innerShadow = if (suppressShadow || !softBackdropShadow) null else ({
-                        val progress = dragAnimation.pressProgress
-                        InnerShadow(radius = 8.dp * progress, alpha = progress)
-                    }),
-                    layerBlock = {
-                        scaleX = dragAnimation.scaleX
-                        scaleY = dragAnimation.scaleY
-                        val velocity = dragAnimation.velocity / 10f
-                        scaleX /= 1f - (velocity * 0.75f).fastCoerceIn(-0.2f, 0.2f)
-                        scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
-                    },
-                    onDrawSurface = {
-                        val progress = dragAnimation.pressProgress
-                        drawRect(
-                            if (isLightTheme) Color.Black.copy(alpha = 0.1f)
-                            else Color.White.copy(alpha = 0.1f),
-                            alpha = 1f - progress
-                        )
-                        drawRect(Color.Black.copy(alpha = 0.03f * progress))
+                    } else {
+                        val indicatorTint = (if (isLightTheme) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.16f))
+                            .let { it.copy(alpha = (it.alpha * material.selectionOpacity / 100f).coerceIn(0f, 1f)) }
+                        Modifier.clip(cornerShape).background(indicatorTint, cornerShape)
                     }
                 )
                 .height(56.dp * heightScale)

@@ -46,6 +46,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var hasPermission by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
     var account by mutableStateOf<CloudAccount?>(null); private set
+    var savedAccounts by mutableStateOf<List<StoredCloudAccount>>(emptyList()); private set
     var cloudPlaylists by mutableStateOf<List<CloudPlaylist>>(emptyList()); private set
     var cloudPlaylistsLoading by mutableStateOf(false); private set
     var cloudPlaylistsFailed by mutableStateOf(false); private set
@@ -492,7 +493,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun togglePlayback() { controller?.let { if (it.playWhenReady) it.pause() else it.play() } }
     fun next() { controller?.seekToNextMediaItem() }
-    fun previous() { controller?.seekToPreviousMediaItem() }
+    fun previous() { controller?.seekToPrevious() }
     fun enqueueNext(song: Song) {
         val player = controller ?: run { error = tr("player_connecting", "播放服务正在连接，请稍后重试"); return }
         if (player.mediaItemCount == 0) { play(listOf(song)); return }
@@ -831,6 +832,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         val changed = app.endpoint != NeteaseApi.normalizeEndpoint(value)
         if (changed) clearCloudQueue()
         app.saveEndpoint(value)
+        syncSavedAccounts()
         if (changed) { account = null; cloudPlaylists = emptyList() }
         loginMessage = tr("api_saved", "服务地址已保存")
     }.onFailure { loginMessage = tr("invalid_api", "请输入 HTTPS 地址；自建局域网服务可使用 HTTP") }.isSuccess
@@ -849,7 +851,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         if (e is CloudApiException && e.status == 301) {
             cloudGeneration++
             resetCloudPaging()
-            app.clearCookie(); account = null; cloudPlaylists = emptyList()
+            app.clearCookie(); syncSavedAccounts(); account = null; cloudPlaylists = emptyList()
         }
         val message = when {
             e is CloudApiException && e.status == 301 -> tr("session_expired", "登录已过期，请重新登录")
@@ -879,9 +881,20 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         val previous = collectionDestinations.maxByOrNull { it.key }?.value
         collection = previous?.collection; cloudCollection = previous?.cloud; activeCollectionId = previous?.id ?: 0L
     }
+    private fun syncSavedAccounts() {
+        savedAccounts = app.savedAccounts()
+    }
     private fun restoreAccount() {
+        syncSavedAccounts()
+        app.activeStoredAccount()?.let { account = it.toAccount() }
         if (app.cookie.isNotBlank()) cloudAction {
-            account = app.api.account()
+            val generation = cloudGeneration
+            val user = app.api.account()
+            currentCoroutineContext().ensureActive()
+            if (generation != cloudGeneration) return@cloudAction
+            app.saveAccountSession(user, app.cookie)
+            syncSavedAccounts()
+            account = user
             loadCloudPlaylists(reset = true)
         }
     }
@@ -960,29 +973,82 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch { smsRemaining = 60; while (smsRemaining > 0) { delay(1000); smsRemaining-- } }
         }
     }
-    fun login(phone: String, country: String, captcha: String) = cloudAction {
+    fun login(phone: String, country: String, captcha: String, onSuccess: () -> Unit = {}) = cloudAction {
         val generation = cloudGeneration
         val (cookie, user) = app.api.login(phone.trim(), country.trim().removePrefix("+"), captcha.trim())
         currentCoroutineContext().ensureActive()
         if (generation != cloudGeneration) return@cloudAction
-        app.saveCookie(cookie)
-        resetCloudPaging(); cloudPlaylists = emptyList()
+        val previousUserId = account?.userId
+        if (previousUserId != null && previousUserId != user.userId) clearCloudQueue() else resetCloudPaging()
+        cloudPlaylists = emptyList()
+        app.saveAccountSession(user, cookie)
+        syncSavedAccounts()
         account = user
         loginMessage = tr("login_success", "登录成功")
         loadCloudPlaylists(reset = true)
+        if (settings.value.homeContent == "cloud") refreshCloudHome()
+        onSuccess()
     }
-    fun completeOfficialLogin(sessionCookie: String) {
+    fun completeOfficialLogin(sessionCookie: String, onSuccess: () -> Unit = {}) {
         if (cloudBusy || app.endpoint.isNotBlank()) return
         cloudAction {
             val generation = cloudGeneration
             val user = withContext(Dispatchers.IO) { NeteaseApi({ "" }, { sessionCookie }).account() }
             currentCoroutineContext().ensureActive()
             if (generation != cloudGeneration) return@cloudAction
-            app.saveCookie(sessionCookie)
-            resetCloudPaging(); cloudPlaylists = emptyList()
+            val previousUserId = account?.userId
+            if (previousUserId != null && previousUserId != user.userId) clearCloudQueue() else resetCloudPaging()
+            cloudPlaylists = emptyList()
+            app.saveAccountSession(user, sessionCookie)
+            syncSavedAccounts()
             account = user
             loginMessage = tr("login_success", "登录成功")
             loadCloudPlaylists(reset = true)
+            if (settings.value.homeContent == "cloud") refreshCloudHome()
+            onSuccess()
+        }
+    }
+    fun switchCloudAccount(userId: Long) {
+        if (account?.userId == userId && app.cookie.isNotBlank()) return
+        cloudGeneration++
+        cloudJob?.cancel()
+        clearCloudQueue()
+        val selected = app.switchAccount(userId)
+        syncSavedAccounts()
+        cloudPlaylists = emptyList()
+        account = selected?.toAccount()
+        if (selected == null) return
+        loadCloudPlaylists(reset = true)
+        if (settings.value.homeContent == "cloud") refreshCloudHome()
+        cloudAction {
+            val generation = cloudGeneration
+            val refreshed = app.api.account()
+            currentCoroutineContext().ensureActive()
+            if (generation == cloudGeneration && refreshed.userId == userId) {
+                app.saveAccountSession(refreshed, app.cookie)
+                syncSavedAccounts()
+                account = refreshed
+            }
+        }
+    }
+    fun deleteCloudAccount(userId: Long) {
+        val wasActive = account?.userId == userId || app.activeStoredAccount()?.userId == userId
+        val nextActive = app.removeAccount(userId)
+        syncSavedAccounts()
+        if (wasActive) {
+            cloudGeneration++
+            cloudJob?.cancel()
+            clearCloudQueue()
+            android.webkit.CookieManager.getInstance().removeAllCookies(null)
+            cloudPlaylists = emptyList()
+            cloudBusy = false
+            account = nextActive?.toAccount()
+            if (nextActive != null) {
+                loadCloudPlaylists(reset = true)
+                if (settings.value.homeContent == "cloud") refreshCloudHome()
+            } else {
+                loginMessage = tr("logged_out", "已退出登录")
+            }
         }
     }
     fun useOfficialService() {
@@ -990,6 +1056,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         cloudJob?.cancel()
         clearCloudQueue()
         app.useOfficialService()
+        syncSavedAccounts()
         account = null; cloudPlaylists = emptyList(); cloudBusy = false; loginMessage = ""
     }
     fun logout() {
@@ -997,6 +1064,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         cloudJob?.cancel()
         clearCloudQueue()
         app.clearCookie()
+        syncSavedAccounts()
         android.webkit.CookieManager.getInstance().removeAllCookies(null)
         account = null
         cloudPlaylists = emptyList()

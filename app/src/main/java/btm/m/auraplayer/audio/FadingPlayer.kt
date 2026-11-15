@@ -22,6 +22,14 @@ class FadingPlayer(private val delegate: Player, private val store: EffectsStore
     }
     override fun play() = setPlayWhenReady(true)
     override fun pause() = setPlayWhenReady(false)
+    override fun seekToPrevious() {
+        if (store.state.value.nativePreviousBehavior) {
+            // Match Android Media3 BasePlayer.seekToPrevious(): restart current track past 3s threshold or without previous item.
+            delegate.seekToPrevious()
+        } else {
+            delegate.seekToPreviousMediaItem()
+        }
+    }
     override fun setVolume(volume: Float) { userVolume = volume.coerceIn(0f, 1f); if (ramp?.isActive != true) delegate.volume = userVolume }
     override fun getVolume(): Float = userVolume
     override fun setPlayWhenReady(playWhenReady: Boolean) {

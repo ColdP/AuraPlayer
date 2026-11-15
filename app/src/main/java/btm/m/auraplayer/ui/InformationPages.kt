@@ -32,8 +32,15 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.time.Year
 
 @Composable
-private fun aboutCardColors() = CardDefaults.defaultColors(color = MiuixTheme.colorScheme.surfaceContainer.copy(
-    alpha = if (MiuixTheme.colorScheme.surface.luminance() < .5f) .60f else .65f))
+private fun aboutCardColors(): CardColors {
+    val surfaceContainer = MiuixTheme.colorScheme.surfaceContainer
+    if (!LocalAdvancedMaterialEnabled.current) {
+        return CardDefaults.defaultColors(color = surfaceContainer)
+    }
+    return CardDefaults.defaultColors(
+        color = surfaceContainer.copy(alpha = if (MiuixTheme.colorScheme.surface.luminance() < .5f) .60f else .65f),
+    )
+}
 
 private fun systemProperty(name: String): String = runCatching {
     Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, name) as String

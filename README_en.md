@@ -32,18 +32,20 @@ Aura Player (`btm.m.auraplayer`) is an Android music player for Android 13 (API 
 
 The source version is defined by `versionName` in [app/build.gradle.kts](app/build.gradle.kts); the README does not duplicate the version string. See [Releases](https://github.com/ColdP/AuraPlayer/releases) for downloads and release notes.
 
+See the [1.0.0 release notes](RELEASE_NOTES_1.0.0.md) for this stable release (in Simplified Chinese).
+
 ## Features
 
 ### Local Library and Home
 
 - MediaStore local music scanning and permission handling with Songs, Local Playlists, Albums, Artists, Favorites, and Playback History.
 - Retro Music-inspired home layout: greeting header, quick shortcuts, recently added, cover collage suggestions, and top/recent artists and albums.
-- Folder blacklist/whitelist, minimum-duration filter, manual file/folder import via Android SAF, persistent sorting, pull-to-refresh, and categorized search.
+- Folder blacklist/whitelist, minimum-duration filter, manual audio file import via Android SAF (up to 20 files at once), full or folder-scoped scanning, persistent sorting, pull-to-refresh, and categorized search.
 - Adaptive responsive layout: compact track rows with `44dp` covers, freeform/multi-window and landscape split-pane Now Playing scaling, multi-column grids on large screens, and preserved system font scaling.
 
 ### NetEase Cloud Music and Downloads
 
-- **Official Direct Sign-In**: Signs in on the official HTTPS page (`music.163.com`) by default with no self-hosted backend or manual cookie copying required. Session cookies are encrypted via Android Keystore and cleared when logging out or switching service URLs.
+- **Official Direct Sign-In and Multi-Account Switching**: Signs in on the official HTTPS page (`music.163.com`) by default with no self-hosted backend or manual cookie copying required; session cookies are encrypted via Android Keystore with multi-account saving, switching, and per-line cookie inspection/copying, and active credentials are cleared on logout or service URL change.
 - **Optional Custom API**: Advanced connection settings support connecting to a self-hosted [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) server (including SMS verification login), with ready-to-run Node.js and Docker Compose files in `server/`.
 - **Cloud Browsing and Details**: Cloud recommendations, paginated playlists (30 per page) and tracks (50 per page), search (All / Songs / Audio / Podcasts), album and artist detail pages, and audio quality selection.
 - **Downloads and Tagging**: Downloads selected qualities via the Android system downloader; WorkManager decodes NCM containers in the background and writes FLAC/MP3 tags and artwork to `Music/Aura Player` (subject to NetEase account and regional rights).
@@ -52,23 +54,24 @@ The source version is defined by `versionName` in [app/build.gradle.kts](app/bui
 ### Now Playing, Lyrics, and Lyric Sharing
 
 - **Media3 Playback and Gestures**: Background playback with media notifications, 0.5–3x playback speed, sleep timer, volume controls, drag-to-reorder queue, horizontal swipe track switching, mini-player to full-screen continuous morphing, swipe-down collapse, and predictive back.
-- **Player Appearance**: Aurora, Blurred Aurora, Blur, Solid Color, Full-Screen, Material, and One themes; snow and rain effects; glow progress bars (`Hyper` / `One`); 10 stylized lyric themes; Immersive Cover (bottom feather mask and screen-corner collapse morphing); **Apple Music animated artwork** (forces immersive layout automatically when motion data is available); multiple cover transitions (Card, Cover, Page Turn, Stack, Vertical/Horizontal Flip); keep-screen-on in lyrics mode; and auto-hiding immersive controls.
+- **Player Appearance and Cover Themes**: Aurora, Blurred Aurora, Blur, Solid Color, Full-Screen, Material, and One themes; snow and rain effects; glow progress bars (`Hyper` / `One`); **Square / 3D Coverflow / Tiled cover wall** themes (landscape auto-Coverflow option, adjustable center-hold duration in Tiled mode, and model-free gyroscope 3D tilt parallax with sensitivity sliders); Immersive Cover (bottom feather mask and screen-corner collapse morphing); **Apple Music animated artwork & artist visuals** (motion covers on Now Playing/albums/artists, high-res artist portraits, and artist wordmark logos); 8 cover transitions; keep-screen-on in lyrics mode; and auto-hiding immersive controls.
+- **12 Stylized Lyric Themes & 3D Tokyo Cityscape**: Reworked AGSL shader backgrounds plus a Cel-Shaded **3D Tokyo** theme with seamless **City Walk** auto-transitions across Shibuya Crossing, Tokyo Tower, Shinjuku Neon Street, Asakusa Nakamise, and Odaiba Rainbow Bay with 6 time-of-day presets or system-time sync.
 - **Experimental Features**:
-  - **Spatial Lyrics**: gyroscope-driven multi-layer 3D depth parallax in lyric view.
-  - **Spatial Cover**: on-device depth estimation + foreground matting rendered into gyroscope-driven 3D parallax covers, with **album-scoped cache sharing** (keyed by album title and album artist), cache inspection/full-screen preview, and optional on-demand downloads for the `arm64-v8a` ONNX Runtime libraries and models (kept out of the base APK).
-  - **Rear Display Mode**: optional secondary rear-screen Now Playing & lyrics display powered by Root or Shizuku.
+  - **Spatial Lyrics**: gyroscope-driven multi-layer 3D depth parallax in lyric view with tilt sensitivity slider.
+  - **Spatial Cover**: on-device depth estimation + foreground matting rendered into gyroscope-driven 3D parallax covers with tilt sensitivity slider and **album-scoped cache sharing** (keyed by album title and album artist), cache inspection/full-screen preview, and optional on-demand downloads for the `arm64-v8a` ONNX Runtime libraries and models (kept out of the base APK).
+  - **Rear Display Mode**: optional secondary rear-screen Now Playing & lyrics display powered by Root or Shizuku (with AMOLED pure black mode, lyric spacing, and screen-awake toggle).
 - **Multi-Source Lyrics**: Fetches from NetEase, QQ Music, Kuwo, Kugou, LrcLib, AMLL, and TTML Hub; supports word-by-word timing, translations, pronunciation, duet alignment, edge fade/blur shader, tap-to-seek, and 3-second browse focus auto-return.
-- **Lyric Share Studio**: Multiple card templates (Aura Mesh, Cinema, Paper, Polaroid, Vinyl, Swiss, etc.) with customizable light/dark mode, fonts, backgrounds, filters, line spacing, corner radius, and image export/sharing.
+- **Lyric Share Studio**: 12 card templates (Aura Mesh, Cinema, Paper, Polaroid, Vinyl, Swiss, etc.) with customizable light/dark mode, fonts, backgrounds, film filters, line spacing, corner radius, export quality, and image export/sharing.
 
 ### Audio Effects and Tag Editor
 
-- **Built-In DSP Engine**: 15 built-in presets (Reference, Warmth, Clarity, Deep Bass, etc.) plus real-time custom tuning (multi-band EQ, preamp, automatic gain protection, stereo width, low-frequency crossfeed, harmonic coloration, and dynamics compressor), alongside fade-in/out and Always Play.
+- **Built-In DSP Engine**: 15 built-in presets (Reference, Warmth, Clarity, Deep Bass, etc.) plus real-time custom tuning (multi-band EQ, preamp, automatic gain protection, stereo width, low-frequency crossfeed, harmonic coloration, and dynamics compressor), alongside fade-in/out, Always Play, and Android native Previous Track behavior (rewind past 3s).
 - **Preset Sharing**: Import, export, and share audio presets via Aura JSON files, JSON text, or ZXing QR codes.
-- **Local Tag Editor**: Powered by `jaudiotagger` to edit title, artist, album, album artist, release date, year, track number, composer, lyricist, comment, and embedded artwork with system write confirmation.
+- **Local Tag Editor & Audio Info**: Powered by `jaudiotagger` to inspect audio codec, format, sample rate, bit depth, and bitrate, and edit title, artist, album, album artist, release date, year, track number, composer, lyricist, comment, and embedded artwork with system write confirmation.
 
 ### Visual Customization and Localization
 
-- Three interface styles (**Hyper**, **Material**, and **One**) built across MIUIX 0.9.4, Material 3 Expressive, and OneUI_Kit; light, dark, and system themes plus Monet color generation (Classic 2021 / Expressive 2025 specs, One UI CIELAB semantic tones, multiple palettes, and custom colors).
+- Three interface styles (**Hyper**, **Material**, and **One**) built across MIUIX 0.9.4, Material 3 Expressive, and OneUI_Kit; light, dark, and system themes, Monet color generation (Classic 2021 / Expressive 2025 specs, One UI CIELAB semantic tones, multiple palettes, and custom colors), and a global **Disable advanced materials** solid-color fallback switch.
 - Floating HyperOS, floating HarmonyOS, Liquid Glass, Material, and One UI bottom navigation styles, with customizable blur, opacity, refraction, highlight, and dispersion parameters for glass styles.
 - Built-in Simplified Chinese, English, and Japanese interfaces and localized legal documents (User Agreement, Disclaimer, Privacy Policy), extensible via [languages/example.json](languages/example.json).
 
@@ -129,6 +132,7 @@ Aura-Player/
 |-- README.md                Primary Chinese README
 |-- README_en.md             English README
 |-- README_ja.md             Japanese README
+|-- RELEASE_NOTES_1.0.0.md   1.0.0 stable release notes
 |-- CONTRIBUTING_zh.md       Chinese contributing guide
 |-- CONTRIBUTING.md          English contributing guide
 |-- CONTRIBUTING_ja.md       Japanese contributing guide

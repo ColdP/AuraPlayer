@@ -556,6 +556,11 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
                 }
             }
             SwitchPreference(tr("audio_always_play", "始终播放"), tr("audio_always_play_summary", "当有其他内容播放时，在后台保持播放"), state.alwaysPlay) { store.audio(always = it) }
+            SwitchPreference(
+                title = tr("audio_native_previous", "原生上一首逻辑"),
+                summary = tr("audio_native_previous_summary", "播放超过 3 秒时点击上一首回到歌曲开头，否则切换至上一首"),
+                checked = state.nativePreviousBehavior,
+            ) { store.audio(nativePrevious = it) }
         } }
         item { AudioScanGroup(model) }
     }

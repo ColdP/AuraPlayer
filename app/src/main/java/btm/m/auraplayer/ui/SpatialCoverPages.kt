@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -58,7 +59,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import btm.m.auraplayer.AuraApplication
 import btm.m.auraplayer.lyrics.rememberSpatialGyroTilt
+import btm.m.auraplayer.lyrics.scaleSpatialParallaxTilt
 import btm.m.auraplayer.spatialcover.SpatialCoverAssets
 import btm.m.auraplayer.spatialcover.SpatialCoverCacheEntry
 import btm.m.auraplayer.spatialcover.SpatialCoverManager
@@ -512,6 +515,7 @@ fun SpatialCoverCachePage(padding: PaddingValues, open: (String) -> Unit) {
 @Composable
 fun SpatialCoverPreviewPage(cacheKey: String, back: () -> Unit) {
     val context = LocalContext.current
+    val nowPlayingConfig by (context.applicationContext as AuraApplication).nowPlaying.state.collectAsState()
     var assets by remember { mutableStateOf<SpatialCoverAssets?>(null) }
     var failed by remember { mutableStateOf(false) }
     var hintVisible by remember { mutableStateOf(true) }
@@ -580,9 +584,10 @@ fun SpatialCoverPreviewPage(cacheKey: String, back: () -> Unit) {
                         SpatialCoverRenderer(
                             assets = currentAssets,
                             tiltProvider = {
+                                val scaledGyro = scaleSpatialParallaxTilt(gyroTilt, nowPlayingConfig.spatialCoverSensitivity)
                                 Offset(
-                                    (gyroTilt.x + dragTilt.x).coerceIn(-1.2f, 1.2f),
-                                    (gyroTilt.y + dragTilt.y).coerceIn(-1.2f, 1.2f),
+                                    (scaledGyro.x + dragTilt.x).coerceIn(-1.2f, 1.2f),
+                                    (scaledGyro.y + dragTilt.y).coerceIn(-1.2f, 1.2f),
                                 )
                             },
                             strength = 1.0f,
@@ -637,24 +642,31 @@ fun SpatialCoverPreviewPage(cacheKey: String, back: () -> Unit) {
 private fun SpatialLiquidGlassBackButton(backdrop: com.kyant.backdrop.Backdrop, onClick: () -> Unit) {
     val surface = MiuixTheme.colorScheme.surface
     val dark = surface.luminance() < 0.5f
+    val advancedMaterial = LocalAdvancedMaterialEnabled.current && top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported()
     Box(
         modifier = Modifier
             .size(46.dp)
             .clip(CircleShape)
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { CircleShape },
-                effects = {
-                    vibrancy()
-                    blur(10.dp.toPx())
-                    lens(18.dp.toPx(), 44.dp.toPx(), depthEffect = true, chromaticAberration = true)
-                },
-                highlight = { Highlight.Default.copy(alpha = .62f) },
-                shadow = { Shadow.Default.copy(radius = 6.dp, color = Color.Black, alpha = .3f) },
-                innerShadow = null,
-                onDrawSurface = {
-                    drawCircle((if (dark) Color.Black else surface).copy(alpha = .45f))
-                },
+            .then(
+                if (advancedMaterial) {
+                    Modifier.drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { CircleShape },
+                        effects = {
+                            vibrancy()
+                            blur(10.dp.toPx())
+                            lens(18.dp.toPx(), 44.dp.toPx(), depthEffect = true, chromaticAberration = true)
+                        },
+                        highlight = { Highlight.Default.copy(alpha = .62f) },
+                        shadow = { Shadow.Default.copy(radius = 6.dp, color = Color.Black, alpha = .3f) },
+                        innerShadow = null,
+                        onDrawSurface = {
+                            drawCircle((if (dark) Color.Black else surface).copy(alpha = .45f))
+                        },
+                    )
+                } else {
+                    Modifier.background(if (dark) Color(0xFF242424) else surface)
+                }
             )
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,

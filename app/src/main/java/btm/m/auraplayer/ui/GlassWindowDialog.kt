@@ -270,10 +270,11 @@ fun WindowDialog(
                         .clip(dialogShape)
                         .background(Color(onePalette.card), dialogShape)
                 } else {
+                    val advancedMaterial = LocalAdvancedMaterialEnabled.current
                     Modifier
                         .clip(dialogShape)
                         .then(
-                            if (activeBackdrop != null) {
+                            if (advancedMaterial && activeBackdrop != null) {
                                 Modifier.drawBackdrop(
                                     backdrop = activeBackdrop,
                                     shape = { dialogShape },
@@ -289,7 +290,7 @@ fun WindowDialog(
                             } else Modifier
                         )
                         .background(
-                            color = backgroundColor.copy(alpha = 0.87f),
+                            color = backgroundColor.copy(alpha = if (advancedMaterial) 0.87f else 1f),
                             shape = dialogShape,
                         )
                 }

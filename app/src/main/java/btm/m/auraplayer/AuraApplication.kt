@@ -21,6 +21,7 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
     lateinit var history: LibraryHistory; private set
     lateinit var session: SecureSession; private set
     lateinit var api: NeteaseApi; private set
+    @Volatile var accountsState: MultiAccountState = MultiAccountState(); private set
     @Volatile var cookie: String = ""; private set
     @Volatile var endpoint: String = ""; private set
     override fun onCreate() {
@@ -34,7 +35,8 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         auraMix = btm.m.auraplayer.auramix.AuraMixSettings(this)
         history = LibraryHistory(this)
         session = SecureSession(this)
-        cookie = session.read()
+        accountsState = MultiAccountStateCodec.decode(session.read())
+        cookie = accountsState.activeCookie
         endpoint = getSharedPreferences("aura.cloud", MODE_PRIVATE).getString("endpoint", "").orEmpty()
         api = NeteaseApi({ endpoint }, { cookie }, metadataCache = CloudMetadataCache(cacheDir.resolve("cloud-metadata")))
         I18n.initialize(this, settings.value.language)
@@ -47,8 +49,30 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         .memoryCache { MemoryCache.Builder().maxSizePercent(context, .15).build() }
         .diskCache { DiskCache.Builder().directory(cacheDir.resolve("artwork").toOkioPath()).maxSizeBytes(128L * 1024 * 1024).build() }
         .build()
-    fun saveCookie(value: String) { session.save(value); cookie = value }
-    fun clearCookie() { session.clear(); cookie = "" }
+    private fun persistAccounts(next: MultiAccountState) {
+        accountsState = next
+        cookie = next.activeCookie
+        val encoded = MultiAccountStateCodec.encode(next)
+        if (encoded.isEmpty()) session.clear() else session.save(encoded)
+    }
+    fun savedAccounts(): List<StoredCloudAccount> = accountsState.accounts
+    fun activeStoredAccount(): StoredCloudAccount? = accountsState.activeAccount
+    fun saveAccountSession(user: CloudAccount, cookieValue: String) =
+        persistAccounts(MultiAccountStateCodec.upsertAndActivate(accountsState, user, cookieValue))
+    fun switchAccount(userId: Long): StoredCloudAccount? {
+        persistAccounts(MultiAccountStateCodec.switchActive(accountsState, userId))
+        return accountsState.activeAccount
+    }
+    fun removeAccount(userId: Long): StoredCloudAccount? {
+        persistAccounts(MultiAccountStateCodec.removeAccount(accountsState, userId))
+        return accountsState.activeAccount
+    }
+    fun saveCookie(value: String) {
+        persistAccounts(MultiAccountState(legacyCookie = value.trim()))
+    }
+    fun clearCookie() {
+        persistAccounts(MultiAccountStateCodec.deactivateActive(accountsState))
+    }
     fun useOfficialService() {
         if (endpoint.isNotBlank()) clearCookie()
         endpoint = ""

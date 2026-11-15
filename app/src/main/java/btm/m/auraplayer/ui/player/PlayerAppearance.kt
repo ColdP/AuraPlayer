@@ -48,10 +48,11 @@ internal fun PlayerThemeBackground(
     oneUi: PlayerOneUiColors? = null,
     modifier: Modifier = Modifier,
 ) {
-    val usesFlowingArt = config.theme == PlayerTheme.AURORA_BLUR ||
-        (config.theme == PlayerTheme.MATERIAL && config.materialBackground == MaterialPlayerBackground.AURORA_BLUR)
-    val usesMaterialWash = config.theme == PlayerTheme.MATERIAL && config.materialBackground == MaterialPlayerBackground.MATERIAL
-    val lyricOverlayBlend = if (config.lyricTheme == LyricTheme.BLUR) {
+    val advancedMaterial = btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled.current
+    val usesFlowingArt = advancedMaterial && (config.theme == PlayerTheme.AURORA_BLUR ||
+        (config.theme == PlayerTheme.MATERIAL && config.materialBackground == MaterialPlayerBackground.AURORA_BLUR))
+    val usesMaterialWash = advancedMaterial && config.theme == PlayerTheme.MATERIAL && config.materialBackground == MaterialPlayerBackground.MATERIAL
+    val lyricOverlayBlend = if (!advancedMaterial || config.lyricTheme == LyricTheme.BLUR) {
         0f
     } else {
         (compactProgress * (1f - queueBlend)).coerceIn(0f, 1f)
@@ -84,7 +85,7 @@ internal fun PlayerThemeBackground(
     var background by remember { mutableStateOf<ImageBitmap?>(null) }
     var previousBackground by remember { mutableStateOf<ImageBitmap?>(null) }
     val artworkBlend = remember { Animatable(1f) }
-    val usesArtwork = config.usesArtworkBackground
+    val usesArtwork = advancedMaterial && config.usesArtworkBackground
     LaunchedEffect(artwork, usesArtwork, context) {
         artworkBlend.snapTo(1f)
         previousBackground = null
@@ -135,17 +136,17 @@ internal fun PlayerThemeBackground(
                 else -> Color(palette.a2.tone(14))
             }
             Box(Modifier.fillMaxSize().background(baseColor)) {
-                val showAurora = theme == PlayerTheme.AURORA ||
+                val showAurora = advancedMaterial && (theme == PlayerTheme.AURORA ||
                     theme == PlayerTheme.AURORA_BLUR ||
-                    (materialMode && (materialBg == MaterialPlayerBackground.AURORA || materialBg == MaterialPlayerBackground.AURORA_BLUR))
-                val showArtwork = theme == PlayerTheme.AURORA_BLUR ||
+                    (materialMode && (materialBg == MaterialPlayerBackground.AURORA || materialBg == MaterialPlayerBackground.AURORA_BLUR)))
+                val showArtwork = advancedMaterial && (theme == PlayerTheme.AURORA_BLUR ||
                     theme == PlayerTheme.BLUR ||
                     theme == PlayerTheme.FULLSCREEN ||
-                    (materialMode && (materialBg == MaterialPlayerBackground.BLUR || materialBg == MaterialPlayerBackground.AURORA_BLUR))
-                if (materialMode && materialBg == MaterialPlayerBackground.MATERIAL && expressive != null) {
+                    (materialMode && (materialBg == MaterialPlayerBackground.BLUR || materialBg == MaterialPlayerBackground.AURORA_BLUR)))
+                if (advancedMaterial && materialMode && materialBg == MaterialPlayerBackground.MATERIAL && expressive != null) {
                     MaterialExpressiveSurfaceWash(expressive, phase, washStrength = 1f - materialMix * .92f, Modifier.fillMaxSize())
                 }
-                if (oneUiMode) {
+                if (advancedMaterial && oneUiMode) {
                     OneUiSurfaceWash(oneUi, Modifier.fillMaxSize())
                 }
                 if (showAurora) {
@@ -197,6 +198,8 @@ internal fun PlayerThemeBackground(
                 phase = lyricPhase,
                 palette = palette,
                 spatialTilt = if (config.spatialLyrics) spatialTilt else Offset.Zero,
+                tokyoSceneTime = config.tokyoSceneTime,
+                tokyoSceneLandmark = config.tokyoSceneLandmark,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -296,8 +299,13 @@ internal fun AnimatedPlayerArtwork(artwork: String, transitionKey: String, anima
     var currentKey by remember { mutableStateOf(transitionKey) }
     var previous by remember { mutableStateOf<String?>(null) }
     val progress = remember { Animatable(1f) }
+    if (!enabled && (artwork != current || transitionKey != currentKey)) {
+        current = artwork
+        currentKey = transitionKey
+        previous = null
+    }
     LaunchedEffect(artwork, transitionKey, enabled, animation) {
-        if (artwork == current && transitionKey == currentKey && previous == null) return@LaunchedEffect
+        if (artwork == current && transitionKey == currentKey && previous == null && progress.value >= 0.999f) return@LaunchedEffect
         if (artwork != current || transitionKey != currentKey) { previous = current; current = artwork; currentKey = transitionKey }
         if (enabled) { progress.snapTo(0f); progress.animateTo(1f, tween(if (animation == CoverAnimation.DEFAULT) 300 else 480, easing = FastOutSlowInEasing)) }
         else progress.snapTo(1f)
@@ -449,7 +457,7 @@ internal fun CatalogNowPlayingBackground(
     val palette = rememberPlayerMonetPalette(artwork)
     val seed = rememberPlayerArtworkSeed(artwork)
     val tokens = rememberCatalogPlayerThemeTokens(artwork, config, fallbackDarkSurface, forceHeroSurface)
-    if (!forceHeroSurface && !tokens.dark) {
+    if (!btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled.current || (!forceHeroSurface && !tokens.dark)) {
         Box(modifier.background(tokens.surface))
         return
     }

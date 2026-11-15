@@ -6,6 +6,8 @@ import android.graphics.RuntimeShader
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,6 +26,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun AboutMaterialBackground(modifier: Modifier = Modifier, monetEnabled: Boolean = false) {
     val scheme = MiuixTheme.colorScheme
+    if (!LocalAdvancedMaterialEnabled.current) {
+        Box(modifier.background(scheme.surface))
+        return
+    }
     val dark = scheme.surface.luminance() < .5f
     val colors = if (monetEnabled) {
         // Use the resolved theme so wallpaper, presets, custom and monochrome colors

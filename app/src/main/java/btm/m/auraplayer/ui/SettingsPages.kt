@@ -161,6 +161,11 @@ fun ThemePage(model: AuraViewModel, padding: PaddingValues) {
                     listOf("system", "light", "dark").indexOf(value.theme).coerceAtLeast(0), backdrop = LocalToolbarBackdrop.current) { index ->
                     model.updateSettings { it.copy(theme = listOf("system", "light", "dark")[index]) }
                 }
+                SwitchPreference(
+                    tr("disable_advanced_material", "关闭高级材质"),
+                    tr("disable_advanced_material_summary", "开启后，玻璃、流光等高级材质（包括关于界面）自动回退为纯色"),
+                    value.disableAdvancedMaterial,
+                ) { checked -> model.updateSettings { it.copy(disableAdvancedMaterial = checked) } }
             }
         }
         item {
@@ -208,22 +213,23 @@ fun LoginPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Un
     var phone by rememberSaveable { mutableStateOf("") }
     // Verification codes are transient and never persisted.
     var captcha by remember { mutableStateOf("") }
-    var confirmLogout by remember { mutableStateOf(false) }
     val account = model.account
     var advanced by rememberSaveable { mutableStateOf(false) }
-    var showingWeb by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(account) { if (account != null) showingWeb = false }
-    androidx.activity.compose.BackHandler(showingWeb) { showingWeb = false }
-    if (showingWeb) {
-        OfficialLoginView(padding, model.cloudBusy, model::completeOfficialLogin)
-        return
+    val officialLoginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val cookie = result.data?.getStringExtra(OfficialLoginActivity.EXTRA_COOKIE).orEmpty()
+            if (cookie.isNotBlank()) model.completeOfficialLogin(cookie)
+        }
     }
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (account == null) item {
             SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
                 Preference(tr("official_login", "网易云音乐官方登录"), tr("official_login_summary", "直接登录，无需配置服务器或 API 地址")) {
                     if (model.app.endpoint.isNotBlank()) model.useOfficialService()
-                    showingWeb = true
+                    officialLoginLauncher.launch(OfficialLoginActivity.createIntent(context, clearCookies = false))
+                }
+                if (model.savedAccounts.isNotEmpty()) {
+                    Preference(tr("switch_user", "切换账号")) { open("switch_user") }
                 }
             }
         }
@@ -233,7 +239,7 @@ fun LoginPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Un
                     Artwork(account.avatar, Modifier.size(60.dp), circular = true)
                     Column(Modifier.padding(start = 16.dp)) { Text(account.nickname); Text("UID ${account.userId}", style = MiuixTheme.textStyles.body2) }
                 }
-                Preference(tr("logout", "退出登录")) { confirmLogout = true }
+                Preference(tr("switch_user", "切换账号")) { open("switch_user") }
             } else if (model.app.endpoint.isNotBlank()) Group(tr("phone_login", "手机号验证码登录")) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     AuraTextField(country, { country = it.filter(Char::isDigit).take(4) }, label = tr("country_code", "国际区号"), singleLine = true,
@@ -277,12 +283,6 @@ fun LoginPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Un
             }
         }
         if (model.loginMessage.isNotBlank()) item { Text(model.loginMessage, color = MiuixTheme.colorScheme.primary, modifier = Modifier.padding(16.dp)) }
-    }
-    WindowDialog(confirmLogout, title = tr("logout_confirm", "退出网易云音乐？"), onDismissRequest = { confirmLogout = false }) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            GlassDialogButton({ confirmLogout = false }, Modifier.weight(1f)) { Text(tr("cancel", "取消")) }
-            GlassDialogButton({ model.logout(); confirmLogout = false }, Modifier.weight(1f)) { Text(tr("logout", "退出登录")) }
-        }
     }
 }
 

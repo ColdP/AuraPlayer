@@ -1,7 +1,31 @@
+import java.time.LocalDate
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val localProps = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.isFile) file.inputStream().use(::load)
+}
+
+fun signingValue(key: String, envKey: String): String? =
+    providers.gradleProperty(key).orNull
+        ?: localProps.getProperty(key)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(envKey)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = signingValue("releaseStoreFile", "RELEASE_STORE_FILE")
+val releaseStorePassword = signingValue("releaseStorePassword", "RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = signingValue("releaseKeyAlias", "RELEASE_KEY_ALIAS")
+val releaseKeyPassword = signingValue("releaseKeyPassword", "RELEASE_KEY_PASSWORD")
+val hasReleaseSigning = !releaseStoreFile.isNullOrBlank() &&
+    !releaseStorePassword.isNullOrEmpty() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrEmpty()
+val buildDate = LocalDate.now().toString().replace('-', '.')
+
 android {
     namespace = "btm.m.auraplayer"
     compileSdk = 37
@@ -9,9 +33,9 @@ android {
         applicationId = "btm.m.auraplayer"
         minSdk = 33
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
-        buildConfigField("String", "BUILD_DATE", "\"2026.11.10\"")
+        versionCode = 1000039
+        versionName = "1.0.0"
+        buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
@@ -21,10 +45,23 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    if (hasReleaseSigning) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     packaging {

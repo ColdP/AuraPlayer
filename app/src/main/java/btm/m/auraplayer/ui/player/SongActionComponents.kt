@@ -52,9 +52,12 @@ internal fun Modifier.neutralSheetMaterial(backdrop: Backdrop?): Modifier {
         return clip(shape).background(Color(palette.card), shape)
     }
     val light = MiuixTheme.colorScheme.surface.luminance() > .5f
-    val tint = (if (light) Color(0xFFF8F8F8) else Color(0xFF202022)).copy(alpha = .80f)
+    val solidSurface = if (light) Color(0xFFF5F5F5) else Color(0xFF202022)
+    val tint = solidSurface.copy(alpha = .80f)
     val shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp)
-    return if (backdrop == null) background(tint, shape) else drawBackdrop(
+    return if (backdrop == null || !LocalAdvancedMaterialEnabled.current) {
+        clip(shape).background(if (!LocalAdvancedMaterialEnabled.current) solidSurface else tint, shape)
+    } else drawBackdrop(
         backdrop = backdrop, shape = { shape },
         effects = { vibrancy(); blur(8.dp.toPx()); lens(14.dp.toPx(), 22.dp.toPx(), chromaticAberration = true) },
         highlight = { Highlight.Default.copy(alpha = .55f) },

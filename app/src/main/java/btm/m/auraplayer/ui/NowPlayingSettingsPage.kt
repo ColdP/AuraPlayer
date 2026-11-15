@@ -123,6 +123,32 @@ fun NowPlayingSettingsPage(padding: PaddingValues, open: (String) -> Unit = {}) 
                         store.update { it.copy(lyricTheme = picked) }
                     }
                 }
+                BlurAnimatedVisibility(
+                    visible = state.lyricTheme == LyricTheme.TOKYO_CITYSCAPE,
+                    label = "player-tokyo-scene-time-setting",
+                ) {
+                    GlassDropdownPreference(
+                        tr("lyric_theme_tokyo_time", "东京景色时段"),
+                        tokyoSceneTimeLabels(),
+                        state.tokyoSceneTime.ordinal,
+                        backdrop = LocalToolbarBackdrop.current,
+                    ) { index ->
+                        store.update { it.copy(tokyoSceneTime = TokyoSceneTime.entries[index]) }
+                    }
+                }
+                BlurAnimatedVisibility(
+                    visible = state.lyricTheme == LyricTheme.TOKYO_CITYSCAPE,
+                    label = "player-tokyo-scene-landmark-setting",
+                ) {
+                    GlassDropdownPreference(
+                        tr("lyric_theme_tokyo_landmark", "东京景色"),
+                        tokyoSceneLandmarkLabels(),
+                        state.tokyoSceneLandmark.ordinal,
+                        backdrop = LocalToolbarBackdrop.current,
+                    ) { index ->
+                        store.update { it.copy(tokyoSceneLandmark = TokyoSceneLandmark.entries[index]) }
+                    }
+                }
                 GlassDropdownPreference(tr("player_special_effect", "特殊效果"),
                     listOf(tr("player_effect_none", "不显示"), tr("player_effect_snow", "降雪"), tr("player_effect_rain", "降雨")),
                     state.weather.ordinal, backdrop = LocalToolbarBackdrop.current) { index -> store.update { it.copy(weather = PlayerWeather.entries[index]) } }
@@ -130,12 +156,74 @@ fun NowPlayingSettingsPage(padding: PaddingValues, open: (String) -> Unit = {}) 
                     listOf(tr("default", "默认"), tr("player_cover_card", "卡片"), tr("player_theme_blur", "模糊"), tr("player_cover_cover", "覆盖"),
                         tr("player_cover_page", "翻页"), tr("player_cover_stack", "堆叠"), tr("player_cover_vertical_flip", "垂直翻转"), tr("player_cover_horizontal_flip", "水平翻转")),
                     state.coverAnimation.ordinal, backdrop = LocalToolbarBackdrop.current) { index -> store.update { it.copy(coverAnimation = CoverAnimation.entries[index]) } }
+                GlassDropdownPreference(
+                    tr("player_cover_theme", "封面主题"),
+                    listOf(
+                        tr("player_cover_theme_square", "方形"),
+                        tr("player_cover_theme_coverflow", "Coverflow"),
+                        tr("player_cover_theme_tiled", "平铺"),
+                    ),
+                    state.coverTheme.ordinal,
+                    backdrop = LocalToolbarBackdrop.current,
+                ) { index ->
+                    store.update { it.copy(coverTheme = CoverTheme.entries[index]) }
+                }
+                BlurAnimatedVisibility(state.coverTheme == CoverTheme.COVERFLOW, label = "player-coverflow-parallax-setting") {
+                    Column {
+                        SwitchPreference(
+                            title = tr("player_coverflow_parallax", "Coverflow 3D 体感视差"),
+                            summary = tr("player_coverflow_parallax_summary", "跟随手机倾斜产生 Coverflow 分层立体视差与 3D 倾角，无需加载空间模型"),
+                            checked = state.coverflowParallax,
+                        ) { value -> store.update { it.copy(coverflowParallax = value) } }
+                        ParallaxSensitivitySlider(
+                            visible = state.coverflowParallax,
+                            label = "player-coverflow-parallax-sensitivity-setting",
+                            title = tr("player_parallax_tilt_sensitivity", "倾斜灵敏度"),
+                            value = state.coverflowParallaxSensitivity,
+                        ) { snapped ->
+                            store.update { it.copy(coverflowParallaxSensitivity = snapped) }
+                        }
+                    }
+                }
+                BlurAnimatedVisibility(state.coverTheme == CoverTheme.TILED, label = "player-tiled-dwell-setting") {
+                    Column {
+                        SliderPreference(
+                            title = tr("player_tiled_switch_dwell", "停留播放时长"),
+                            value = state.tiledSwitchDwellSeconds,
+                            range = 0.1f..5.0f,
+                            valueText = "${"%.1f".format(state.tiledSwitchDwellSeconds)} s",
+                            steps = 48,
+                            defaultValue = 2.0f,
+                        ) { value ->
+                            val snapped = ((value * 10f).roundToInt().coerceIn(1, 50)) / 10f
+                            store.update { it.copy(tiledSwitchDwellSeconds = snapped) }
+                        }
+                        SwitchPreference(
+                            title = tr("player_tiled_parallax", "平铺 3D 体感视差"),
+                            summary = tr("player_tiled_parallax_summary", "跟随手机倾斜让中心主封面与平铺封面墙产生悬浮景深与 3D 倾角，无需加载空间模型"),
+                            checked = state.tiledParallax,
+                        ) { value -> store.update { it.copy(tiledParallax = value) } }
+                        ParallaxSensitivitySlider(
+                            visible = state.tiledParallax,
+                            label = "player-tiled-parallax-sensitivity-setting",
+                            title = tr("player_parallax_tilt_sensitivity", "倾斜灵敏度"),
+                            value = state.tiledParallaxSensitivity,
+                        ) { snapped ->
+                            store.update { it.copy(tiledParallaxSensitivity = snapped) }
+                        }
+                    }
+                }
                 SwitchPreference(tr("player_immersive_cover", "沉浸式封面"), checked = state.immersiveCover) { value -> store.update { it.copy(immersiveCover = value) } }
                 SwitchPreference(
                     title = tr("player_apple_music_animated_cover", "Apple Music 动态封面"),
                     summary = tr("player_apple_music_animated_cover_summary", "获取到动态封面时强制使用沉浸式封面"),
                     checked = state.appleMusicAnimatedCover,
                 ) { value -> store.update { it.copy(appleMusicAnimatedCover = value) } }
+                SwitchPreference(
+                    title = tr("player_landscape_coverflow", "横屏自动进入 Coverflow"),
+                    summary = tr("player_landscape_coverflow_summary", "横屏展开正在播放界面时自动切换为 3D Coverflow 视图"),
+                    checked = state.landscapeAutoCoverflow,
+                ) { value -> store.update { it.copy(landscapeAutoCoverflow = value) } }
                 SwitchPreference(tr("player_show_volume", "显示音量控件"), checked = state.showVolume) { value -> store.update { it.copy(showVolume = value) } }
             }
         }
@@ -167,6 +255,14 @@ fun NowPlayingSettingsPage(padding: PaddingValues, open: (String) -> Unit = {}) 
                         store.update { it.copy(spatialLyrics = value) }
                     }
                 }
+                ParallaxSensitivitySlider(
+                    visible = state.spatialLyrics,
+                    label = "player-spatial-lyrics-sensitivity-setting",
+                    title = tr("player_parallax_tilt_sensitivity", "倾斜灵敏度"),
+                    value = state.spatialLyricsSensitivity,
+                ) { snapped ->
+                    store.update { it.copy(spatialLyricsSensitivity = snapped) }
+                }
                 SwitchPreference(
                     title = tr("player_spatial_cover", "空间封面效果"),
                     checked = state.spatialCover,
@@ -182,6 +278,12 @@ fun NowPlayingSettingsPage(padding: PaddingValues, open: (String) -> Unit = {}) 
                     label = "player-spatial-cover-setting",
                 ) {
                     Column {
+                        TiltSensitivitySlider(
+                            title = tr("player_parallax_tilt_sensitivity", "倾斜灵敏度"),
+                            value = state.spatialCoverSensitivity,
+                        ) { snapped ->
+                            store.update { it.copy(spatialCoverSensitivity = snapped) }
+                        }
                         GlassDropdownPreference(
                             tr("player_spatial_depth_model", "空间渲染模型"),
                             SpatialDepthModel.entries.map { it.displayName },
@@ -268,6 +370,25 @@ internal fun lyricThemeLabels(): List<String> = listOf(
     tr("lyric_theme_lime_soda", "青柠苏打"),
     tr("lyric_theme_monet_garden", "莫奈花园"),
     tr("lyric_theme_faded_film", "褪色胶片"),
+    tr("lyric_theme_tokyo_cityscape", "3D 东京"),
+)
+
+internal fun tokyoSceneTimeLabels(): List<String> = listOf(
+    tr("tokyo_time_follow_system", "跟随系统时间"),
+    tr("tokyo_time_dawn", "清晨"),
+    tr("tokyo_time_morning", "上午"),
+    tr("tokyo_time_noon", "正午"),
+    tr("tokyo_time_dusk", "黄昏"),
+    tr("tokyo_time_night", "夜晚"),
+)
+
+internal fun tokyoSceneLandmarkLabels(): List<String> = listOf(
+    tr("tokyo_landmark_city_walk", "城市漫步"),
+    tr("tokyo_landmark_shibuya", "涩谷十字路口"),
+    tr("tokyo_landmark_tokyo_tower", "东京塔"),
+    tr("tokyo_landmark_shinjuku", "新宿不夜街"),
+    tr("tokyo_landmark_asakusa", "浅草仲见世"),
+    tr("tokyo_landmark_odaiba", "台场彩虹湾"),
 )
 
 @Composable
@@ -382,5 +503,35 @@ private fun CountdownPowerWarningDialog(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TiltSensitivitySlider(
+    title: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+) {
+    SliderPreference(
+        title = title,
+        value = value,
+        range = PARALLAX_SENSITIVITY_MIN..PARALLAX_SENSITIVITY_MAX,
+        valueText = "${"%.1f".format(value)}x",
+        steps = 22,
+        defaultValue = PARALLAX_SENSITIVITY_DEFAULT,
+        onChange = { raw -> onValueChange(clampParallaxSensitivity(raw)) },
+    )
+}
+
+@Composable
+private fun ParallaxSensitivitySlider(
+    visible: Boolean,
+    label: String,
+    title: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+) {
+    BlurAnimatedVisibility(visible = visible, label = label) {
+        TiltSensitivitySlider(title = title, value = value, onValueChange = onValueChange)
     }
 }

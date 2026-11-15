@@ -92,17 +92,19 @@ fun AuraRoot(model: AuraViewModel) {
         ThemeController(mode, keyColor = seed?.let(::Color), paletteStyle = paletteStyles[settings.palette.coerceIn(paletteStyles.indices)],
             colorSpec = if (settings.colorSpec == 0) ThemeColorSpec.Spec2021 else ThemeColorSpec.Spec2025)
     }
-    AuraUiTheme(
-        themeMode = settings.theme,
-        uiStyle = settings.uiStyle,
-        monet = settings.monet,
-        seed = seed,
-        useSystemSeed = settings.color == "system",
-        controller = controller,
-        textStyles = remember { auraTextStyles() },
-    ) {
-        ProvideAuraCouiTheme(settings.monet) {
-            AuraAdaptiveLayout { AuraShell(model) }
+    CompositionLocalProvider(LocalAdvancedMaterialEnabled provides !settings.disableAdvancedMaterial) {
+        AuraUiTheme(
+            themeMode = settings.theme,
+            uiStyle = settings.uiStyle,
+            monet = settings.monet,
+            seed = seed,
+            useSystemSeed = settings.color == "system",
+            controller = controller,
+            textStyles = remember { auraTextStyles() },
+        ) {
+            ProvideAuraCouiTheme(settings.monet) {
+                AuraAdaptiveLayout { AuraShell(model) }
+            }
         }
     }
 }
@@ -496,6 +498,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "theme" -> tr("theme_color", "主题与颜色")
         "navigation_material" -> tr("nav_material_title", "底部导航栏材质参数调整")
         "login" -> tr("netease", "网易云音乐")
+        "switch_user" -> tr("switch_user", "切换账号")
         "cloud_recommended" -> tr("recommended_playlists", "推荐歌单")
         "downloads" -> tr("downloaded_music", "已下载的音乐")
         "audio_effects" -> tr("audio_effects", "音效")
@@ -598,6 +601,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             "theme" -> ThemePage(model, contentPadding)
             "navigation_material" -> NavigationMaterialPage(model, contentPadding, NavigationMaterialSettings.styles[materialTab])
             "login" -> LoginPage(model, contentPadding, open)
+        "switch_user" -> SwitchUserPage(model, contentPadding)
             "cloud_recommended" -> CloudRecommendedPage(model, contentPadding)
             "downloads" -> DownloadedMusicPage(model, contentPadding)
             "audio_effects" -> AudioEffectsPage(contentPadding, isActive, open)
@@ -693,7 +697,7 @@ internal fun AuraBottomBar(selected: MutableIntState, model: AuraViewModel, back
             CustomNavigation(view, tabs = labels.mapIndexed { index, label -> HostTab(label, "aura.$index") {
                 if (!searchMounted && secondaryProgress < .01f) selected.intValue = index
             } }, selectedIndex = selected, blurRadius = if (liquid) 3 else 18, labelMode = settings.labels,
-                navigationStyle = navigationStyle, advancedMaterial = true, colorMode = settings.theme,
+                navigationStyle = navigationStyle, advancedMaterial = LocalAdvancedMaterialEnabled.current, colorMode = settings.theme,
                 accentColorOverride = accent, material = rememberModuleNavigationMaterial(navigationStyle),
                 dimensionScale = dimensions, liquidBottomSpacingDp = 7, onHostPreDraw = {}, backdropOverride = backdrop,
                 tabIconContent = { index, color -> AuraTabIcon(index, color) })

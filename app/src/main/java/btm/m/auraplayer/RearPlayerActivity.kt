@@ -152,6 +152,7 @@ class RearPlayerActivity : ComponentActivity() {
             MiuixTheme(colors = if (dark) darkColorScheme() else lightColorScheme()) {
                 androidx.compose.runtime.CompositionLocalProvider(
                     LocalAppUiStyle provides uiStyle,
+                    btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled provides !settings.disableAdvancedMaterial,
                 ) {
                     RearPlayerScreen(
                         model = model,

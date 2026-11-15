@@ -7,6 +7,8 @@ import btm.m.auraplayer.playback.LyricTheme
 import btm.m.auraplayer.playback.NowPlayingConfig
 import btm.m.auraplayer.playback.PlayerTheme
 import btm.m.auraplayer.playback.PlayerWeather
+import btm.m.auraplayer.playback.TokyoSceneLandmark
+import btm.m.auraplayer.playback.TokyoSceneTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -99,6 +101,8 @@ class RearScreenTest {
                     showTranslation = weather != PlayerWeather.SNOW,
                     showPronunciation = theme == PlayerTheme.MATERIAL,
                     lyricTheme = LyricTheme.entries[(theme.ordinal + weather.ordinal) % LyricTheme.entries.size],
+                    tokyoSceneTime = TokyoSceneTime.entries[(theme.ordinal + weather.ordinal) % TokyoSceneTime.entries.size],
+                    tokyoSceneLandmark = TokyoSceneLandmark.entries[(theme.ordinal + weather.ordinal) % TokyoSceneLandmark.entries.size],
                     weather = weather,
                 )
                 assertEquals(cfg, RearScreenCodec.decode(RearScreenCodec.encode(cfg)))
@@ -121,29 +125,40 @@ class RearScreenTest {
         val main = NowPlayingConfig(
             theme = PlayerTheme.MATERIAL,
             blur = 32,
-            lyricTheme = LyricTheme.NEON_CITY,
+            lyricTheme = LyricTheme.TOKYO_CITYSCAPE,
+            tokyoSceneTime = TokyoSceneTime.DUSK,
+            tokyoSceneLandmark = TokyoSceneLandmark.SHINJUKU_NEON,
             weather = PlayerWeather.RAIN,
         )
         val independent = RearScreenConfig(
             followMainTheme = false,
             theme = PlayerTheme.BLUR,
             lyricTheme = LyricTheme.LIME_SODA,
+            tokyoSceneTime = TokyoSceneTime.MORNING,
+            tokyoSceneLandmark = TokyoSceneLandmark.ODAIBA_BAY,
             weather = PlayerWeather.SNOW,
         ).resolveAppearance(main)
         assertEquals(PlayerTheme.BLUR, independent.theme)
         assertEquals(LyricTheme.LIME_SODA, independent.lyricTheme)
+        assertEquals(TokyoSceneTime.MORNING, independent.tokyoSceneTime)
+        assertEquals(TokyoSceneLandmark.ODAIBA_BAY, independent.tokyoSceneLandmark)
         assertEquals(PlayerWeather.SNOW, independent.weather)
 
         val following = RearScreenConfig(
             followMainTheme = true,
             theme = PlayerTheme.BLUR,
             lyricTheme = LyricTheme.LIME_SODA,
+            tokyoSceneTime = TokyoSceneTime.MORNING,
+            tokyoSceneLandmark = TokyoSceneLandmark.ODAIBA_BAY,
             weather = PlayerWeather.SNOW,
         ).resolveAppearance(main)
         assertEquals(PlayerTheme.MATERIAL, following.theme)
-        assertEquals(LyricTheme.NEON_CITY, following.lyricTheme)
+        assertEquals(LyricTheme.TOKYO_CITYSCAPE, following.lyricTheme)
+        assertEquals(TokyoSceneTime.DUSK, following.tokyoSceneTime)
+        assertEquals(TokyoSceneLandmark.SHINJUKU_NEON, following.tokyoSceneLandmark)
         assertEquals(PlayerWeather.RAIN, following.weather)
-        assertEquals(LyricTheme.NEON_CITY, following.toNowPlayingConfig(main, RearScreenConfig(followMainTheme = true)).lyricTheme)
+        assertEquals(TokyoSceneTime.DUSK, following.toNowPlayingConfig(main, RearScreenConfig(followMainTheme = true)).tokyoSceneTime)
+        assertEquals(TokyoSceneLandmark.SHINJUKU_NEON, following.toNowPlayingConfig(main, RearScreenConfig(followMainTheme = true)).tokyoSceneLandmark)
     }
 
     @Test

@@ -14,6 +14,7 @@ data class EffectsState(
     val fade: Boolean = false,
     val fadeMs: Int = 600,
     val alwaysPlay: Boolean = false,
+    val nativePreviousBehavior: Boolean = true,
     val draftDirty: Boolean = false,
     val draftBase: String = "reference",
     val draftOriginal: DspConfig? = null,
@@ -88,8 +89,19 @@ class EffectsStore(context: Context) {
     }
     fun delete(id: String) = update { it.copy(imported = it.imported.filterNot { p -> p.id == id }, selected = if (it.selected == id) "reference" else it.selected,
         pendingSelection = if (it.pendingSelection == id) null else it.pendingSelection, counts = it.counts - id, recent = it.recent - id) }
-    fun audio(fade: Boolean = state.value.fade, ms: Int = state.value.fadeMs, always: Boolean = state.value.alwaysPlay) =
-        update { it.copy(fade = fade, fadeMs = ms.coerceIn(100, 3000), alwaysPlay = always) }
+    fun audio(
+        fade: Boolean = state.value.fade,
+        ms: Int = state.value.fadeMs,
+        always: Boolean = state.value.alwaysPlay,
+        nativePrevious: Boolean = state.value.nativePreviousBehavior,
+    ) = update {
+        it.copy(
+            fade = fade,
+            fadeMs = ms.coerceIn(100, 3000),
+            alwaysPlay = always,
+            nativePreviousBehavior = nativePrevious,
+        )
+    }
 
     @Synchronized private fun update(block: (EffectsState) -> EffectsState) {
         val previous = mutable.value
