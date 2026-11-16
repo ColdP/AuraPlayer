@@ -77,13 +77,14 @@ Open an issue before implementing large architectural changes, new network sourc
 
 ## Reporting Issues
 
-Include the following in a bug report:
+Blank issues are disabled. Please choose either the **Bug 报告** (Bug Report) form or the **请求新功能** (Feature Request) form when opening an issue:
 
-- Device model, Android version, and OEM OS version (such as HyperOS version)
-- Aura Player version (or commit hash)
-- Clear reproduction steps (specify local playback, official NetEase login, or custom API setup)
-- Expected and actual behavior
-- Relevant Logcat output or screenshots with sensitive data (session cookies, private server URLs, personal file paths) removed
+- For bug reports (**NO LOG, NO FIX**), include:
+  - Device model, Android version, and OEM OS version (such as HyperOS version)
+  - Aura Player version (or commit hash) and affected module
+  - Clear reproduction steps (specify local playback, official NetEase login, custom API, Aura Sing, Spatial Cover, etc.)
+  - Expected and actual behavior, at least 60 characters of effective description, relevant Logcat output, and an uploaded `.log`, `.txt`, `.zip`, or screenshot attachment on GitHub with sensitive data (session cookies, private server URLs, personal file paths) removed.
+  - Incomplete bug reports without logs/attachments are automatically labeled `invalid` and closed by `.github/workflows/issue-triage.yml`.
 
 ## Code of Conduct
 

@@ -1,0 +1,118 @@
+name: Bug 报告
+description: 提交包含设备型号、版本信息与 Logcat 日志的可复现问题
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈问题！请务必使用本表单提供完整环境信息与 **Logcat 日志 / 截图附件**，并移除日志或截图中的个人隐私信息（如网易云账号 Cookie、自建 API 地址、本地私密文件名）。
+
+        > **NO LOG, NO FIX.** 缺少有效描述、未提供日志信息或未上传 `.log` / `.txt` / `.zip` / 截图附件的 Bug 报告将被自动标记为 `invalid` 并关闭。
+
+  - type: input
+    id: device-model
+    attributes:
+      label: 设备型号
+      description: 请填写完整的设备型号，例如 Xiaomi 17、Pixel 9。
+      placeholder: 例如：Xiaomi 17
+    validations:
+      required: true
+
+  - type: input
+    id: android-rom-version
+    attributes:
+      label: Android 与系统版本
+      description: 请填写 Android 版本以及系统 ROM / 定制层版本，例如 Android 16 (HyperOS OS4.0.6.0)。
+      placeholder: 例如：Android 16 (HyperOS OS4.0.6.0)
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: Aura Player 版本
+      description: 请填写应用内「设置 → 关于」显示的完整版本号或构建日期，例如 1.0.0。
+      placeholder: 例如：1.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: module
+    attributes:
+      label: 涉及功能模块
+      description: 请选择问题主要发生的功能区域。
+      options:
+        - 本地媒体库与播放
+        - 网易云官方直连 / 多账号 / 下载
+        - 自建 NeteaseCloudMusicApiEnhanced 服务
+        - 歌词显示 / LLM AI 翻译 / 歌词分享
+        - Aura Sing 端侧伴唱 / NPU 加速 / 音轨导出
+        - 3D 空间封面 / Coverflow / 3D 东京
+        - 背屏显示 / Shizuku / Root
+        - DSP 音效 / 标签编辑 / 外观与导航
+        - 应用崩溃 / 闪退 / 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logcat 日志与异常信息
+      description: 请在此处粘贴关键 Logcat 错误日志或崩溃栈片段；完整日志文件或报错截图请在最下方上传。
+      placeholder: |
+        Logcat 关键日志：
+        2026-11-17 00:00:00 E/AndroidRuntime: FATAL EXCEPTION: main ...
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem-description
+    attributes:
+      label: 问题描述
+      description: 请具体描述发生了什么，以及问题出现的频率与影响。
+      placeholder: 请至少填写 30 个字符。
+    validations:
+      required: true
+      min_length: 30
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: 复现步骤
+      description: 请按顺序列出触发问题的操作步骤。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+      min_length: 20
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: 预期行为
+      description: 说明你原本期望发生什么。
+    validations:
+      required: true
+      min_length: 10
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: 实际行为
+      description: 说明实际发生了什么，并注明是否可以稳定复现。
+    validations:
+      required: true
+      min_length: 10
+
+  - type: upload
+    id: log-files
+    attributes:
+      label: 上传日志或相关文件
+      description: 必须上传至少一个相关文件（`.log`、`.txt`、`.zip` 或报错截图 `.png` / `.jpg` / `.jpeg` / `.gif` / `.webp`），单个文件大小遵循 GitHub 限制。
+    validations:
+      required: true
+      accept: ".log,.txt,.zip,.png,.jpg,.jpeg,.gif,.webp"

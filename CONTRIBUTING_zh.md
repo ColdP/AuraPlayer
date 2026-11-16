@@ -77,13 +77,14 @@ Windows PowerShell：
 
 ## 反馈问题
 
-提交 Bug 报告时，请尽量提供：
+仓库已关闭空白 Issue 创建入口，请按需求选择 **Bug 报告** 或 **请求新功能** 表单提交：
 
-- 设备型号、Android 版本与系统定制版本（如 HyperOS 版本）
-- Aura Player 版本号（或提交哈希）
-- 复现步骤（本地音乐 / 官方网易云直连 / 自建 API 等场景说明）
-- 预期行为与实际行为
-- 已移除账号 Cookie、私有服务地址与个人文件路径等敏感信息的 Logcat 输出或截图
+- 提交 **Bug 报告** 遵循 **NO LOG, NO FIX** 原则，请务必填写并提供：
+  - 设备型号、Android 版本与系统定制版本（如 HyperOS 版本）
+  - Aura Player 版本号（或提交哈希）与涉及功能模块
+  - 复现步骤、预期行为与实际行为（有效正文描述至少 60 个字符）
+  - 移除账号 Cookie、私有 API 地址与个人文件路径等敏感信息后的 Logcat 输出，以及上传至 GitHub 的 `.log`、`.txt`、`.zip` 或报错截图附件
+  - 缺少日志关键词、有效描述不足或未上传合规附件的 Bug 报告将由 `.github/workflows/issue-triage.yml` 自动标记 `invalid` 并关闭。
 
 ## 行为准则
 

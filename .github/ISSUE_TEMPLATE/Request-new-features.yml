@@ -1,0 +1,30 @@
+name: 请求新功能
+description: 请求为 Aura Player 新增或改进功能
+title: "[New Features]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢您对 Aura Player 提出功能建议！
+
+        > 注意：此表单仅用于**功能请求**。如果您需要反馈崩溃、闪退或功能异常，请返回并选择 **Bug 报告** 表单并附上 Logcat 日志；试图使用本表单绕过日志提交 Bug 将会被直接关闭。
+
+  - type: input
+    id: features
+    attributes:
+      label: 新功能名称
+      description: 请简明扼要地写出期望新增或改进的功能名称。
+      placeholder: 例如：支持 WebDAV 云盘曲库
+    validations:
+      required: true
+
+  - type: textarea
+    id: sayfeatures
+    attributes:
+      label: 大致效果描述与使用场景
+      description: 请详细描述希望实现的效果、交互方式及典型使用场景。
+      placeholder: 请至少填写 20 个字符，说明具体交互细节或参考示例。
+    validations:
+      required: true
+      min_length: 20
