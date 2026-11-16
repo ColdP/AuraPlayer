@@ -14,8 +14,8 @@
 
 <p align="center">
   <a href="https://github.com/ColdP/AuraPlayer/releases">リリース</a> |
-  <a href="https://t.me/HyperChanger">Telegram グループ</a> |
-  <a href="https://qm.qq.com/q/rQhbQbiYLe">QQ グループ：429188055</a>
+  <a href="https://t.me/AuraPlayer39">Telegram グループ</a> |
+  <a href="https://qm.qq.com/q/swThZQLJi8">QQ グループ：2157080278</a>
 </p>
 
 <p align="center">
