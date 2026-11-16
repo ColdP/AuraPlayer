@@ -31,7 +31,8 @@ internal val LocalOpenTagEditor = staticCompositionLocalOf<(Song) -> Unit> { {} 
 
 @Composable
 internal fun SongActionsSheet(model: AuraViewModel, request: SongActionRequest, show: Boolean,
-                              dismiss: () -> Unit, onDismissFinished: () -> Unit) {
+                              dismiss: () -> Unit, onDismissFinished: () -> Unit,
+                              openPage: (String) -> Unit = {}) {
     val song = request.song
     val editTags = LocalOpenTagEditor.current
     val foreground = sheetForeground()
@@ -129,14 +130,24 @@ internal fun SongActionsSheet(model: AuraViewModel, request: SongActionRequest, 
             Column(groupModifier, verticalArrangement = Arrangement.spacedBy(if (expressive != null) 2.dp else 0.dp)) {
                 action(MiuixIcons.Regular.Album, tr("album", "专辑"), song.album, song.albumId > 0 || !song.cloud,
                     position = SheetItemPosition.TOP) { model.openSongAlbum(song); dismiss() }
-                val artistPosition = if (!song.cloud) SheetItemPosition.MIDDLE else SheetItemPosition.BOTTOM
+                val artistPosition = SheetItemPosition.MIDDLE
                 if (artists.size > 1) SheetDropdown(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, request.backdrop,
                     DropdownEntry(artists.map { artist -> DropdownItem(artist.name, enabled = !song.cloud || artist.id > 0,
                         icon = { Artwork(artist.artwork, it.size(30.dp), circular = true) },
                         onClick = { model.openSongArtist(song, artist); dismiss() }) }), expressive = expressive, position = artistPosition)
                 else action(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, song.artistId > 0 || !song.cloud,
                     position = artistPosition) { model.openSongArtist(song); dismiss() }
-                if (!song.cloud) {
+                if (song.cloud) {
+                    action(
+                        MiuixIcons.Regular.Merge,
+                        tr("production_team", "制作团队"),
+                        position = SheetItemPosition.BOTTOM,
+                    ) {
+                        model.rememberSongForCredits(song)
+                        dismiss()
+                        openPage(songCreditsRoute(song))
+                    }
+                } else {
                     action(MiuixIcons.Regular.File, tr("tag_editor", "标签编辑器"), position = SheetItemPosition.MIDDLE) { dismiss(); editTags(song) }
                     action(MiuixIcons.Regular.Info, tr("audio_info", "音频信息"), position = SheetItemPosition.BOTTOM) { audioInfoOpen = true }
                 }

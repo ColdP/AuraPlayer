@@ -92,6 +92,9 @@ internal class OfficialNeteaseClient(
                 value("ids").split(',').mapNotNull(String::toLongOrNull).forEach { put(JSONObject().put("id", it)) }
             }.toString()), authenticated)
             "song/music/detail" -> call("/api/song/music/detail/get", JSONObject().put("songId", value("id")), authenticated)
+            "lyric/new" -> call("/api/song/lyric/v1", JSONObject().put("id", value("id"))
+                .put("cp", false).put("lv", 0).put("kv", 0).put("tv", 0).put("rv", 0)
+                .put("yv", 0).put("ytv", 0).put("yrv", 0), authenticated, eapi = true)
             "song/url/v1" -> call("/api/song/enhance/player/url/v1", JSONObject().put("ids", "[${value("id")}]")
                 .put("level", value("level", "standard")).put("encodeType", if (value("level") == "vivid") "mp3" else "flac").apply { if (value("level") == "sky") put("immerseType", "c51") }, authenticated, eapi = true, androidClient = value("level") == "vivid")
             "captcha/sent" -> call("/api/sms/captcha/sent", JSONObject().put("cellphone", value("phone"))

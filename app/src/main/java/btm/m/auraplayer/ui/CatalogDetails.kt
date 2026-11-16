@@ -33,7 +33,11 @@ import btm.m.auraplayer.ui.player.rememberCatalogPlayerThemeTokens
 import btm.m.auraplayer.ui.player.rememberPlayerMonetPalette
 import btm.m.auraplayer.ui.player.LocalSongActions
 import btm.m.auraplayer.ui.player.SongActionRequest
+import btm.m.auraplayer.ui.player.findCachedArtworkMemoryEntry
+import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.size.Precision
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.basic.*
@@ -252,15 +256,28 @@ internal fun CatalogBackground(
 
 @Composable
 internal fun AlbumInfoBackground(collection: MusicCollection, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val palette = rememberPlayerMonetPalette(collection.artwork)
     val base = Color(palette.a2.tone(14))
     if (!LocalAdvancedMaterialEnabled.current) {
         Box(modifier.background(base))
         return
     }
+    val bgRequest = remember(collection.artwork, context) {
+        if (collection.artwork.isBlank()) null
+        else {
+            val placeholderKey = findCachedArtworkMemoryEntry(SingletonImageLoader.get(context), collection.artwork)?.key
+            ImageRequest.Builder(context)
+                .data(collection.artwork)
+                .size(512)
+                .precision(Precision.INEXACT)
+                .apply { if (placeholderKey != null) placeholderMemoryCacheKey(placeholderKey) }
+                .build()
+        }
+    }
     Box(modifier.clipToBounds().background(base)) {
-        if (collection.artwork.isNotBlank()) AsyncImage(
-            model = collection.artwork,
+        if (bgRequest != null) AsyncImage(
+            model = bgRequest,
             contentDescription = null,
             modifier = Modifier.matchParentSize()
                 .graphicsLayer { scaleX = 1.15f; scaleY = 1.15f }

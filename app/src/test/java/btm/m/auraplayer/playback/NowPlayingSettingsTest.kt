@@ -23,6 +23,8 @@ class NowPlayingSettingsTest {
         assertEquals(1.0f, expected.spatialCoverSensitivity, 0.001f)
         assertEquals(TokyoSceneTime.FOLLOW_SYSTEM, expected.tokyoSceneTime)
         assertEquals(TokyoSceneLandmark.CITY_WALK, expected.tokyoSceneLandmark)
+        assertEquals(0f, expected.mainLyricScalePercent, 0f)
+        assertEquals(0f, expected.bgLyricScalePercent, 0f)
         assertFalse(expected.immersiveLyrics || expected.keepLyricsAwake || expected.immersiveCover || expected.landscapeAutoCoverflow || expected.coverflowParallax || expected.tiledParallax || expected.appleMusicAnimatedCover || expected.albumAnimatedCover || expected.appleMusicArtistArtwork || expected.artistAnimatedCover)
         assertTrue(expected.fullscreenGlass)
     }
@@ -50,7 +52,8 @@ class NowPlayingSettingsTest {
                 showVolume = false, openFromNotification = false, keepLyricsAwake = true,
                 showAudioInfo = false, swipeTracks = false,
                 immersiveLyrics = true, immersiveSeconds = 27, fullscreenGlass = false,
-                materialBackground = bg, materialColorMix = 78, glowProgress = glow)
+                materialBackground = bg, materialColorMix = 78, glowProgress = glow,
+                mainLyricScalePercent = -35.4f, bgLyricScalePercent = 142.8f)
             assertEquals(config, NowPlayingCodec.decode(NowPlayingCodec.encode(config)))
         }
     }
@@ -102,6 +105,23 @@ class NowPlayingSettingsTest {
         assertTrue(high.y < sample.y)
         val extreme = scaleSpatialParallaxTilt(Offset(1.0f, -1.0f), 2.5f)
         assertTrue(extreme.x <= 1.55f && extreme.y >= -1.55f)
+    }
+
+    @Test fun lyricScalePercentClampsToTenthsAndMultipliesSimultaneously() {
+        val high = NowPlayingCodec.decode("""{"mainLyricScalePercent":250.4,"bgLyricScalePercent":123.46}""")
+        assertEquals(200f, high.mainLyricScalePercent, 0f)
+        assertEquals(123.5f, high.bgLyricScalePercent, 0.001f)
+        val low = NowPlayingCodec.decode("""{"mainLyricScalePercent":-150.0,"bgLyricScalePercent":-0.04}""")
+        assertEquals(-100f, low.mainLyricScalePercent, 0f)
+        assertEquals(0f, low.bgLyricScalePercent, 0f)
+        assertEquals("0.0%", formatLyricScalePercent(-0.04f))
+        assertEquals("-100.0%", formatLyricScalePercent(-100f))
+        assertEquals("200.0%", formatLyricScalePercent(200f))
+        assertEquals(0f, lyricScaleMultiplier(-100f), 0.0001f)
+        assertEquals(1f, lyricScaleMultiplier(0f), 0.0001f)
+        assertEquals(1.5f, lyricScaleMultiplier(50f), 0.0001f)
+        assertEquals(3f, lyricScaleMultiplier(200f), 0.0001f)
+        assertEquals(1.8f, 1.2f * lyricScaleMultiplier(50f), 0.0001f)
     }
 
     @Test fun blurIsContinuousFromClearThroughDefaultToMaximumAndOnlyCorrectThemesExposeIt() {

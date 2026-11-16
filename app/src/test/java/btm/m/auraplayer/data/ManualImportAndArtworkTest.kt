@@ -2,6 +2,7 @@
 package btm.m.auraplayer.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -81,5 +82,31 @@ class ManualImportAndArtworkTest {
         assertTrue(id2 < 0L)
         assertEquals(id1, stableManualSongId(list[0].uri))
         assertNotEquals(id1, id2)
+    }
+
+    @Test
+    fun localAudioArtworkCachesExtractedBytesAndMatchesSameAlbumArt() {
+        val song1 = LocalAudioArtwork.uriFor(
+            songUri = "content://media/external/audio/media/101",
+            albumArtUri = "content://media/external/audio/albumart/555",
+            version = 100L,
+        )
+        val song2 = LocalAudioArtwork.uriFor(
+            songUri = "content://media/external/audio/media/102",
+            albumArtUri = "content://media/external/audio/albumart/555",
+            version = 101L,
+        )
+        val otherAlbum = LocalAudioArtwork.uriFor(
+            songUri = "content://media/external/audio/media/103",
+            albumArtUri = "content://media/external/audio/albumart/999",
+            version = 102L,
+        )
+        assertTrue(LocalAudioArtwork.sameAlbumArtUri(song1, song2))
+        assertFalse(LocalAudioArtwork.sameAlbumArtUri(song1, otherAlbum))
+
+        val payload = byteArrayOf(1, 2, 3, 4, 5)
+        LocalAudioArtwork.cacheBytes(song1, payload)
+        assertEquals(payload.toList(), LocalAudioArtwork.cachedBytes(song1)?.toList())
+        assertNull(LocalAudioArtwork.cachedBytes(song2))
     }
 }

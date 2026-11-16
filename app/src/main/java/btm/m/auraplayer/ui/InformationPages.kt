@@ -91,8 +91,6 @@ fun AboutPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Un
                 SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = aboutCardColors()) {
                     Preference(tr("license", "LICENSE"), "AGPL-3.0-or-later") { open("license") }
                     Preference(tr("github_repository", "GitHub Repository"), "github.com/ColdP/AuraPlayer") { openUrl(context, "https://github.com/ColdP/AuraPlayer") }
-                    Preference(tr("telegram_group", "Telegram 群组"), "t.me/HyperChanger") { openUrl(context, "https://t.me/HyperChanger") }
-                    Preference(tr("qq_group", "QQ 群"), tr("qq_number", "群号: 429188055")) { openUrl(context, "https://qm.qq.com/q/rQhbQbiYLe") }
                 }
             }
             item {

@@ -77,6 +77,9 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var quality by mutableStateOf(playbackPreferences.quality); private set
     var showTranslation by mutableStateOf(playbackPreferences.translation); private set
     var showPronunciation by mutableStateOf(playbackPreferences.pronunciation); private set
+    var lyricTranslationSource by mutableStateOf(playbackPreferences.translationSource); private set
+    var hasDualTranslationSources by mutableStateOf(false); private set
+    private var resolvedLyricsVariant: btm.m.auraplayer.lyrics.ResolvedLyrics? = null
     private val lyricPreferences = btm.m.auraplayer.lyrics.LyricPreferences(application)
     var lyricSize by mutableStateOf(lyricPreferences.size); private set
     fun changeLyricSize(value: btm.m.auraplayer.lyrics.LyricSize) {
@@ -107,7 +110,11 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var lyricShareInitialIndex by mutableIntStateOf(-1); private set
     fun prepareLyricShare(index: Int) { lyricShareInitialIndex = index }
     var lyricsLoading by mutableStateOf(false); private set
-    private val lyricRepository = btm.m.auraplayer.lyrics.LyricsRepository(application)
+    private val lyricRepository = btm.m.auraplayer.lyrics.LyricsRepository(
+        context = application,
+        llmConfigProvider = { app.llmTranslation.current },
+        llmApiKeyProvider = { app.llmTranslation.apiKeyFor() },
+    )
     private var lyricJob: Job? = null
     private var lyricKey: String? = null
     var buffering by mutableStateOf(false); private set
@@ -145,6 +152,8 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private val knownSongs = mutableMapOf<String, Song>()
     private val artistArtworkCache = mutableStateMapOf<Long, String>()
     private val songArtistCache = mutableMapOf<String, List<SongArtist>>()
+    private val cloudCreditsSongSeeds = mutableMapOf<Long, Song>()
+    private val songCreditsCache = mutableMapOf<Long, SongCreditsData>()
     private val prefetchedArtists = mutableSetOf<Long>()
     private var lastCurrentKey: String? = null
     private val future = MediaController.Builder(app, SessionToken(app, ComponentName(app, PlaybackService::class.java))).buildAsync()
@@ -202,6 +211,16 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         restoreAccount()
         refreshDownloadedSongs()
         downloadsPreferences.registerOnSharedPreferenceChangeListener(downloadsListener)
+        viewModelScope.launch {
+            app.llmTranslation.revision.drop(1).collect {
+                lyricRepository.clear()
+                btm.m.auraplayer.lyrics.LlmTranslator.clearMemoryCache()
+                current?.let { activeSong ->
+                    lyricKey = null
+                    loadLyrics(activeSong)
+                }
+            }
+        }
         viewModelScope.launch {
             @OptIn(FlowPreview::class)
             queries.debounce(300).collectLatest { request ->
@@ -426,13 +445,15 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             val detail = withContext(Dispatchers.IO) { btm.m.auraplayer.playback.AudioDetails.inspect(app, song) }
             if (current?.key == song.key) { localAudioBase = detail; localAudioDetails = detail.withFormat(audioFormat) }
         }
-        lyricKey = song?.key; lyricJob?.cancel(); lyrics = emptyList(); lyricsLoading = song != null
+        lyricKey = song?.key; lyricJob?.cancel(); lyrics = emptyList(); resolvedLyricsVariant = null; hasDualTranslationSources = false; lyricsLoading = song != null
         if (song == null) return
         lyricJob = viewModelScope.launch {
             try {
-                lyricRepository.lyrics(song).collect { rows ->
-                    lyrics = rows
-                    if (rows.isNotEmpty()) lyricsLoading = false
+                lyricRepository.resolveLyrics(song).collect { resolved ->
+                    resolvedLyricsVariant = resolved
+                    hasDualTranslationSources = resolved.hasDualTranslationSources
+                    lyrics = resolved.select(lyricTranslationSource)
+                    if (lyrics.isNotEmpty()) lyricsLoading = false
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { android.util.Log.w("AuraLyrics", "Lyrics lookup failed", e) }
@@ -442,6 +463,21 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     fun lyricsOptions(translation: Boolean, pronunciation: Boolean) {
         showTranslation = translation; showPronunciation = pronunciation
         playbackPreferences.translation = translation; playbackPreferences.pronunciation = pronunciation
+    }
+    fun changeLyricTranslationSource(source: btm.m.auraplayer.playback.LyricTranslationSource) {
+        lyricTranslationSource = source
+        playbackPreferences.translationSource = source
+        resolvedLyricsVariant?.let { lyrics = it.select(source) }
+    }
+    fun notifyLlmTranslationCacheChanged(songKey: String? = null) {
+        btm.m.auraplayer.lyrics.LlmTranslator.clearMemoryCache()
+        if (songKey == null) lyricRepository.clear() else lyricRepository.invalidate(songKey)
+        current?.let { activeSong ->
+            if (songKey == null || activeSong.key == songKey) {
+                lyricKey = null
+                loadLyrics(activeSong)
+            }
+        }
     }
     fun seekTo(value: Long) { controller?.seekTo(value.coerceIn(0L, duration.coerceAtLeast(0))); position = value.coerceIn(0L, duration.coerceAtLeast(0)) }
     fun queueTo(index: Int) { controller?.let { if (index in 0 until it.mediaItemCount) { it.seekToDefaultPosition(index); it.play() } } }
@@ -535,6 +571,25 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     fun openSongArtist(song: Song, artist: SongArtist) {
         if (song.cloud && artist.artwork.isNotBlank()) artistArtworkCache[artist.id] = artist.artwork
         openSongArtist(song.copy(artist = artist.name, artistId = artist.id, artists = listOf(artist)))
+    }
+    fun rememberSongForCredits(song: Song) {
+        if (song.cloud && song.id > 0L) cloudCreditsSongSeeds[song.id] = song
+    }
+    fun findCloudSongForCredits(songId: Long): Song? {
+        if (songId <= 0L) return null
+        return cloudCreditsSongSeeds[songId]
+            ?: current?.takeIf { it.cloud && it.id == songId }
+            ?: knownSongs["cloud:$songId"]
+            ?: queue.firstOrNull { it.cloud && it.id == songId }
+            ?: collection?.songs?.firstOrNull { it.cloud && it.id == songId }
+            ?: cloudCollection?.songs?.firstOrNull { it.cloud && it.id == songId }
+            ?: cloudRecentSongs.firstOrNull { it.cloud && it.id == songId }
+    }
+    suspend fun loadSongCredits(songId: Long, forceRefresh: Boolean = false): SongCreditsData {
+        if (!forceRefresh) songCreditsCache[songId]?.let { return it }
+        val data = app.api.songCredits(songId, findCloudSongForCredits(songId))
+        songCreditsCache[songId] = data
+        return data
     }
     suspend fun resolveSongArtists(song: Song): List<SongArtist> = coroutineScope {
         val credits = if (song.cloud) songArtistCache[song.key] ?: song.artists.ifEmpty {

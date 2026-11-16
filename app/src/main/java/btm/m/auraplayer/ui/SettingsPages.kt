@@ -71,6 +71,13 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
                     if (value.language == "en") 1 else 0, backdrop = LocalToolbarBackdrop.current) { index ->
                     model.updateSettings { it.copy(language = if (index == 0) "zh" else "en") }; I18n.language = model.settings.value.language
                 }
+                val llmState by model.app.llmTranslation.state.collectAsState()
+                Preference(
+                    tr("llm_translation", "大模型翻译"),
+                    summary = if (llmState.enabled) {
+                        llmState.activeModel().ifBlank { tr("llm_translation_enabled_summary", "使用兼容大模型智能翻译歌词") }
+                    } else null,
+                ) { open("llm_translation") }
             }
         }
         item {
@@ -86,6 +93,7 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
         item {
             Group(tr("information", "信息")) {
                 Preference(tr("about", "关于")) { open("about") }
+                Preference(tr("software_update", "软件更新")) { open("software_update") }
                 Preference(tr("donate", "捐赠")) { open("donate") }
             }
         }

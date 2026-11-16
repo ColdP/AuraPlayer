@@ -1,5 +1,8 @@
 package btm.m.auraplayer.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
@@ -163,10 +166,15 @@ fun BlurAnimatedVisibility(visible: Boolean, label: String, content: @Composable
     }
 }
 
+internal fun copyToClipboard(context: Context, label: String, text: String) {
+    val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+    manager.setPrimaryClip(ClipData.newPlainText(label, text))
+}
+
 @Composable
-fun SliderPreference(title: String, value: Float, range: ClosedFloatingPointRange<Float>, valueText: String, enabled: Boolean = true, steps: Int = 0, defaultValue: Float = range.start, onChange: (Float) -> Unit) {
+fun SliderPreference(title: String, value: Float, range: ClosedFloatingPointRange<Float>, valueText: String, enabled: Boolean = true, steps: Int = 0, defaultValue: Float = range.start, centerValue: Float? = null, onChange: (Float) -> Unit) {
     EditableSliderPreference(value = value, onValueChange = onChange, onValueChangeFinished = {},
-        title = title, valueText = valueText, valueRange = range, enabled = enabled, steps = steps, defaultValue = defaultValue)
+        title = title, valueText = valueText, valueRange = range, enabled = enabled, steps = steps, defaultValue = defaultValue, centerValue = centerValue)
 }
 
 @Composable

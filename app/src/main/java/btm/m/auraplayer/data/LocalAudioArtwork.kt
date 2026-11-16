@@ -31,6 +31,37 @@ import java.nio.charset.StandardCharsets
 object LocalAudioArtwork {
     const val SCHEME = "aura-art"
     const val HOST = "local"
+    private const val ARTWORK_BYTES_CACHE_BYTES = 24 * 1024 * 1024
+
+    // Keeps extracted embedded album art bytes in memory across list thumbnails,
+    // album pages, album info sheets, Now Playing covers, and Monet quantization
+    // so switching screens never re-runs MediaMetadataRetriever for the same track.
+    private val extractedBytesCache = LinkedHashMap<String, ByteArray>(64, 0.75f, true)
+    private var extractedBytesTotal = 0
+
+    internal fun cachedBytes(rawUri: String): ByteArray? =
+        if (rawUri.isBlank()) null else synchronized(extractedBytesCache) { extractedBytesCache[rawUri] }
+
+    internal fun cacheBytes(rawUri: String, bytes: ByteArray) {
+        if (rawUri.isBlank() || bytes.isEmpty() || bytes.size > ARTWORK_BYTES_CACHE_BYTES / 3) return
+        synchronized(extractedBytesCache) {
+            extractedBytesCache.remove(rawUri)?.let { extractedBytesTotal -= it.size }
+            extractedBytesCache[rawUri] = bytes
+            extractedBytesTotal += bytes.size
+            val iter = extractedBytesCache.entries.iterator()
+            while (extractedBytesTotal > ARTWORK_BYTES_CACHE_BYTES && iter.hasNext()) {
+                val eldest = iter.next()
+                extractedBytesTotal -= eldest.value.size
+                iter.remove()
+            }
+        }
+    }
+
+    internal fun sameAlbumArtUri(firstUri: String, secondUri: String): Boolean {
+        val firstAlbum = parse(firstUri)?.albumArtUri?.takeIf { it.isNotBlank() } ?: return false
+        val secondAlbum = parse(secondUri)?.albumArtUri?.takeIf { it.isNotBlank() } ?: return false
+        return firstAlbum == secondAlbum
+    }
 
     data class ParsedUri(
         val songUri: String,
@@ -91,13 +122,16 @@ internal class LocalAudioArtworkFetcher(
 ) : Fetcher {
     override suspend fun fetch(): FetchResult? {
         val parsed = LocalAudioArtwork.parse(rawUri) ?: return null
-        val bytes = readEmbeddedArt(parsed.songUri) ?: readAlbumArtFallback(parsed.albumArtUri) ?: return null
+        val bytes = LocalAudioArtwork.cachedBytes(rawUri)
+            ?: (readEmbeddedArt(parsed.songUri) ?: readAlbumArtFallback(parsed.albumArtUri))
+                ?.also { LocalAudioArtwork.cacheBytes(rawUri, it) }
+            ?: return null
         if (bytes.isEmpty()) return null
         val buffer = Buffer().write(bytes)
         return SourceFetchResult(
             source = ImageSource(source = buffer, fileSystem = options.fileSystem),
             mimeType = null,
-            dataSource = DataSource.DISK,
+            dataSource = DataSource.MEMORY,
         )
     }
 

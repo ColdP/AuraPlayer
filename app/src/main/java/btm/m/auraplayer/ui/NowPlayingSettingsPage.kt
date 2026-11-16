@@ -110,45 +110,6 @@ fun NowPlayingSettingsPage(padding: PaddingValues, open: (String) -> Unit = {}) 
                 ) { index ->
                     store.update { it.copy(glowProgress = GlowProgressStyle.entries[index]) }
                 }
-                GlassDropdownPreference(
-                    tr("player_lyric_theme", "歌词主题"),
-                    lyricThemeItems,
-                    state.lyricTheme.ordinal,
-                    backdrop = LocalToolbarBackdrop.current,
-                ) { index ->
-                    val picked = LyricTheme.entries[index]
-                    if (shouldPromptLyricThemePowerNotice(picked, state.lyricThemePowerNoticeDismissed)) {
-                        pendingLyricTheme = picked
-                    } else {
-                        store.update { it.copy(lyricTheme = picked) }
-                    }
-                }
-                BlurAnimatedVisibility(
-                    visible = state.lyricTheme == LyricTheme.TOKYO_CITYSCAPE,
-                    label = "player-tokyo-scene-time-setting",
-                ) {
-                    GlassDropdownPreference(
-                        tr("lyric_theme_tokyo_time", "东京景色时段"),
-                        tokyoSceneTimeLabels(),
-                        state.tokyoSceneTime.ordinal,
-                        backdrop = LocalToolbarBackdrop.current,
-                    ) { index ->
-                        store.update { it.copy(tokyoSceneTime = TokyoSceneTime.entries[index]) }
-                    }
-                }
-                BlurAnimatedVisibility(
-                    visible = state.lyricTheme == LyricTheme.TOKYO_CITYSCAPE,
-                    label = "player-tokyo-scene-landmark-setting",
-                ) {
-                    GlassDropdownPreference(
-                        tr("lyric_theme_tokyo_landmark", "东京景色"),
-                        tokyoSceneLandmarkLabels(),
-                        state.tokyoSceneLandmark.ordinal,
-                        backdrop = LocalToolbarBackdrop.current,
-                    ) { index ->
-                        store.update { it.copy(tokyoSceneLandmark = TokyoSceneLandmark.entries[index]) }
-                    }
-                }
                 GlassDropdownPreference(tr("player_special_effect", "特殊效果"),
                     listOf(tr("player_effect_none", "不显示"), tr("player_effect_snow", "降雪"), tr("player_effect_rain", "降雨")),
                     state.weather.ordinal, backdrop = LocalToolbarBackdrop.current) { index -> store.update { it.copy(weather = PlayerWeather.entries[index]) } }
@@ -230,6 +191,51 @@ fun NowPlayingSettingsPage(padding: PaddingValues, open: (String) -> Unit = {}) 
         item {
             Group(tr("player_functions", "功能")) {
                 SwitchPreference(tr("player_open_notification", "从媒体通知进入时显示正在播放界面"), checked = state.openFromNotification) { value -> store.update { it.copy(openFromNotification = value) } }
+                SwitchPreference(tr("player_show_audio_info", "正在播放界面显示音频信息"), checked = state.showAudioInfo) { value -> store.update { it.copy(showAudioInfo = value) } }
+                SwitchPreference(tr("player_swipe_tracks", "左右滑动切歌"), checked = state.swipeTracks) { value -> store.update { it.copy(swipeTracks = value) } }
+            }
+        }
+        item {
+            Group(tr("lyrics", "歌词")) {
+                GlassDropdownPreference(
+                    tr("player_lyric_theme", "歌词主题"),
+                    lyricThemeItems,
+                    state.lyricTheme.ordinal,
+                    backdrop = LocalToolbarBackdrop.current,
+                ) { index ->
+                    val picked = LyricTheme.entries[index]
+                    if (shouldPromptLyricThemePowerNotice(picked, state.lyricThemePowerNoticeDismissed)) {
+                        pendingLyricTheme = picked
+                    } else {
+                        store.update { it.copy(lyricTheme = picked) }
+                    }
+                }
+                BlurAnimatedVisibility(
+                    visible = state.lyricTheme == LyricTheme.TOKYO_CITYSCAPE,
+                    label = "player-tokyo-scene-time-setting",
+                ) {
+                    GlassDropdownPreference(
+                        tr("lyric_theme_tokyo_time", "东京景色时段"),
+                        tokyoSceneTimeLabels(),
+                        state.tokyoSceneTime.ordinal,
+                        backdrop = LocalToolbarBackdrop.current,
+                    ) { index ->
+                        store.update { it.copy(tokyoSceneTime = TokyoSceneTime.entries[index]) }
+                    }
+                }
+                BlurAnimatedVisibility(
+                    visible = state.lyricTheme == LyricTheme.TOKYO_CITYSCAPE,
+                    label = "player-tokyo-scene-landmark-setting",
+                ) {
+                    GlassDropdownPreference(
+                        tr("lyric_theme_tokyo_landmark", "东京景色"),
+                        tokyoSceneLandmarkLabels(),
+                        state.tokyoSceneLandmark.ordinal,
+                        backdrop = LocalToolbarBackdrop.current,
+                    ) { index ->
+                        store.update { it.copy(tokyoSceneLandmark = TokyoSceneLandmark.entries[index]) }
+                    }
+                }
                 SwitchPreference(tr("player_lyrics_awake", "显示歌词时屏幕常亮"), checked = state.keepLyricsAwake) { value -> store.update { it.copy(keepLyricsAwake = value) } }
                 SwitchPreference(tr("player_lyrics_immersive", "歌词自动沉浸"), checked = state.immersiveLyrics) { value -> store.update { it.copy(immersiveLyrics = value) } }
                 immersion.AnimatedVisibility(visible = { it }, enter = fadeIn(tween(220)) + expandVertically(tween(220)),
@@ -239,8 +245,26 @@ fun NowPlayingSettingsPage(padding: PaddingValues, open: (String) -> Unit = {}) 
                             "${state.immersiveSeconds} s", steps = 29, defaultValue = 5f) { value -> store.update { it.copy(immersiveSeconds = value.roundToInt()) } }
                     }
                 }
-                SwitchPreference(tr("player_show_audio_info", "正在播放界面显示音频信息"), checked = state.showAudioInfo) { value -> store.update { it.copy(showAudioInfo = value) } }
-                SwitchPreference(tr("player_swipe_tracks", "左右滑动切歌"), checked = state.swipeTracks) { value -> store.update { it.copy(swipeTracks = value) } }
+                SliderPreference(
+                    title = tr("player_main_lyric_scale", "主歌词缩放"),
+                    value = state.mainLyricScalePercent,
+                    range = LYRIC_SCALE_MIN_PERCENT..LYRIC_SCALE_MAX_PERCENT,
+                    valueText = formatLyricScalePercent(state.mainLyricScalePercent),
+                    defaultValue = LYRIC_SCALE_DEFAULT_PERCENT,
+                    centerValue = LYRIC_SCALE_DEFAULT_PERCENT,
+                ) { value ->
+                    store.update { it.copy(mainLyricScalePercent = clampLyricScalePercent(value)) }
+                }
+                SliderPreference(
+                    title = tr("player_bg_lyric_scale", "翻译与发音缩放"),
+                    value = state.bgLyricScalePercent,
+                    range = LYRIC_SCALE_MIN_PERCENT..LYRIC_SCALE_MAX_PERCENT,
+                    valueText = formatLyricScalePercent(state.bgLyricScalePercent),
+                    defaultValue = LYRIC_SCALE_DEFAULT_PERCENT,
+                    centerValue = LYRIC_SCALE_DEFAULT_PERCENT,
+                ) { value ->
+                    store.update { it.copy(bgLyricScalePercent = clampLyricScalePercent(value)) }
+                }
             }
         }
         item {

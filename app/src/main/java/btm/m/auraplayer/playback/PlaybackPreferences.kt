@@ -3,6 +3,7 @@ package btm.m.auraplayer.playback
 import android.content.Context
 
 enum class StreamQuality(val level: String) { STANDARD("standard"), HIGHER("higher"), HIGH("exhigh"), LOSSLESS("lossless"), HIRES("hires"), SPATIAL("jyeffect"), SURROUND("sky"), DOLBY("dolby"), VIVID("vivid"), MASTER("jymaster") }
+enum class LyricTranslationSource { LLM, NETWORK }
 
 /** Kept separate from appearance/library preferences; shared with the playback service. */
 class PlaybackPreferences(context: Context) {
@@ -14,6 +15,10 @@ class PlaybackPreferences(context: Context) {
     var translation: Boolean
         get() = prefs.getBoolean("translation", true)
         set(value) { prefs.edit().putBoolean("translation", value).apply() }
+    var translationSource: LyricTranslationSource
+        get() = LyricTranslationSource.entries.firstOrNull { it.name == prefs.getString("translation_source", "LLM") }
+            ?: LyricTranslationSource.LLM
+        set(value) { prefs.edit().putString("translation_source", value.name).apply() }
     var pronunciation: Boolean
         get() = prefs.getBoolean("pronunciation", true)
         set(value) { prefs.edit().putBoolean("pronunciation", value).apply() }

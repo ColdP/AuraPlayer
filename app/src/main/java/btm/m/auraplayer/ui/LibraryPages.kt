@@ -21,6 +21,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -29,7 +30,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.data.*
+import btm.m.auraplayer.ui.player.findCachedArtworkMemoryEntry
+import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
 import com.itos.coui.search.CouiSearchBarDefaults
 import com.itos.coui.search.SearchBar
 import com.itos.coui.search.rememberCouiSearchBarState
@@ -58,10 +62,21 @@ internal val ListArtworkCornerRadius = 11.dp
 
 @Composable
 fun Artwork(uri: String, modifier: Modifier = Modifier, circular: Boolean = false, cornerRadius: Dp = 16.dp) {
+    val context = LocalContext.current
+    val request = remember(uri, context) {
+        if (uri.isBlank()) null
+        else {
+            val placeholderKey = findCachedArtworkMemoryEntry(SingletonImageLoader.get(context), uri)?.key
+            ImageRequest.Builder(context)
+                .data(uri)
+                .apply { if (placeholderKey != null) placeholderMemoryCacheKey(placeholderKey) }
+                .build()
+        }
+    }
     Box(modifier.clip(if (circular) CircleShape else RoundedCornerShape(cornerRadius))
         .background(Brush.linearGradient(listOf(MiuixTheme.colorScheme.primaryContainer, MiuixTheme.colorScheme.surfaceContainer))), contentAlignment = Alignment.Center) {
         Text("♫", fontSize = 28.sp, color = MiuixTheme.colorScheme.primary.copy(alpha = .7f))
-        if (uri.isNotBlank()) AsyncImage(model = uri, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        if (request != null) AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
     }
 }
 
@@ -365,6 +380,7 @@ internal fun PlaylistHeaderSearchBar(
     onQueryChange: (String) -> Unit,
     onExpandedChange: (Boolean) -> Unit,
     onSearch: () -> Unit,
+    placeholder: String = tr("playlist_search_hint", "搜索歌单内歌曲、歌手或专辑"),
 ) {
     if (LocalAppUiStyle.current == AppUiStyle.ONE) {
         val palette = rememberActiveOneUiPalette()
@@ -413,7 +429,7 @@ internal fun PlaylistHeaderSearchBar(
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (query.isEmpty()) {
                                 Text(
-                                    tr("playlist_search_hint", "搜索歌单内歌曲、歌手或专辑"),
+                                    placeholder,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     style = MiuixTheme.textStyles.body1,
@@ -491,7 +507,7 @@ internal fun PlaylistHeaderSearchBar(
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (query.isEmpty()) {
                                 Text(
-                                    tr("playlist_search_hint", "搜索歌单内歌曲、歌手或专辑"),
+                                    placeholder,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     style = MiuixTheme.textStyles.body1,
@@ -537,7 +553,7 @@ internal fun PlaylistHeaderSearchBar(
         query = query,
         onQueryChange = onQueryChange,
         onExpandedChange = onExpandedChange,
-        placeholder = tr("playlist_search_hint", "搜索歌单内歌曲、歌手或专辑"),
+        placeholder = placeholder,
         cancelText = tr("cancel", "取消"),
         clearDescription = tr("clear", "清空"),
         dark = dark,

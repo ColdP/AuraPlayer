@@ -36,6 +36,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import btm.m.auraplayer.AuraApplication
 import btm.m.auraplayer.AuraViewModel
+import btm.m.auraplayer.BuildConfig
+import btm.m.auraplayer.update.AppUpdateManager
+import btm.m.auraplayer.update.UpdateInfo
 import btm.m.auraplayer.ui.navigation.*
 import btm.m.auraplayer.ui.player.LocalSongActions
 import btm.m.auraplayer.ui.player.LocalOpenTagEditor
@@ -53,8 +56,10 @@ import com.itos.coui.theme.CouiColorScheme
 import com.itos.coui.theme.CouiTheme
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -174,6 +179,30 @@ private fun AuraShell(model: AuraViewModel) {
     }
     var songActions by remember { mutableStateOf<SongActionRequest?>(null) }
     var songActionsOpen by remember { mutableStateOf(false) }
+    var pendingUpdate by remember { mutableStateOf<UpdateInfo?>(AppUpdateManager.startupUpdatePending) }
+    LaunchedEffect(Unit) {
+        if (AppUpdateManager.startupUpdateChecked) {
+            pendingUpdate = AppUpdateManager.startupUpdatePending
+            return@LaunchedEffect
+        }
+        var resolved: UpdateInfo? = null
+        for (attempt in 0 until 3) {
+            if (attempt > 0) delay(3_000L)
+            val result = withContext(Dispatchers.IO) {
+                runCatching { AppUpdateManager.fetchUpdateInfo() }
+            }
+            if (result.isSuccess) {
+                resolved = result.getOrNull()
+                break
+            }
+        }
+        val info = resolved ?: return@LaunchedEffect
+        AppUpdateManager.startupUpdateChecked = true
+        if (info.versionCode > BuildConfig.VERSION_CODE.toLong()) {
+            AppUpdateManager.startupUpdatePending = info
+            pendingUpdate = info
+        }
+    }
     LaunchedEffect(model.current) { if (model.current == null) playerOpen = false }
     val playerDark = MiuixTheme.colorScheme.surface.luminance() < .5f
     val nowPlayingConfig by (context.applicationContext as btm.m.auraplayer.AuraApplication).nowPlaying.state.collectAsState()
@@ -422,13 +451,28 @@ private fun AuraShell(model: AuraViewModel) {
                     }
                 }
                 PresetChangeGuard(model.app.effects)
+                UpdateAvailableDialog(
+                    show = pendingUpdate != null,
+                    currentVersion = BuildConfig.VERSION_NAME,
+                    latestVersion = pendingUpdate?.versionName.orEmpty(),
+                    onDismiss = {
+                        pendingUpdate = null
+                        AppUpdateManager.startupUpdatePending = null
+                    },
+                    onViewUpdate = {
+                        pendingUpdate = null
+                        AppUpdateManager.startupUpdatePending = null
+                        open("software_update")
+                    },
+                )
                 WindowDialog(model.error != null, title = tr("notice", "提示"), summary = model.error, onDismissRequest = model::dismissError) {
                     GlassDialogButton(model::dismissError, Modifier.fillMaxWidth()) { Text(tr("ok", "确定")) }
                 }
                 songActions?.let { request -> key(request.song.key) {
                     CompositionLocalProvider(LocalDialogBackdrop provides (request.backdrop ?: backdrop)) {
                         SongActionsSheet(model, request, songActionsOpen, dismiss = { songActionsOpen = false },
-                            onDismissFinished = { if (!songActionsOpen) songActions = null })
+                            onDismissFinished = { if (!songActionsOpen) songActions = null },
+                            openPage = open)
                     }
                 } }
             }
@@ -451,6 +495,8 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
     val albumInfoDestination = route.takeIf { it.substringBefore(':') in setOf("albumInfo", "artistSongs", "artistAlbums") }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)
     val page = when {
         route.startsWith("tagEditor:") -> "tagEditor"
+        route.startsWith("llm_translation_edit:") -> "llm_translation_edit"
+        route.startsWith("song_credits:") -> "song_credits"
         route.startsWith("collection:") -> "collection"
         route.startsWith("spatial_cover_preview:") -> "spatial_cover_preview"
         route.substringBefore(':') in setOf("albumInfo", "artistSongs", "artistAlbums") -> route.substringBefore(':')
@@ -507,11 +553,19 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "effect_online" -> tr("online_presets", "在线预设库")
         "audio_settings" -> tr("audio_settings", "音频")
         "artist_album_settings" -> tr("artist_and_album", "艺术家与专辑")
+        "llm_translation" -> tr("llm_translation", "大模型翻译")
+        "llm_translation_cache" -> tr("llm_translation_cache", "翻译缓存")
+        "llm_raw_output_history" -> tr("llm_raw_history_title", "历史输出")
+        "llm_translation_edit" -> tr("llm_edit_lines", "编辑译文")
+        "llm_auto_language_rules" -> tr("llm_auto_rules_title", "自动翻译语言规则")
+        "song_credits" -> tr("production_team", "制作团队")
         "now_playing_settings" -> tr("now_playing_page", "正在播放页面")
         "spatial_cover_downloads" -> tr("spatial_model_downloads", "模型下载")
         "spatial_cover_cache" -> tr("spatial_cover_cache_title", "空间封面数据缓存")
         "rear_screen" -> tr("rear_screen", "背屏")
         "about" -> tr("about", "关于")
+        "software_update" -> tr("software_update", "软件更新")
+        "update_log" -> tr("update_log", "更新日志")
         "donate" -> tr("donate", "捐赠")
         "localPlaylists" -> tr("playback_lists", "播放列表")
         "albums" -> tr("albums", "专辑")
@@ -535,6 +589,32 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
     if (page == "spatial_cover_preview") {
         val key = route.substringAfter(':')
         SpatialCoverPreviewPage(key, back)
+        return
+    }
+    if (page == "llm_translation_cache") {
+        LlmTranslationCachePage(
+            model = model,
+            back = back,
+            open = open,
+            isActive = isActive,
+        )
+        return
+    }
+    if (page == "llm_raw_output_history") {
+        LlmRawOutputHistoryPage(
+            model = model,
+            back = back,
+            isActive = isActive,
+        )
+        return
+    }
+    if (page == "llm_translation_edit") {
+        val cacheKey = Uri.decode(route.substringAfter(':'))
+        LlmTranslationLineEditorRoute(
+            cacheKey = cacheKey,
+            model = model,
+            back = back,
+        )
         return
     }
     val playlistSearchSupported = page == "collection" && !catalog && collection != null
@@ -610,11 +690,18 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             "audio_settings" -> AudioPreferencesPage(model, contentPadding)
             "effect_online" -> Box(Modifier.fillMaxSize().padding(contentPadding))
             "artist_album_settings" -> ArtistAlbumSettingsPage(contentPadding)
+            "llm_translation" -> LlmTranslationSettingsPage(model, contentPadding, open)
+            "llm_auto_language_rules" -> LlmAutoLanguageRulesPage(contentPadding)
+            "song_credits" -> route.substringAfter(':').toLongOrNull()?.let { songId ->
+                SongCreditsPage(songId, model, contentPadding)
+            }
             "now_playing_settings" -> NowPlayingSettingsPage(contentPadding, open)
             "spatial_cover_downloads" -> SpatialCoverDownloadsPage(contentPadding)
             "spatial_cover_cache" -> SpatialCoverCachePage(contentPadding, open)
             "rear_screen" -> RearScreenSettingsPage(contentPadding)
             "about" -> AboutPage(model, contentPadding, open)
+            "software_update" -> SoftwareUpdatePage(contentPadding, open)
+            "update_log" -> UpdateLogPage(contentPadding)
             "donate" -> DonatePage(contentPadding)
             "localPlaylists" -> LocalPlaylistsPage(model, contentPadding)
             "albums" -> AlbumsArtistsPage(model, contentPadding, 0)

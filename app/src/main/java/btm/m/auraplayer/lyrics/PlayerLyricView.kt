@@ -131,12 +131,14 @@ class PlayerLyricView(context: Context) : View(context) {
     private var requestedSource = emptyList<LyricLine>()
     private var below = 3
     private var lyricScale = 1f
+    private var bgLyricScale = 1f
     private var lineSpacingScale = 1f
     private var horizontalInsetDp = 26f
     private var generation = 0
     private var builtWidth = 0
     private var builtMode = -1
     private var builtScale = 0f
+    private var builtBgScale = -1f
     private var builtLineSpacing = 0f
     private var builtHorizontalInsetDp = -1f
     private var lyricTheme: LyricTheme = LyricTheme.BLUR
@@ -286,18 +288,21 @@ class PlayerLyricView(context: Context) : View(context) {
         textScale: Float = 1f,
         lineSpacingMultiplier: Float = 1f,
         horizontalPaddingDp: Float = 26f,
+        bgTextScale: Float = textScale,
     ) {
         val mode = (if (translation) 1 else 0) or (if (pronunciation) 2 else 0)
-        val scale = textScale.coerceIn(.5f, 1.5f)
+        val scale = textScale.coerceIn(.05f, 3.6f)
+        val bgScale = if (bgTextScale <= 0.005f) 0f else bgTextScale.coerceIn(.05f, 3.6f)
         val spacing = lineSpacingMultiplier.coerceIn(.4f, 2.5f)
         val inset = horizontalPaddingDp.coerceIn(0f, 40f)
         if (requestedSource === lines && below == mode && lyricScale == scale &&
-            lineSpacingScale == spacing && horizontalInsetDp == inset
+            bgLyricScale == bgScale && lineSpacingScale == spacing && horizontalInsetDp == inset
         ) return
         if (requestedSource !== lines) cancelPendingSeek()
         requestedSource = lines
         below = mode
         lyricScale = scale
+        bgLyricScale = bgScale
         lineSpacingScale = spacing
         horizontalInsetDp = inset
         rebuild()
@@ -343,13 +348,13 @@ class PlayerLyricView(context: Context) : View(context) {
         if (width <= 0) return
         // Keep the lyric body symmetric for normal and opposite (choral) alignment. The browse
         // timestamp is an overlay and must not permanently make right-aligned rows narrower.
-        val lines = requestedSource; val mode = below; val scale = lyricScale
+        val lines = requestedSource; val mode = below; val scale = lyricScale; val bgScale = bgLyricScale
         val spacing = lineSpacingScale; val insetDp = horizontalInsetDp
         val activeTheme = lyricTheme
         val activeSpec = themeSpec
         // Retain the layout and appearance when the same content is attached again unchanged.
         if (source === lines && builtWidth == width && builtMode == mode && builtScale == scale &&
-            builtLineSpacing == spacing && builtHorizontalInsetDp == insetDp &&
+            builtBgScale == bgScale && builtLineSpacing == spacing && builtHorizontalInsetDp == insetDp &&
             builtLyricTheme == activeTheme
         ) return
         val gen = ++generation
@@ -366,9 +371,9 @@ class PlayerLyricView(context: Context) : View(context) {
                 val built = lines.map { line ->
                     ensureActive()
                     val p = paint(30f * scale, activeSpec.mainWeight, activeSpec.italicMain, activeSpec.letterSpacing)
-                    val tp = paint(17f * scale, activeSpec.subWeight, activeSpec.italicSub, activeSpec.letterSpacing * 0.5f)
+                    val tp = paint(17f * (if (bgScale > 0f) bgScale else .05f), activeSpec.subWeight, activeSpec.italicSub, activeSpec.letterSpacing * 0.5f)
                     val main = layout(line.text, p, textWidth, line.opposite)
-                    val under = line.under(mode)?.let { layout(it, tp, textWidth, line.opposite) }
+                    val under = if (bgScale > 0f) line.under(mode)?.let { layout(it, tp, textWidth, line.opposite) } else null
                     val bp = paint(17f * scale, activeSpec.subWeight, activeSpec.italicSub, activeSpec.letterSpacing * 0.5f)
                     val bg = line.bg?.let { layout(it.text, bp, textWidth, line.opposite) }
                     val bgXs = line.bg?.let { b -> FloatArray(b.text.length + 1) { bg!!.getPrimaryHorizontal(it) } } ?: FloatArray(0)
@@ -396,7 +401,7 @@ class PlayerLyricView(context: Context) : View(context) {
             source = lines; rows = built; masks.evictAll(); pending.clear()
             prepared.forEach { (key, bitmap) -> masks.put(key, bitmap) }
             maskBlend.reset(prepared.keys)
-            builtWidth = targetWidth; builtMode = mode; builtScale = scale
+            builtWidth = targetWidth; builtMode = mode; builtScale = scale; builtBgScale = bgScale
             builtLineSpacing = spacing; builtHorizontalInsetDp = insetDp; builtLyricTheme = activeTheme
             heights = FloatArray(rows.size) { rows[it].height }
             var y = 0f
@@ -801,7 +806,9 @@ class PlayerLyricView(context: Context) : View(context) {
             val bl = layout(bg.text, bp, row.main.width, row.line.opposite); bl.draw(out)
             out.restoreToCount(saved); underY += bl.height + 3 * d
         }
-        row.line.under(mode)?.let { out.translate(0f, underY + 5 * d); layout(it, tp, row.main.width, row.line.opposite).draw(out) }
+        if (row.below != null) {
+            row.line.under(mode)?.let { out.translate(0f, underY + 5 * d); layout(it, tp, row.main.width, row.line.opposite).draw(out) }
+        }
         return image
     }
     private fun rowAt(yPos: Float): Int = rows.indices.firstOrNull { i ->

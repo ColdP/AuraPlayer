@@ -5,26 +5,62 @@ import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import btm.m.auraplayer.data.Song
+import btm.m.auraplayer.playback.LyricTranslationSource
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import java.io.File
 
+data class ResolvedLyrics(
+    val primaryLines: List<LyricLine>,
+    val llmLines: List<LyricLine>? = null,
+    val networkLines: List<LyricLine>? = null,
+) {
+    val hasDualTranslationSources: Boolean
+        get() = llmLines != null &&
+            networkLines != null &&
+            llmLines.any { !it.translation.isNullOrBlank() } &&
+            networkLines.any { !it.translation.isNullOrBlank() }
+
+    fun select(preferred: LyricTranslationSource): List<LyricLine> = when {
+        hasDualTranslationSources && preferred == LyricTranslationSource.NETWORK -> networkLines!!
+        llmLines != null -> llmLines
+        networkLines != null -> networkLines
+        else -> primaryLines
+    }
+}
+
 /** Aura's lifecycle adapter around HyperChanger/HyperMusicCover's original providers and parser. */
-class LyricsRepository(private val context: Context) {
-    private val cache = object : LinkedHashMap<String, List<LyricLine>>(24, .75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<LyricLine>>) = size > 24
+class LyricsRepository(
+    private val context: Context,
+    private val llmConfigProvider: () -> LlmTranslationConfig = { LlmTranslationConfig() },
+    private val llmApiKeyProvider: () -> String = { "" },
+) {
+    private val cache = object : LinkedHashMap<String, ResolvedLyrics>(24, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ResolvedLyrics>) = size > 24
     }
     private data class Answer(val rank: Int, val lines: List<LyricLine>)
     fun invalidate(songKey: String) { cache.remove(songKey) }
+    fun clear() { cache.clear() }
 
-    fun lyrics(song: Song): Flow<List<LyricLine>> = flow {
+    fun lyrics(song: Song): Flow<List<LyricLine>> = resolveLyrics(song).map { it.select(LyricTranslationSource.LLM) }
+
+    fun resolveLyrics(song: Song): Flow<ResolvedLyrics> = flow {
         cache[song.key]?.let { emit(it); return@flow }
         var own = withContext(Dispatchers.IO) { local(song) }
+        var llmVersion: List<LyricLine>? = null
+        var networkVersion: List<LyricLine>? = own.takeIf { lines -> lines.any { !it.translation.isNullOrBlank() } }
+
         suspend fun publish() {
-            if (own.isNotEmpty()) cache[song.key] = own
-            emit(own)
+            val resolved = ResolvedLyrics(
+                primaryLines = own,
+                llmLines = llmVersion,
+                networkLines = networkVersion ?: own.takeIf { lines -> lines.any { !it.translation.isNullOrBlank() } },
+            )
+            if (own.isNotEmpty()) cache[song.key] = resolved
+            emit(resolved)
         }
         if (own.isNotEmpty()) publish()
         // Same race and 400ms database grace as LyricSource.race; rich ID sources do not
@@ -72,6 +108,7 @@ class LyricsRepository(private val context: Context) {
                         val rows = LyricParse.splitInlineTranslations(ready.lines)
                         own = if (own.isEmpty()) rows else LyricParse.borrow(own, rows, true, true).lines
                         rank = minOf(rank, ready.rank); grace = null
+                        networkVersion = own.takeIf { lines -> lines.any { !it.translation.isNullOrBlank() } }
                         publish()
                         deadline = overallDeadline
                         continue
@@ -89,33 +126,67 @@ class LyricsRepository(private val context: Context) {
                         rank = answer.rank
                         merged
                     } else LyricParse.borrow(own, rows, true, true).lines
+                    networkVersion = own.takeIf { lines -> lines.any { !it.translation.isNullOrBlank() } }
                     publish()
                 }
                 grace?.let { answer ->
                     val rows = LyricParse.splitInlineTranslations(answer.lines)
                     own = if (own.isEmpty()) rows else LyricParse.borrow(own, rows, true, true).lines
+                    networkVersion = own.takeIf { lines -> lines.any { !it.translation.isNullOrBlank() } }
                     publish()
                 }
-                if (own.isEmpty()) {
+                val missedPrimary = own.isEmpty()
+                if (missedPrimary) {
                     // Same lower-priority sources, sequentially, only after the fast pair misses.
                     for (source in order.drop(2)) {
                         currentCoroutineContext().ensureActive()
                         val found = withContext(Dispatchers.IO) { runInterruptible { OnlineLyrics.ask(source, query) } } ?: continue
                         own = LyricParse.splitInlineTranslations(LyricParse.parse(found.body, found.translation, found.roma))
-                        if (own.isNotEmpty()) { publish(); break }
+                        if (own.isNotEmpty()) {
+                            networkVersion = own.takeIf { lines -> lines.any { !it.translation.isNullOrBlank() } }
+                            publish()
+                            break
+                        }
                     }
-                } else {
-                    // Keep the preferred timing and borrow only missing translated/phonetic lanes,
-                    // exactly as LyricSource.borrow does after its fast first answer.
-                    for (source in order.drop(2)) {
-                        val translations = own.none { !it.translation.isNullOrBlank() } && LyricParse.foreign(own)
-                        val romas = own.none { !it.roma.isNullOrBlank() } && LyricParse.romanisable(own)
-                        if (!translations && !romas) break
-                        currentCoroutineContext().ensureActive()
-                        val found = withContext(Dispatchers.IO) { runInterruptible { OnlineLyrics.ask(source, query) } } ?: continue
-                        val other = LyricParse.parse(found.body, found.translation, found.roma)
-                        val loan = LyricParse.borrow(own, other, translations, romas)
-                        if (loan.translations > 0 || loan.romas > 0) { own = loan.lines; publish() }
+                }
+                if (own.isNotEmpty()) {
+                    if (!missedPrimary) {
+                        for (source in order.drop(2)) {
+                            val translations = own.none { !it.translation.isNullOrBlank() } && LyricParse.foreign(own)
+                            val romas = own.none { !it.roma.isNullOrBlank() } && LyricParse.romanisable(own)
+                            if (!translations && !romas) break
+                            currentCoroutineContext().ensureActive()
+                            val found = withContext(Dispatchers.IO) { runInterruptible { OnlineLyrics.ask(source, query) } } ?: continue
+                            val other = LyricParse.parse(found.body, found.translation, found.roma)
+                            val loan = LyricParse.borrow(own, other, translations, romas)
+                            if (loan.translations > 0 || loan.romas > 0) {
+                                own = loan.lines
+                                if (own.any { !it.translation.isNullOrBlank() }) {
+                                    networkVersion = own
+                                }
+                                publish()
+                            }
+                        }
+                    }
+                    val llmConfig = llmConfigProvider()
+                    val llmApiKey = llmApiKeyProvider()
+                    val canRunLlm = llmConfig.enabled &&
+                        !LlmLyricLanguageSupport.isSameLanguage(llmConfig, own)
+                    if (canRunLlm) {
+                        val translated = LlmTranslator.translate(
+                            songKey = song.key,
+                            songTitle = song.title,
+                            artist = song.artist,
+                            albumTitle = song.album,
+                            lines = own,
+                            config = llmConfig,
+                            apiKey = llmApiKey,
+                            cacheRoot = context.cacheDir,
+                        )
+                        if (translated != null) {
+                            llmVersion = translated
+                            publish()
+                        }
                     }
                 }
             } finally { jobs.forEach { it.cancel() }; answers.close() }

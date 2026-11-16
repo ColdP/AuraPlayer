@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
+import java.util.Locale
 import kotlin.math.roundToInt
 
 enum class PlayerTheme { AURORA, AURORA_BLUR, BLUR, COLOR, FULLSCREEN, MATERIAL, ONE }
@@ -48,11 +49,26 @@ enum class TokyoSceneLandmark {
 internal const val PARALLAX_SENSITIVITY_MIN = 0.2f
 internal const val PARALLAX_SENSITIVITY_MAX = 2.5f
 internal const val PARALLAX_SENSITIVITY_DEFAULT = 1.0f
+internal const val LYRIC_SCALE_MIN_PERCENT = -100f
+internal const val LYRIC_SCALE_MAX_PERCENT = 200f
+internal const val LYRIC_SCALE_DEFAULT_PERCENT = 0f
 
 internal fun clampParallaxSensitivity(value: Float): Float {
     if (!value.isFinite()) return PARALLAX_SENSITIVITY_DEFAULT
     return ((value.coerceIn(PARALLAX_SENSITIVITY_MIN, PARALLAX_SENSITIVITY_MAX) * 10f).roundToInt() / 10f)
 }
+
+internal fun clampLyricScalePercent(value: Float): Float {
+    if (!value.isFinite()) return LYRIC_SCALE_DEFAULT_PERCENT
+    val rounded = (value.coerceIn(LYRIC_SCALE_MIN_PERCENT, LYRIC_SCALE_MAX_PERCENT) * 10f).roundToInt() / 10f
+    return if (rounded == -0.0f) 0f else rounded
+}
+
+internal fun lyricScaleMultiplier(percent: Float): Float =
+    (1f + clampLyricScalePercent(percent) / 100f).coerceAtLeast(0f)
+
+internal fun formatLyricScalePercent(percent: Float): String =
+    String.format(Locale.US, "%.1f%%", clampLyricScalePercent(percent))
 
 internal fun shouldPromptLyricThemePowerNotice(
     target: LyricTheme,
@@ -111,6 +127,8 @@ data class NowPlayingConfig(
     val spatialCoverDepthModel: String = "depth_anything_v2_small",
     val spatialCoverMattingModel: String = "matting_u2netp",
     val spatialCoverViewActive: Boolean = true,
+    val mainLyricScalePercent: Float = LYRIC_SCALE_DEFAULT_PERCENT,
+    val bgLyricScalePercent: Float = LYRIC_SCALE_DEFAULT_PERCENT,
 ) {
     val usesArtworkBackground: Boolean
         get() = theme == PlayerTheme.AURORA_BLUR ||
@@ -142,6 +160,8 @@ class NowPlayingSettings(context: Context) {
                 tiledParallaxSensitivity = clampParallaxSensitivity(it.tiledParallaxSensitivity),
                 spatialLyricsSensitivity = clampParallaxSensitivity(it.spatialLyricsSensitivity),
                 spatialCoverSensitivity = clampParallaxSensitivity(it.spatialCoverSensitivity),
+                mainLyricScalePercent = clampLyricScalePercent(it.mainLyricScalePercent),
+                bgLyricScalePercent = clampLyricScalePercent(it.bgLyricScalePercent),
             )
         }
         mutable.value = next
@@ -183,6 +203,8 @@ internal object NowPlayingCodec {
         put("tiledParallax", c.tiledParallax)
         put("tiledParallaxSensitivity", c.tiledParallaxSensitivity.toDouble())
         put("landscapeAutoCoverflow", c.landscapeAutoCoverflow)
+        put("mainLyricScalePercent", c.mainLyricScalePercent.toDouble())
+        put("bgLyricScalePercent", c.bgLyricScalePercent.toDouble())
     }.toString()
     fun decode(raw: String): NowPlayingConfig = runCatching {
         val j = JSONObject(raw); val defaults = NowPlayingConfig()
@@ -240,6 +262,14 @@ internal object NowPlayingCodec {
                 defaults.tiledParallaxSensitivity.toDouble(),
             ).toFloat().let(::clampParallaxSensitivity),
             landscapeAutoCoverflow = j.optBoolean("landscapeAutoCoverflow", defaults.landscapeAutoCoverflow),
+            mainLyricScalePercent = j.optDouble(
+                "mainLyricScalePercent",
+                defaults.mainLyricScalePercent.toDouble(),
+            ).toFloat().let(::clampLyricScalePercent),
+            bgLyricScalePercent = j.optDouble(
+                "bgLyricScalePercent",
+                defaults.bgLyricScalePercent.toDouble(),
+            ).toFloat().let(::clampLyricScalePercent),
         )
     }.getOrDefault(NowPlayingConfig())
 }

@@ -82,17 +82,44 @@ internal fun PlayerThemeBackground(
     // Keep decoded pixels outside the theme Crossfade and outside Coil's loading state. A new
     // model must never clear the last successful background while its artwork is being decoded.
     val context = LocalContext.current
-    var background by remember { mutableStateOf<ImageBitmap?>(null) }
-    var previousBackground by remember { mutableStateOf<ImageBitmap?>(null) }
-    val artworkBlend = remember { Animatable(1f) }
     val usesArtwork = advancedMaterial && config.usesArtworkBackground
+    val initialCachedBg = remember(artwork, usesArtwork) {
+        if (!usesArtwork || artwork.isBlank()) null
+        else findCachedArtworkMemoryEntry(SingletonImageLoader.get(context), artwork)
+            ?.let { runCatching { it.image.toBitmap().asImageBitmap() }.getOrNull() }
+    }
+    var background by remember { mutableStateOf<ImageBitmap?>(initialCachedBg) }
+    var previousBackground by remember { mutableStateOf<ImageBitmap?>(null) }
+    var loadedArtwork by remember { mutableStateOf(if (initialCachedBg != null) artwork else "") }
+    val artworkBlend = remember { Animatable(1f) }
     LaunchedEffect(artwork, usesArtwork, context) {
         artworkBlend.snapTo(1f)
         previousBackground = null
-        if (!usesArtwork || artwork.isBlank()) return@LaunchedEffect
+        if (!usesArtwork || artwork.isBlank()) {
+            loadedArtwork = ""
+            return@LaunchedEffect
+        }
+        val imageLoader = SingletonImageLoader.get(context)
+        val cached = findCachedArtworkMemoryEntry(imageLoader, artwork)
+        val cachedBitmap = cached?.let { runCatching { it.image.toBitmap().asImageBitmap() }.getOrNull() }
+        if (cached != null && cachedBitmap != null) {
+            if (loadedArtwork != artwork || background == null) {
+                previousBackground = background
+                background = cachedBitmap
+                loadedArtwork = artwork
+                if (previousBackground != null) {
+                    artworkBlend.snapTo(0f)
+                    artworkBlend.animateTo(1f, tween(400))
+                }
+                previousBackground = null
+            }
+            if (cached.exactUriMatch && minOf(cached.image.width, cached.image.height) >= 512) {
+                return@LaunchedEffect
+            }
+        }
         val decoded = try {
             withContext(Dispatchers.IO) {
-                (SingletonImageLoader.get(context).execute(
+                (imageLoader.execute(
                     ImageRequest.Builder(context).data(artwork).size(1024).allowHardware(false).build()
                 ) as? SuccessResult)?.image?.toBitmap()?.asImageBitmap()
             }
@@ -101,13 +128,18 @@ internal fun PlayerThemeBackground(
         } catch (_: Exception) {
             null
         } ?: return@LaunchedEffect
-        previousBackground = background
-        background = decoded
-        if (previousBackground != null) {
-            artworkBlend.snapTo(0f)
-            artworkBlend.animateTo(1f, tween(400))
+        if (loadedArtwork == artwork && background != null) {
+            background = decoded
+        } else {
+            previousBackground = background
+            background = decoded
+            loadedArtwork = artwork
+            if (previousBackground != null) {
+                artworkBlend.snapTo(0f)
+                artworkBlend.animateTo(1f, tween(400))
+            }
+            previousBackground = null
         }
-        previousBackground = null
     }
     val baseSpatialWeight = if (config.spatialLyrics) (compactProgress * (1f - queueBlend)).coerceIn(0f, 1f) else 0f
     Box(modifier.clipToBounds()) {
@@ -343,18 +375,22 @@ internal fun AnimatedPlayerArtwork(artwork: String, transitionKey: String, anima
     val context = LocalContext.current
     val previousRequest = remember(previous, context) {
         previous?.let {
+            val placeholderKey = findCachedArtworkMemoryEntry(SingletonImageLoader.get(context), it)?.key
             ImageRequest.Builder(context)
                 .data(it)
                 .size(1600)
                 .precision(Precision.INEXACT)
+                .apply { if (placeholderKey != null) placeholderMemoryCacheKey(placeholderKey) }
                 .build()
         }
     }
     val currentRequest = remember(current, context) {
+        val placeholderKey = findCachedArtworkMemoryEntry(SingletonImageLoader.get(context), current)?.key
         ImageRequest.Builder(context)
             .data(current)
             .size(1600)
             .precision(Precision.INEXACT)
+            .apply { if (placeholderKey != null) placeholderMemoryCacheKey(placeholderKey) }
             .build()
     }
     Box(Modifier.fillMaxSize()) {

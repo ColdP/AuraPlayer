@@ -41,6 +41,7 @@ import btm.m.auraplayer.data.AppleMusicMotionCoverManager
 import btm.m.auraplayer.lyrics.PlayerLyricView
 import btm.m.auraplayer.lyrics.rememberSpatialGyroTilt
 import btm.m.auraplayer.lyrics.scaleSpatialParallaxTilt
+import btm.m.auraplayer.playback.lyricScaleMultiplier
 import btm.m.auraplayer.spatialcover.SpatialCoverAssets
 import btm.m.auraplayer.spatialcover.SpatialCoverManager
 import btm.m.auraplayer.spatialcover.SpatialCoverRenderer
@@ -598,403 +599,81 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         .playerDismissGesture(swipeEnabled, p > .5f, headerBottom, onSwipeStart, onSwipeDelta, onSwipeRelease, onSwipeCancel)
         .clickable(indication = null, interactionSource = remember { MutableInteractionSource() },
             enabled = expansion == 0f, onClick = onExpand)) {
-        val w = maxWidth; val h = maxHeight
-        val fullscreen = appearance.theme == PlayerTheme.FULLSCREEN
-        val landscape = isLandscapePlayerLayout(w, h)
-        val activeCoverTheme = resolveActiveCoverTheme(appearance.coverTheme, landscape, appearance.landscapeAutoCoverflow)
-        val coverflowActive = activeCoverTheme != CoverTheme.SQUARE
-        val squareCardFullscreen = fullscreen && !coverflowActive
-        val usesStageDock = coverflowActive && landscape
-        val compactWindow = isCompactPlayerWindow(w, h, isMultiWindow)
-        val compactScale = if (compactWindow) (h.value / 640f).coerceIn(0.78f, 1.0f) else 1f
-        val (portraitColX, portraitColW) = portraitControlColumnRange(w, w * (if (compactWindow) .055f else .058f * PlayerPaddingScale))
-        val landscapeGeom = remember(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, appearance.showVolume) {
-            if (landscape) {
-                computeLandscapePlayerGeometry(
-                    width = w,
-                    height = h,
-                    leftInset = effectiveLeftInset,
-                    topInset = effectiveStatus,
-                    rightInset = effectiveRightInset,
-                    bottomInset = effectiveBottomInset,
-                    showVolume = appearance.showVolume,
-                )
-            } else null
-        }
-
-        // Portrait & compact freeform layout metrics
-        val portraitNav = effectiveBottomInset
-        val fullCard = fullscreenPlayerCard(w, h, effectiveStatus, portraitNav)
-        val normalMargin = w * (if (compactWindow) .055f else .058f * PlayerPaddingScale)
-        fun controlSize(cardSize: Dp, normalSize: Dp): Dp = if (squareCardFullscreen) cardSize + (normalSize - cardSize) * p else normalSize
-        val margin = controlSize(fullCard.left + 16.dp, normalMargin)
-        val coverY = if (compactWindow) {
-            effectiveStatus + 34.dp
-        } else {
-            maxOf(h * .142f, effectiveStatus + 44.dp * PlayerPaddingScale)
-        }
-        val baseControlsHeight = (if (appearance.showVolume) 244.dp else 200.dp) * compactScale
-        val seekCeiling = h - portraitNav - baseControlsHeight - 10.dp
-        val titleGap = (if (compactWindow) 12.dp else 20.dp * PlayerPaddingScale)
-        val titleToSeek = (if (compactWindow) 48.dp else 63.dp * PlayerPaddingScale)
-        val coverSize = if (landscapeGeom != null) {
-            landscapeGeom.heroCoverSize
-        } else {
-            minOf(
-                w - normalMargin * 2,
-                (h - effectiveStatus - portraitNav) * (if (compactWindow) .40f else .46f),
-                (seekCeiling - coverY - titleGap - titleToSeek).coerceAtLeast(1.dp),
-            ).coerceAtLeast(1.dp)
-        }
-        val coverInset = playerCoverInset(w, coverSize, normalMargin)
-        val coverX = normalMargin + coverInset
-        val immersiveCover = shouldUseImmersiveCover(
-            immersiveCoverSetting = appearance.immersiveCover,
-            appleMusicAnimatedCoverEnabled = appearance.appleMusicAnimatedCover,
-            appleMusicAnimatedCoverAvailable = !motionVideoPath.isNullOrBlank(),
-            fullscreen = fullscreen,
-            hasLandscapeGeometry = landscapeGeom != null,
-        )
-        val immGeom = if (immersiveCover && !coverflowActive) {
-            if (landscapeGeom != null) {
-                computeLandscapeImmersiveCoverGeometry(
-                    width = w,
-                    height = h,
-                    rightPaneX = landscapeGeom.rightPaneX,
-                    leftPaneWidth = landscapeGeom.leftPaneWidth,
-                )
-            } else {
-                computeImmersiveCoverGeometry(
-                    width = w,
-                    height = h,
-                    statusTop = effectiveStatus,
-                    seekCeiling = seekCeiling,
-                    titleToSeek = titleToSeek,
-                    compactWindow = compactWindow,
-                )
-            }
-        } else {
-            null
-        }
-        val normalTitleY = immGeom?.titleY ?: (coverY + coverSize + titleGap)
-        val small = if (landscapeGeom != null) {
-            landscapeGeom.lyricsCompactCoverSize
-        } else {
-            minOf(if (compactWindow) 48.dp else 64.dp, coverSize * .44f) * .86f
-        }
-        val smallY = effectiveStatus + (if (compactWindow) 14.dp else 48.dp * PlayerPaddingScale)
-        val smallX = if (compactWindow) normalMargin else 26.dp * PlayerPaddingScale
-        val e = expansion.coerceIn(0f, 1f)
-        val coverflowReveal = if (coverflowActive) ((e - 0.12f) / 0.88f).coerceIn(0f, 1f) * (1f - p) else 0f
-        val stageRevealAlpha = if (coverflowActive) smoothstep01(0.16f, 0.90f, coverflowReveal) else 0f
-        val stageHeroContentAlpha = if (coverflowActive) smoothstep01(0.68f, 0.90f, coverflowReveal) else 1f
-        val coverflowSharedVis = if (coverflowActive) 1f - smoothstep01(0.76f, 0.97f, coverflowReveal) else 1f
-        val normalSeekY = immGeom?.seekY ?: maxOf(normalTitleY + titleToSeek, h * .637f).coerceAtMost(seekCeiling)
-        val seekY = controlSize(fullCard.top + 64.dp, normalSeekY)
-        val titleY = if (squareCardFullscreen && !landscape) fullCard.top + 14.dp else normalTitleY
-        val portraitControlsScale = if (squareCardFullscreen) {
-            ((fullCard.height - 76.dp) / 180.dp).coerceIn(.5f, 1.12f)
-        } else {
-            compactScale
-        }
-        var textHeight by remember { mutableIntStateOf(0) }
-        val fullWidthPx = with(density) { w.toPx() }
-        val glassCardRect = when {
-            !fullscreen || coverflowActive -> null
-            landscapeGeom != null -> FullscreenPlayerCard(
-                left = (landscapeGeom.rightPaneX - 16.dp).coerceAtLeast(landscapeGeom.leftPaneX + landscapeGeom.leftPaneWidth + 6.dp),
-                top = (landscapeGeom.controlStackTop - 16.dp).coerceAtLeast(landscapeGeom.usableTop),
-                width = (landscapeGeom.rightPaneWidth + 32.dp).coerceAtMost(w - landscapeGeom.rightPaneX + 12.dp),
-                height = (landscapeGeom.controlStackHeight + 32.dp).coerceAtMost(landscapeGeom.usableHeight + 16.dp),
-            )
-            else -> fullCard
-        }
-        if (glassCardRect != null && alpha > 0f) {
-            val glassTop = glassCardRect.top
-            val cardLeftPx = with(density) { glassCardRect.left.toPx() }
-            val cardTopPx = with(density) { glassTop.toPx() }
-            val cardWidthPx = with(density) { glassCardRect.width.toPx() }
-            val cardHeightPx = with(density) { glassCardRect.height.toPx() }
-            val localTouch = touchPoint - Offset(cardLeftPx, cardTopPx)
-            val touchInside = touching && localTouch.x in 0f..cardWidthPx && localTouch.y in 0f..cardHeightPx
-            val useFullscreenGlass = appearance.fullscreenGlass && btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled.current
-            val touchLight by animateFloatAsState(if (useFullscreenGlass && touchInside) .19f else 0f,
-                tween(if (touchInside) 100 else 320), label = "playerCardTouchLight")
-            val cardMaterial = if (useFullscreenGlass) Modifier.drawBackdrop(
-                backdrop = backdrop, shape = { RoundedCornerShape(30.dp) }, effects = {
-                    vibrancy(); backdropBlur(5.dp.toPx()); lens(28.dp.toPx(), 42.dp.toPx(), chromaticAberration = true)
-                }, highlight = { Highlight.Default.copy(alpha = .60f) },
-                onDrawSurface = { drawRect(menuTint.copy(alpha = .18f)) })
-            else Modifier.playerMenuMaterial(miuixBackdrop, menuTint, 30.dp)
-            Box(Modifier.offset(glassCardRect.left, glassTop).size(glassCardRect.width, glassCardRect.height)
-                .graphicsLayer { this.alpha = if (coverflowActive) 0f else alpha * (1f - p) * shareChromeAlpha }.blur(shareChromeBlur)
-                .then(cardMaterial).clip(RoundedCornerShape(30.dp)).drawWithContent {
-                    drawContent()
-                    if (useFullscreenGlass && touchLight > .001f) {
-                        val radius = size.width * .65f
-                        drawRect(Brush.radialGradient(listOf(Color.White.copy(alpha = touchLight), Color.White.copy(alpha = touchLight * .32f), Color.Transparent),
-                            center = localTouch, radius = radius.coerceAtLeast(1f)))
-                    }
-                })
-            if (p < .01f && !landscape) Box(Modifier.fillMaxWidth().height(glassTop.coerceAtLeast(0.dp))
-                .playerTrackSwipe(appearance.swipeTracks && active, model::next, model::previous))
-        }
-        val showSmallLandscapeCover = p * controlsVisibility
-        val coverflowMetrics = if (activeCoverTheme == CoverTheme.COVERFLOW) {
-            remember(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, appearance.showVolume) {
-                computeCoverflowMetrics(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, appearance.showVolume)
-            }
-        } else null
-        val tiledWallMetrics = if (activeCoverTheme == CoverTheme.TILED) {
-            remember(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, model.queue.size, appearance.showVolume) {
-                computeTiledWallMetrics(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, model.queue.size.coerceAtLeast(1), appearance.showVolume)
-            }
-        } else null
-        val stageCoverHeroSize = when {
-            coverflowMetrics != null -> coverflowMetrics.cardSize
-            tiledWallMetrics != null -> tiledWallMetrics.tileSize * 1.825f
-            landscapeGeom != null -> landscapeGeom.heroCoverSize
-            else -> coverSize
-        }
-        val stageCoverHeroX = when {
-            coverflowMetrics != null -> (w - coverflowMetrics.cardSize) / 2f
-            tiledWallMetrics != null -> (w - stageCoverHeroSize) / 2f
-            landscapeGeom != null -> landscapeGeom.heroCoverX
-            else -> coverX
-        }
-        val stageCoverHeroY = when {
-            coverflowMetrics != null -> effectiveStatus + coverflowMetrics.carouselTopPadding
-            tiledWallMetrics != null -> h * tiledWallMetrics.focusYFraction - stageCoverHeroSize / 2f
-            landscapeGeom != null -> landscapeGeom.heroCoverY
-            else -> coverY
-        }
-        val fullCoverSize = if (landscapeGeom != null) {
-            lerp(stageCoverHeroSize, landscapeGeom.lyricsCompactCoverSize, showSmallLandscapeCover)
-        } else {
-            stageCoverHeroSize + (small - stageCoverHeroSize) * p
-        }
-        val targetCoverX = if (landscapeGeom != null) {
-            lerp(stageCoverHeroX, landscapeGeom.lyricsCompactCoverX, showSmallLandscapeCover)
-        } else {
-            stageCoverHeroX + (smallX - stageCoverHeroX) * p
-        }
-        val targetCoverY = if (landscapeGeom != null) {
-            lerp(stageCoverHeroY, landscapeGeom.lyricsCompactCoverY, showSmallLandscapeCover)
-        } else {
-            stageCoverHeroY + (smallY - stageCoverHeroY) * p
-        }
-        val miniScale = miniHeight / PlayerNavigationGeometry.miniHeight
-        val miniCoverSize = 44.dp * miniScale
-        val miniCoverX = 12.dp * miniScale
-        val miniCoverY = (miniHeight - miniCoverSize) / 2
-        val sharedClick = if (e < .5f) onExpand else if (queueOpen) onQueue else onLyrics
-        val miniShift = miniSwipe / density.density
-        val miniAlpha = (1f - abs(miniSwipe) / fullWidthPx.coerceAtLeast(1f) * .35f).coerceIn(.55f, 1f)
-        val baseCoverRadius = when {
-            expressive != null -> 28.dp
-            oneUi != null -> OneUiCardRadius
-            else -> 24.dp
-        }
-        val spatialCoverAllowed = shouldShowSpatialCoverButton(
-            spatialCoverEnabled = appearance.spatialCover,
-            appleMusicAnimatedCoverEnabled = appearance.appleMusicAnimatedCover,
+        val m = rememberFullPlayerMetrics(
+            w = maxWidth,
+            h = maxHeight,
+            density = density,
+            isMultiWindow = isMultiWindow,
+            appearance = appearance,
+            p = p,
+            e = expansion.coerceIn(0f, 1f),
+            alpha = alpha,
+            controlsVisibility = controlsVisibility,
+            effectiveLeftInset = effectiveLeftInset,
+            effectiveStatus = effectiveStatus,
+            effectiveRightInset = effectiveRightInset,
+            effectiveBottomInset = effectiveBottomInset,
+            miniWidth = miniWidth,
+            miniHeight = miniHeight,
+            miniSwipe = miniSwipe,
+            miniControlClearance = miniControlClearance,
+            queueCount = model.queue.size,
+            queueBlend = queueBlend,
             motionVideoPath = motionVideoPath,
+            spatialTilt = spatialTilt,
+            spatialCoverRequested = spatialCoverRequested,
+            spatialCoverState = spatialCoverState,
+            mixVisual = mixVisual,
+            shareTransition = shareTransition,
+            activeInk = activeInk,
+            secondaryInk = secondaryInk,
+            expressive = expressive,
+            oneUi = oneUi,
+            coverPalette = coverPalette,
+            sharedClick = { if (expansion.coerceIn(0f, 1f) < .5f) onExpand() else if (queueOpen) onQueue() else onLyrics() },
         )
-        val hasCubeOnTitleRow = spatialCoverAllowed
-        val buttonSize = CoverThemeHeaderTouchHeight
-        val cubeGap = CoverThemeSpatialCubeGap
-        val coverThemeHeaderTopPad = coverThemeHeaderTopPadding(landscape || compactWindow)
-        val coverThemeHeaderTop = effectiveStatus + coverThemeHeaderTopPad
-        val spatialCoverRendering = spatialCoverAllowed && spatialCoverRequested && p < .99f && e > .25f
-        val spatialCoverTilt = if (spatialCoverRendering) {
-            scaleSpatialParallaxTilt(spatialTilt, appearance.spatialCoverSensitivity)
-        } else {
-            Offset.Zero
-        }
-        val effLyricsProgress = if (landscapeGeom != null) showSmallLandscapeCover else p
-        val motionOverlayAlpha = computeMotionCoverOverlayAlpha(
-            expansion = e,
-            lyricsProgress = effLyricsProgress,
-            mixActive = mixVisual != null,
-            spatialActive = spatialCoverRendering && spatialCoverState is SpatialCoverResolveState.Ready,
-        )
-        if (immGeom != null) {
-            val topLeftDisplayCorner = rememberBottomScreenCornerRadius(0.dp, android.view.RoundedCorner.POSITION_TOP_LEFT)
-            val topRightDisplayCorner = rememberBottomScreenCornerRadius(0.dp, android.view.RoundedCorner.POSITION_TOP_RIGHT)
-            val bottomLeftDisplayCorner = rememberBottomScreenCornerRadius(0.dp, android.view.RoundedCorner.POSITION_BOTTOM_LEFT)
-            val bottomRightDisplayCorner = rememberBottomScreenCornerRadius(0.dp, android.view.RoundedCorner.POSITION_BOTTOM_RIGHT)
-            val portraitTopCorner = when {
-                compactWindow -> minOf(topLeftDisplayCorner, bottomRightDisplayCorner).coerceAtLeast(18.dp)
-                topLeftDisplayCorner > 0.dp -> topLeftDisplayCorner
-                else -> bottomRightDisplayCorner
-            }
-            val landscapeLeftTopCorner = if (compactWindow) topLeftDisplayCorner.coerceAtLeast(18.dp) else topLeftDisplayCorner
-            val landscapeLeftBottomCorner = if (compactWindow) bottomLeftDisplayCorner.coerceAtLeast(18.dp) else bottomLeftDisplayCorner
-            val immCompactX = if (landscapeGeom != null) landscapeGeom.lyricsCompactCoverX else smallX
-            val immCompactY = if (landscapeGeom != null) landscapeGeom.lyricsCompactCoverY else smallY
-            val immTargetW = lerp(immGeom.coverWidth, small, effLyricsProgress)
-            val immTargetH = lerp(immGeom.coverHeight, small, effLyricsProgress)
-            val immTargetX = lerp(immGeom.coverX, immCompactX, effLyricsProgress)
-            val immTargetY = lerp(immGeom.coverY, immCompactY, effLyricsProgress)
-            val immCurW = lerp(miniCoverSize, immTargetW, e)
-            val immCurH = lerp(miniCoverSize, immTargetH, e)
-            val immCurX = lerp(miniCoverX, immTargetX, e)
-            val immCurY = lerp(miniCoverY, immTargetY, e)
-            val miniCorner = 13.dp * miniScale
-            val immCurTopStartRadius = lerp(
-                miniCorner,
-                lerp(if (landscapeGeom != null) landscapeLeftTopCorner else portraitTopCorner, 9.dp, effLyricsProgress),
-                e,
-            )
-            val immCurTopEndRadius = lerp(
-                miniCorner,
-                lerp(if (landscapeGeom != null) 0.dp else topRightDisplayCorner.takeIf { it > 0.dp } ?: portraitTopCorner, 9.dp, effLyricsProgress),
-                e,
-            )
-            val immCurBottomStartRadius = if (landscapeGeom != null) {
-                lerp(miniCorner, lerp(landscapeLeftBottomCorner, 9.dp, effLyricsProgress), e)
-            } else {
-                immersiveCoverBottomCornerRadius(miniCorner, 9.dp, e, effLyricsProgress)
-            }
-            val immCurBottomEndRadius = immersiveCoverBottomCornerRadius(miniCorner, 9.dp, e, effLyricsProgress)
-            val immFeather = (e * (1f - effLyricsProgress)).coerceIn(0f, 1f)
-            Cover(
-                uri = song.artwork,
-                modifier = Modifier
-                    .offset(immCurX, immCurY)
-                    .size(immCurW, immCurH)
-                    .graphicsLayer {
-                        translationX = miniShift
-                        this.alpha = miniAlpha * (1f - coverflowReveal) * shareChromeAlpha
-                    }
-                    .blur(shareChromeBlur)
-                    .playerTrackSwipe(appearance.swipeTracks && active && p < .01f && !coverflowActive, model::next, model::previous),
-                radius = immCurTopStartRadius,
-                topEndRadius = immCurTopEndRadius,
-                bottomRadius = immCurBottomStartRadius,
-                bottomEndRadius = immCurBottomEndRadius,
-                onClick = { if (!shareActive && coverflowReveal < 0.5f) sharedClick() },
-                animation = appearance.coverAnimation,
-                animate = active && e > .99f && coverflowReveal < 0.5f,
-                transitionKey = song.key,
-                mixVisual = mixVisual,
-                placeholderTint = activeInk.copy(alpha = .3f),
-                spatialState = spatialCoverState,
-                spatialActive = spatialCoverRendering && coverflowReveal < 0.5f,
-                spatialTilt = spatialCoverTilt,
-                immersiveFeather = immFeather,
-                immersiveHorizontal = landscapeGeom != null,
-                motionVideoPath = motionVideoPath,
-                motionPlaying = motionVideoAllowed && motionOverlayAlpha > 0.01f && coverflowReveal < 0.5f && mixVisual == null,
-                motionOverlayAlpha = motionOverlayAlpha * (1f - coverflowReveal),
-            )
-            val immScrimStrength = alpha * (1f - effLyricsProgress) * (1f - coverflowReveal)
-            if (immScrimStrength > 0.001f) {
-                val scrimTone = when {
-                    expressive != null -> expressive.surface
-                    oneUi != null -> oneUi.background
-                    else -> Color(coverPalette.a2.tone(14))
-                }
-                if (landscapeGeom != null) {
-                    val scrimLeft = immGeom.coverWidth * 0.46f
-                    val scrimWidth = (immGeom.coverWidth - scrimLeft + 44.dp).coerceAtLeast(1.dp)
-                    Box(
-                        Modifier
-                            .offset(x = scrimLeft)
-                            .width(scrimWidth)
-                            .fillMaxHeight()
-                            .graphicsLayer {
-                                translationX = miniShift
-                                this.alpha = immScrimStrength * shareChromeAlpha
-                            }
-                            .blur(shareChromeBlur)
-                            .background(
-                                Brush.horizontalGradient(
-                                    0f to Color.Transparent,
-                                    0.40f to scrimTone.copy(alpha = 0.22f),
-                                    0.72f to scrimTone.copy(alpha = 0.44f),
-                                    1f to Color.Transparent,
-                                ),
-                            ),
-                    )
-                } else {
-                    val scrimTop = immGeom.coverHeight * 0.44f
-                    val scrimHeight = (immGeom.coverHeight - scrimTop + 44.dp).coerceAtLeast(1.dp)
-                    Box(
-                        Modifier
-                            .offset(y = scrimTop)
-                            .fillMaxWidth()
-                            .height(scrimHeight)
-                            .graphicsLayer {
-                                translationX = miniShift
-                                this.alpha = immScrimStrength * shareChromeAlpha
-                            }
-                            .blur(shareChromeBlur)
-                            .background(
-                                Brush.verticalGradient(
-                                    0f to Color.Transparent,
-                                    0.40f to scrimTone.copy(alpha = 0.22f),
-                                    0.72f to scrimTone.copy(alpha = 0.44f),
-                                    1f to Color.Transparent,
-                                ),
-                            ),
-                    )
-                }
-            }
-        } else {
-            val sharedSize = lerp(miniCoverSize, fullCoverSize, e)
-            val sharedX = lerp(miniCoverX, targetCoverX, e)
-            val sharedY = lerp(miniCoverY, targetCoverY, e)
-            val sharedScale = sharedSize / coverSize
-            val stageCoverHeroRadius = when {
-                coverflowMetrics != null -> (coverflowMetrics.cardSize * 0.088f).coerceIn(16.dp, 26.dp)
-                tiledWallMetrics != null -> tiledWallMetrics.cornerRadius * 1.825f
-                else -> baseCoverRadius
-            }
-            val sharedRadius = lerp(13.dp * miniScale, stageCoverHeroRadius + (9.dp - stageCoverHeroRadius) * p, e)
-            Cover(
-                uri = song.artwork,
-                modifier = Modifier
-                    .offset(sharedX, sharedY)
-                    .size(coverSize)
-                    .graphicsLayer {
-                        transformOrigin = TransformOrigin(0f, 0f); scaleX = sharedScale; scaleY = sharedScale
-                        translationX = miniShift
-                        val portraitFullscreenHidden = fullscreen && !landscape && !coverflowActive
-                        this.alpha = miniAlpha * (if (portraitFullscreenHidden) 1f - e * (1f - p) else 1f) * coverflowSharedVis * shareChromeAlpha
-                    }
-                    .blur(shareChromeBlur)
-                    .playerTrackSwipe(appearance.swipeTracks && active && p < .01f && !fullscreen && !coverflowActive, model::next, model::previous),
-                radius = sharedRadius / sharedScale,
-                onClick = { if (!shareActive && coverflowSharedVis > 0.5f) sharedClick() },
-                animation = appearance.coverAnimation,
-                animate = active && e > .99f && coverflowSharedVis > 0.05f,
-                transitionKey = song.key,
-                mixVisual = mixVisual,
-                placeholderTint = activeInk.copy(alpha = .3f),
-                spatialState = spatialCoverState,
-                spatialActive = spatialCoverRendering && coverflowSharedVis > 0.05f,
-                spatialTilt = spatialCoverTilt,
-                motionVideoPath = motionVideoPath,
-                motionPlaying = motionVideoAllowed && motionOverlayAlpha > 0.01f && coverflowSharedVis > 0.05f && mixVisual == null,
-                motionOverlayAlpha = motionOverlayAlpha * coverflowSharedVis,
-            )
-        }
+        var textHeight by remember { mutableIntStateOf(0) }
         var tiledWallDragging by remember { mutableStateOf(false) }
         val tiledChromeVis = remember { Animatable(1f) }
-        LaunchedEffect(activeCoverTheme, active, tiledWallDragging, p < 0.05f) {
-            if (activeCoverTheme != CoverTheme.TILED || !active) tiledWallDragging = false
-            val target = if (activeCoverTheme == CoverTheme.TILED && active && tiledWallDragging && p < 0.05f) 0f else 1f
+        LaunchedEffect(m.activeCoverTheme, active, tiledWallDragging, p < 0.05f) {
+            if (m.activeCoverTheme != CoverTheme.TILED || !active) tiledWallDragging = false
+            val target = if (m.activeCoverTheme == CoverTheme.TILED && active && tiledWallDragging && p < 0.05f) 0f else 1f
             tiledChromeVis.animateTo(target, tween(180))
         }
-        if (coverflowActive && e > 0.05f) {
-            val stageMod = Modifier
-                .fillMaxSize()
-                .graphicsLayer { this.alpha = stageRevealAlpha * shareChromeAlpha }
-                .blur(((1f - stageRevealAlpha) * 14f).dp + shareChromeBlur)
-            val stageInteractive = !shareActive && stageRevealAlpha > 0.45f
-            val stageMotionAllowed = motionVideoAllowed && stageRevealAlpha > 0.30f
-            val stageParams = CoverThemeStageParams(
+
+        if (m.glassCardRect != null && m.alpha > 0f) {
+            FullPlayerGlassCardLayer(
+                m = m,
+                glassCardRect = m.glassCardRect,
+                touchPoint = touchPoint,
+                touching = touching,
+                appearance = appearance,
+                backdrop = backdrop,
+                miuixBackdrop = miuixBackdrop,
+                menuTint = menuTint,
+                active = active,
+                model = model,
+            )
+        }
+
+        FullPlayerArtworkLayer(
+            m = m,
+            song = song,
+            appearance = appearance,
+            coverPalette = coverPalette,
+            expressive = expressive,
+            oneUi = oneUi,
+            active = active,
+            mixVisual = mixVisual,
+            spatialCoverState = spatialCoverState,
+            motionVideoPath = motionVideoPath,
+            motionVideoAllowed = motionVideoAllowed,
+            model = model,
+        )
+
+        if (m.coverflowActive && m.e > 0.05f) {
+            FullPlayerCoverThemeStageLayer(
+                m = m,
                 model = model,
                 song = song,
                 appearance = appearance,
@@ -1004,357 +683,1150 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 backdrop = backdrop,
                 miuixBackdrop = miuixBackdrop,
                 menuTint = menuTint,
-                activeInk = activeInk,
-                secondaryInk = secondaryInk,
                 mixVisual = mixVisual,
                 spatialCoverState = spatialCoverState,
-                spatialCoverRendering = spatialCoverRendering,
                 spatialTilt = spatialTilt,
                 motionVideoPath = motionVideoPath,
-                motionVideoAllowed = stageMotionAllowed,
+                motionVideoAllowed = motionVideoAllowed,
                 active = active,
-                interactive = stageInteractive,
                 lyricsOpen = lyricsOpen,
                 queueOpen = queueOpen,
-                topInset = effectiveStatus,
-                leftInset = effectiveLeftInset,
-                rightInset = effectiveRightInset,
-                bottomInset = effectiveBottomInset,
-                headerTopPadding = coverThemeHeaderTopPad,
-                reserveSpatialCubeSlot = hasCubeOnTitleRow,
-                maxWidth = w,
-                maxHeight = h,
-                heroContentAlpha = stageHeroContentAlpha,
                 onLyrics = onLyrics,
                 onQueue = onQueue,
                 onQualityMenuExpanded = { qualityMenuOpen = it },
                 onDragActiveChange = { tiledWallDragging = it },
             )
-            when (activeCoverTheme) {
-                CoverTheme.COVERFLOW -> PlayerCoverflowStage(params = stageParams, modifier = stageMod)
-                CoverTheme.TILED -> PlayerTiledStage(params = stageParams, modifier = stageMod)
-                CoverTheme.SQUARE -> Unit
-            }
         }
-        // Only controls and secondary content blur/fade; artwork, metadata, and exiting lyrics transform independently.
-        if (alpha > 0f) Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha * shareChromeAlpha }
-            .blur(((1f - alpha) * 14f).dp + shareChromeBlur)) {
-            val handleAlpha = when {
-                landscape && immersive -> 0.48f
-                immGeom != null && p < 0.5f -> 0.48f + 0.52f * (p / 0.5f)
-                else -> 1f
-            }
-            val handleY = when {
-                coverflowActive -> coverThemeHeaderTop + (buttonSize - 28.dp) / 2f
-                landscape || compactWindow -> effectiveStatus + 2.dp
-                immGeom != null -> effectiveStatus + 6.dp
-                else -> effectiveStatus + 12.dp * PlayerPaddingScale
-            }
-            Box(Modifier.align(Alignment.TopCenter).offset(y = handleY).size(104.dp, 28.dp)
-                .graphicsLayer { this.alpha = handleAlpha * tiledChromeVis.value }
-                .clip(RoundedCornerShape(50))
-                .semantics { contentDescription = tr("collapse_player", "收起播放器") }
-                .playerSurfaceClick(onClose), contentAlignment = Alignment.Center) {
-                val pillWidth = if (landscape || isMultiWindow) 52.dp else 80.dp
-                val pillHeight = if (landscape || isMultiWindow) 4.5.dp else 6.dp
-                when {
-                    expressive != null -> Box(Modifier.width(48.dp).height(4.5.dp).clip(RoundedCornerShape(50)).background(expressive.dragHandleColor))
-                    oneUi != null -> Box(Modifier.width(48.dp).height(4.5.dp).clip(RoundedCornerShape(50)).background(oneUi.track))
-                    else -> Box(Modifier.width(pillWidth).height(pillHeight).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = .36f)))
+
+        if (m.alpha > 0f) {
+            FullPlayerChromeAndLyricsLayer(
+                m = m,
+                model = model,
+                song = song,
+                appearance = appearance,
+                coverPalette = coverPalette,
+                expressive = expressive,
+                oneUi = oneUi,
+                backdrop = backdrop,
+                active = active,
+                lyricsOpen = lyricsOpen,
+                queueOpen = queueOpen,
+                queueBlend = queueBlend,
+                immersive = immersive,
+                isMultiWindow = isMultiWindow,
+                tiledChromeAlpha = tiledChromeVis.value,
+                textHeight = textHeight,
+                spatialTilt = spatialTilt,
+                shareTransition = shareTransition,
+                onClose = onClose,
+                onLyrics = onLyrics,
+                onQueue = onQueue,
+                onQualityMenuExpanded = { qualityMenuOpen = it },
+                openSharePage = openSharePage,
+            )
+        }
+
+        FullPlayerMetadataAndActionsLayer(
+            m = m,
+            model = model,
+            song = song,
+            appearance = appearance,
+            expressive = expressive,
+            oneUi = oneUi,
+            miuixBackdrop = miuixBackdrop,
+            menuTint = menuTint,
+            miniColor = miniColor,
+            mixVisual = mixVisual,
+            spatialCoverRequested = spatialCoverRequested,
+            spatialCoverState = spatialCoverState,
+            tiledChromeAlpha = tiledChromeVis.value,
+            tiledWallDragging = tiledWallDragging,
+            textHeight = textHeight,
+            onTextHeightChange = { textHeight = it },
+            queueBlend = queueBlend,
+            onToggleSpatialCover = onToggleSpatialCover,
+            onMore = onMore,
+            onLyricMenuExpanded = onLyricMenuExpanded,
+        )
+    }
+}
+
+private class FullPlayerMetrics(
+    val w: Dp,
+    val h: Dp,
+    val density: Density,
+    val fullscreen: Boolean,
+    val landscape: Boolean,
+    val activeCoverTheme: CoverTheme,
+    val coverflowActive: Boolean,
+    val squareCardFullscreen: Boolean,
+    val usesStageDock: Boolean,
+    val compactWindow: Boolean,
+    val compactScale: Float,
+    val portraitColX: Dp,
+    val portraitColW: Dp,
+    val landscapeGeom: LandscapePlayerGeometry?,
+    val portraitNav: Dp,
+    val fullCard: FullscreenPlayerCard,
+    val normalMargin: Dp,
+    val margin: Dp,
+    val coverY: Dp,
+    val baseControlsHeight: Dp,
+    val seekCeiling: Dp,
+    val coverSize: Dp,
+    val coverX: Dp,
+    val immGeom: ImmersiveCoverGeometry?,
+    val normalTitleY: Dp,
+    val small: Dp,
+    val smallY: Dp,
+    val smallX: Dp,
+    val p: Float,
+    val e: Float,
+    val alpha: Float,
+    val controlsVisibility: Float,
+    val effectiveLeftInset: Dp,
+    val effectiveStatus: Dp,
+    val effectiveRightInset: Dp,
+    val effectiveBottomInset: Dp,
+    val coverflowReveal: Float,
+    val stageRevealAlpha: Float,
+    val stageHeroContentAlpha: Float,
+    val coverflowSharedVis: Float,
+    val normalSeekY: Dp,
+    val seekY: Dp,
+    val titleY: Dp,
+    val portraitControlsScale: Float,
+    val fullWidthPx: Float,
+    val glassCardRect: FullscreenPlayerCard?,
+    val showSmallLandscapeCover: Float,
+    val coverflowMetrics: CoverflowMetrics?,
+    val tiledWallMetrics: TiledWallMetrics?,
+    val fullCoverSize: Dp,
+    val targetCoverX: Dp,
+    val targetCoverY: Dp,
+    val miniScale: Float,
+    val miniCoverSize: Dp,
+    val miniCoverX: Dp,
+    val miniCoverY: Dp,
+    val miniWidth: Dp,
+    val miniHeight: Dp,
+    val miniControlClearance: Dp,
+    val miniShift: Float,
+    val miniAlpha: Float,
+    val baseCoverRadius: Dp,
+    val spatialCoverAllowed: Boolean,
+    val hasCubeOnTitleRow: Boolean,
+    val buttonSize: Dp,
+    val cubeGap: Dp,
+    val coverThemeHeaderTopPad: Dp,
+    val coverThemeHeaderTop: Dp,
+    val spatialCoverRendering: Boolean,
+    val spatialCoverTilt: Offset,
+    val effLyricsProgress: Float,
+    val motionOverlayAlpha: Float,
+    val shareActive: Boolean,
+    val shareP: Float,
+    val shareChromeAlpha: Float,
+    val shareChromeBlur: Dp,
+    val activeInk: Color,
+    val secondaryInk: Color,
+    val lyricInk: Color,
+    val lyricSubInk: Color,
+    val lyricChromeBlend: Float,
+    val sharedClick: () -> Unit,
+) {
+    fun controlSize(cardSize: Dp, normalSize: Dp): Dp =
+        if (squareCardFullscreen) cardSize + (normalSize - cardSize) * p else normalSize
+}
+
+@Composable
+private fun rememberFullPlayerMetrics(
+    w: Dp,
+    h: Dp,
+    density: Density,
+    isMultiWindow: Boolean,
+    appearance: NowPlayingConfig,
+    p: Float,
+    e: Float,
+    alpha: Float,
+    controlsVisibility: Float,
+    effectiveLeftInset: Dp,
+    effectiveStatus: Dp,
+    effectiveRightInset: Dp,
+    effectiveBottomInset: Dp,
+    miniWidth: Dp,
+    miniHeight: Dp,
+    miniSwipe: Float,
+    miniControlClearance: Dp,
+    queueCount: Int,
+    queueBlend: Float,
+    motionVideoPath: String?,
+    spatialTilt: Offset,
+    spatialCoverRequested: Boolean,
+    spatialCoverState: SpatialCoverResolveState,
+    mixVisual: btm.m.auraplayer.auramix.AuraMixVisualTransition?,
+    shareTransition: LyricShareTransitionState?,
+    activeInk: Color,
+    secondaryInk: Color,
+    expressive: PlayerExpressiveColors?,
+    oneUi: PlayerOneUiColors?,
+    coverPalette: com.materialkolor.palettes.CorePalette,
+    sharedClick: () -> Unit,
+): FullPlayerMetrics {
+    val fullscreen = appearance.theme == PlayerTheme.FULLSCREEN
+    val landscape = isLandscapePlayerLayout(w, h)
+    val activeCoverTheme = resolveActiveCoverTheme(appearance.coverTheme, landscape, appearance.landscapeAutoCoverflow)
+    val coverflowActive = activeCoverTheme != CoverTheme.SQUARE
+    val squareCardFullscreen = fullscreen && !coverflowActive
+    val usesStageDock = coverflowActive && landscape
+    val compactWindow = isCompactPlayerWindow(w, h, isMultiWindow)
+    val compactScale = if (compactWindow) (h.value / 640f).coerceIn(0.78f, 1.0f) else 1f
+    val (portraitColX, portraitColW) = portraitControlColumnRange(w, w * (if (compactWindow) .055f else .058f * PlayerPaddingScale))
+    val landscapeGeom = remember(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, appearance.showVolume) {
+        if (landscape) {
+            computeLandscapePlayerGeometry(
+                width = w,
+                height = h,
+                leftInset = effectiveLeftInset,
+                topInset = effectiveStatus,
+                rightInset = effectiveRightInset,
+                bottomInset = effectiveBottomInset,
+                showVolume = appearance.showVolume,
+            )
+        } else null
+    }
+    val portraitNav = effectiveBottomInset
+    val fullCard = fullscreenPlayerCard(w, h, effectiveStatus, portraitNav)
+    val normalMargin = w * (if (compactWindow) .055f else .058f * PlayerPaddingScale)
+    fun controlSize(cardSize: Dp, normalSize: Dp): Dp = if (squareCardFullscreen) cardSize + (normalSize - cardSize) * p else normalSize
+    val margin = controlSize(fullCard.left + 16.dp, normalMargin)
+    val coverY = if (compactWindow) {
+        effectiveStatus + 34.dp
+    } else {
+        maxOf(h * .142f, effectiveStatus + 44.dp * PlayerPaddingScale)
+    }
+    val baseControlsHeight = (if (appearance.showVolume) 244.dp else 200.dp) * compactScale
+    val seekCeiling = h - portraitNav - baseControlsHeight - 10.dp
+    val titleGap = (if (compactWindow) 12.dp else 20.dp * PlayerPaddingScale)
+    val titleToSeek = (if (compactWindow) 48.dp else 63.dp * PlayerPaddingScale)
+    val coverSize = if (landscapeGeom != null) {
+        landscapeGeom.heroCoverSize
+    } else {
+        minOf(
+            w - normalMargin * 2,
+            (h - effectiveStatus - portraitNav) * (if (compactWindow) .40f else .46f),
+            (seekCeiling - coverY - titleGap - titleToSeek).coerceAtLeast(1.dp),
+        ).coerceAtLeast(1.dp)
+    }
+    val coverInset = playerCoverInset(w, coverSize, normalMargin)
+    val coverX = normalMargin + coverInset
+    val immersiveCover = shouldUseImmersiveCover(
+        immersiveCoverSetting = appearance.immersiveCover,
+        appleMusicAnimatedCoverEnabled = appearance.appleMusicAnimatedCover,
+        appleMusicAnimatedCoverAvailable = !motionVideoPath.isNullOrBlank(),
+        fullscreen = fullscreen,
+        hasLandscapeGeometry = landscapeGeom != null,
+    )
+    val immGeom = if (immersiveCover && !coverflowActive) {
+        if (landscapeGeom != null) {
+            computeLandscapeImmersiveCoverGeometry(
+                width = w,
+                height = h,
+                rightPaneX = landscapeGeom.rightPaneX,
+                leftPaneWidth = landscapeGeom.leftPaneWidth,
+            )
+        } else {
+            computeImmersiveCoverGeometry(
+                width = w,
+                height = h,
+                statusTop = effectiveStatus,
+                seekCeiling = seekCeiling,
+                titleToSeek = titleToSeek,
+                compactWindow = compactWindow,
+            )
+        }
+    } else {
+        null
+    }
+    val normalTitleY = immGeom?.titleY ?: (coverY + coverSize + titleGap)
+    val small = if (landscapeGeom != null) {
+        landscapeGeom.lyricsCompactCoverSize
+    } else {
+        minOf(if (compactWindow) 48.dp else 64.dp, coverSize * .44f) * .86f
+    }
+    val smallY = effectiveStatus + (if (compactWindow) 14.dp else 48.dp * PlayerPaddingScale)
+    val smallX = if (compactWindow) normalMargin else 26.dp * PlayerPaddingScale
+    val coverflowReveal = if (coverflowActive) ((e - 0.12f) / 0.88f).coerceIn(0f, 1f) * (1f - p) else 0f
+    val stageRevealAlpha = if (coverflowActive) smoothstep01(0.16f, 0.90f, coverflowReveal) else 0f
+    val stageHeroContentAlpha = if (coverflowActive) smoothstep01(0.68f, 0.90f, coverflowReveal) else 1f
+    val coverflowSharedVis = if (coverflowActive) 1f - smoothstep01(0.76f, 0.97f, coverflowReveal) else 1f
+    val normalSeekY = immGeom?.seekY ?: maxOf(normalTitleY + titleToSeek, h * .637f).coerceAtMost(seekCeiling)
+    val seekY = controlSize(fullCard.top + 64.dp, normalSeekY)
+    val titleY = if (squareCardFullscreen && !landscape) fullCard.top + 14.dp else normalTitleY
+    val portraitControlsScale = if (squareCardFullscreen) {
+        ((fullCard.height - 76.dp) / 180.dp).coerceIn(.5f, 1.12f)
+    } else {
+        compactScale
+    }
+    val fullWidthPx = with(density) { w.toPx() }
+    val glassCardRect = when {
+        !fullscreen || coverflowActive -> null
+        landscapeGeom != null -> FullscreenPlayerCard(
+            left = (landscapeGeom.rightPaneX - 16.dp).coerceAtLeast(landscapeGeom.leftPaneX + landscapeGeom.leftPaneWidth + 6.dp),
+            top = (landscapeGeom.controlStackTop - 16.dp).coerceAtLeast(landscapeGeom.usableTop),
+            width = (landscapeGeom.rightPaneWidth + 32.dp).coerceAtMost(w - landscapeGeom.rightPaneX + 12.dp),
+            height = (landscapeGeom.controlStackHeight + 32.dp).coerceAtMost(landscapeGeom.usableHeight + 16.dp),
+        )
+        else -> fullCard
+    }
+    val showSmallLandscapeCover = p * controlsVisibility
+    val coverflowMetrics = if (activeCoverTheme == CoverTheme.COVERFLOW) {
+        remember(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, appearance.showVolume) {
+            computeCoverflowMetrics(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, appearance.showVolume)
+        }
+    } else null
+    val tiledWallMetrics = if (activeCoverTheme == CoverTheme.TILED) {
+        remember(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, queueCount, appearance.showVolume) {
+            computeTiledWallMetrics(w, h, effectiveLeftInset, effectiveStatus, effectiveRightInset, effectiveBottomInset, queueCount.coerceAtLeast(1), appearance.showVolume)
+        }
+    } else null
+    val stageCoverHeroSize = when {
+        coverflowMetrics != null -> coverflowMetrics.cardSize
+        tiledWallMetrics != null -> tiledWallMetrics.tileSize * 1.825f
+        landscapeGeom != null -> landscapeGeom.heroCoverSize
+        else -> coverSize
+    }
+    val stageCoverHeroX = when {
+        coverflowMetrics != null -> (w - coverflowMetrics.cardSize) / 2f
+        tiledWallMetrics != null -> (w - stageCoverHeroSize) / 2f
+        landscapeGeom != null -> landscapeGeom.heroCoverX
+        else -> coverX
+    }
+    val stageCoverHeroY = when {
+        coverflowMetrics != null -> effectiveStatus + coverflowMetrics.carouselTopPadding
+        tiledWallMetrics != null -> h * tiledWallMetrics.focusYFraction - stageCoverHeroSize / 2f
+        landscapeGeom != null -> landscapeGeom.heroCoverY
+        else -> coverY
+    }
+    val fullCoverSize = if (landscapeGeom != null) {
+        lerp(stageCoverHeroSize, landscapeGeom.lyricsCompactCoverSize, showSmallLandscapeCover)
+    } else {
+        stageCoverHeroSize + (small - stageCoverHeroSize) * p
+    }
+    val targetCoverX = if (landscapeGeom != null) {
+        lerp(stageCoverHeroX, landscapeGeom.lyricsCompactCoverX, showSmallLandscapeCover)
+    } else {
+        stageCoverHeroX + (smallX - stageCoverHeroX) * p
+    }
+    val targetCoverY = if (landscapeGeom != null) {
+        lerp(stageCoverHeroY, landscapeGeom.lyricsCompactCoverY, showSmallLandscapeCover)
+    } else {
+        stageCoverHeroY + (smallY - stageCoverHeroY) * p
+    }
+    val miniScale = miniHeight / PlayerNavigationGeometry.miniHeight
+    val miniCoverSize = 44.dp * miniScale
+    val miniCoverX = 12.dp * miniScale
+    val miniCoverY = (miniHeight - miniCoverSize) / 2
+    val miniShift = miniSwipe / density.density
+    val miniAlpha = (1f - abs(miniSwipe) / fullWidthPx.coerceAtLeast(1f) * .35f).coerceIn(.55f, 1f)
+    val baseCoverRadius = when {
+        expressive != null -> 28.dp
+        oneUi != null -> OneUiCardRadius
+        else -> 24.dp
+    }
+    val spatialCoverAllowed = shouldShowSpatialCoverButton(
+        spatialCoverEnabled = appearance.spatialCover,
+        appleMusicAnimatedCoverEnabled = appearance.appleMusicAnimatedCover,
+        motionVideoPath = motionVideoPath,
+    )
+    val buttonSize = CoverThemeHeaderTouchHeight
+    val cubeGap = CoverThemeSpatialCubeGap
+    val coverThemeHeaderTopPad = coverThemeHeaderTopPadding(landscape || compactWindow)
+    val coverThemeHeaderTop = effectiveStatus + coverThemeHeaderTopPad
+    val spatialCoverRendering = spatialCoverAllowed && spatialCoverRequested && p < .99f && e > .25f
+    val spatialCoverTilt = if (spatialCoverRendering) {
+        scaleSpatialParallaxTilt(spatialTilt, appearance.spatialCoverSensitivity)
+    } else {
+        Offset.Zero
+    }
+    val effLyricsProgress = if (landscapeGeom != null) showSmallLandscapeCover else p
+    val motionOverlayAlpha = computeMotionCoverOverlayAlpha(
+        expansion = e,
+        lyricsProgress = effLyricsProgress,
+        mixActive = mixVisual != null,
+        spatialActive = spatialCoverRendering && spatialCoverState is SpatialCoverResolveState.Ready,
+    )
+    val shareActive = shareTransition?.active == true
+    val shareP = if (shareActive) shareTransition.progress.coerceIn(0f, 1f) else 0f
+    val shareChromeAlpha = if (shareActive) 1f - lyricShareSmoothStep(0f, .82f, shareP) else 1f
+    val shareChromeBlur = if (shareActive) (shareP * 24f).dp else 0.dp
+    val lyricVisual = remember(appearance.lyricTheme) { lyricThemeSpec(appearance.lyricTheme) }
+    val lyricChromeBlend = if (appearance.lyricTheme == btm.m.auraplayer.playback.LyricTheme.BLUR) {
+        0f
+    } else {
+        (p * (1f - queueBlend)).coerceIn(0f, 1f)
+    }
+    val lyricInk = if (lyricChromeBlend > 0f) lerp(activeInk, lyricVisual.inkColor, lyricChromeBlend) else activeInk
+    val lyricSubInk = if (lyricChromeBlend > 0f) lerp(secondaryInk, lyricVisual.secondaryInkColor, lyricChromeBlend) else secondaryInk
+    return FullPlayerMetrics(
+        w = w,
+        h = h,
+        density = density,
+        fullscreen = fullscreen,
+        landscape = landscape,
+        activeCoverTheme = activeCoverTheme,
+        coverflowActive = coverflowActive,
+        squareCardFullscreen = squareCardFullscreen,
+        usesStageDock = usesStageDock,
+        compactWindow = compactWindow,
+        compactScale = compactScale,
+        portraitColX = portraitColX,
+        portraitColW = portraitColW,
+        landscapeGeom = landscapeGeom,
+        portraitNav = portraitNav,
+        fullCard = fullCard,
+        normalMargin = normalMargin,
+        margin = margin,
+        coverY = coverY,
+        baseControlsHeight = baseControlsHeight,
+        seekCeiling = seekCeiling,
+        coverSize = coverSize,
+        coverX = coverX,
+        immGeom = immGeom,
+        normalTitleY = normalTitleY,
+        small = small,
+        smallY = smallY,
+        smallX = smallX,
+        p = p,
+        e = e,
+        alpha = alpha,
+        controlsVisibility = controlsVisibility,
+        effectiveLeftInset = effectiveLeftInset,
+        effectiveStatus = effectiveStatus,
+        effectiveRightInset = effectiveRightInset,
+        effectiveBottomInset = effectiveBottomInset,
+        coverflowReveal = coverflowReveal,
+        stageRevealAlpha = stageRevealAlpha,
+        stageHeroContentAlpha = stageHeroContentAlpha,
+        coverflowSharedVis = coverflowSharedVis,
+        normalSeekY = normalSeekY,
+        seekY = seekY,
+        titleY = titleY,
+        portraitControlsScale = portraitControlsScale,
+        fullWidthPx = fullWidthPx,
+        glassCardRect = glassCardRect,
+        showSmallLandscapeCover = showSmallLandscapeCover,
+        coverflowMetrics = coverflowMetrics,
+        tiledWallMetrics = tiledWallMetrics,
+        fullCoverSize = fullCoverSize,
+        targetCoverX = targetCoverX,
+        targetCoverY = targetCoverY,
+        miniScale = miniScale,
+        miniCoverSize = miniCoverSize,
+        miniCoverX = miniCoverX,
+        miniCoverY = miniCoverY,
+        miniWidth = miniWidth,
+        miniHeight = miniHeight,
+        miniControlClearance = miniControlClearance,
+        miniShift = miniShift,
+        miniAlpha = miniAlpha,
+        baseCoverRadius = baseCoverRadius,
+        spatialCoverAllowed = spatialCoverAllowed,
+        hasCubeOnTitleRow = spatialCoverAllowed,
+        buttonSize = buttonSize,
+        cubeGap = cubeGap,
+        coverThemeHeaderTopPad = coverThemeHeaderTopPad,
+        coverThemeHeaderTop = coverThemeHeaderTop,
+        spatialCoverRendering = spatialCoverRendering,
+        spatialCoverTilt = spatialCoverTilt,
+        effLyricsProgress = effLyricsProgress,
+        motionOverlayAlpha = motionOverlayAlpha,
+        shareActive = shareActive,
+        shareP = shareP,
+        shareChromeAlpha = shareChromeAlpha,
+        shareChromeBlur = shareChromeBlur,
+        activeInk = activeInk,
+        secondaryInk = secondaryInk,
+        lyricInk = lyricInk,
+        lyricSubInk = lyricSubInk,
+        lyricChromeBlend = lyricChromeBlend,
+        sharedClick = sharedClick,
+    )
+}
+
+@Composable
+private fun FullPlayerGlassCardLayer(
+    m: FullPlayerMetrics,
+    glassCardRect: FullscreenPlayerCard,
+    touchPoint: Offset,
+    touching: Boolean,
+    appearance: NowPlayingConfig,
+    backdrop: Backdrop,
+    miuixBackdrop: top.yukonga.miuix.kmp.blur.Backdrop,
+    menuTint: Color,
+    active: Boolean,
+    model: AuraViewModel,
+) {
+    val glassTop = glassCardRect.top
+    val cardLeftPx = with(m.density) { glassCardRect.left.toPx() }
+    val cardTopPx = with(m.density) { glassTop.toPx() }
+    val cardWidthPx = with(m.density) { glassCardRect.width.toPx() }
+    val cardHeightPx = with(m.density) { glassCardRect.height.toPx() }
+    val localTouch = touchPoint - Offset(cardLeftPx, cardTopPx)
+    val touchInside = touching && localTouch.x in 0f..cardWidthPx && localTouch.y in 0f..cardHeightPx
+    val useFullscreenGlass = appearance.fullscreenGlass && btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled.current
+    val touchLight by animateFloatAsState(
+        if (useFullscreenGlass && touchInside) .19f else 0f,
+        tween(if (touchInside) 100 else 320),
+        label = "playerCardTouchLight",
+    )
+    val cardMaterial = if (useFullscreenGlass) {
+        Modifier.drawBackdrop(
+            backdrop = backdrop,
+            shape = { RoundedCornerShape(30.dp) },
+            effects = {
+                vibrancy()
+                backdropBlur(5.dp.toPx())
+                lens(28.dp.toPx(), 42.dp.toPx(), chromaticAberration = true)
+            },
+            highlight = { Highlight.Default.copy(alpha = .60f) },
+            onDrawSurface = { drawRect(menuTint.copy(alpha = .18f)) },
+        )
+    } else {
+        Modifier.playerMenuMaterial(miuixBackdrop, menuTint, 30.dp)
+    }
+    Box(
+        Modifier
+            .offset(glassCardRect.left, glassTop)
+            .size(glassCardRect.width, glassCardRect.height)
+            .graphicsLayer { this.alpha = if (m.coverflowActive) 0f else m.alpha * (1f - m.p) * m.shareChromeAlpha }
+            .blur(m.shareChromeBlur)
+            .then(cardMaterial)
+            .clip(RoundedCornerShape(30.dp))
+            .drawWithContent {
+                drawContent()
+                if (useFullscreenGlass && touchLight > .001f) {
+                    val radius = size.width * .65f
+                    drawRect(
+                        Brush.radialGradient(
+                            listOf(Color.White.copy(alpha = touchLight), Color.White.copy(alpha = touchLight * .32f), Color.Transparent),
+                            center = localTouch,
+                            radius = radius.coerceAtLeast(1f),
+                        ),
+                    )
                 }
-            }
-            if (queueBlend > .001f && p > 0f) {
-                val queueMod = if (landscapeGeom != null) {
-                    val qBottomClearance = 0.dp
-                    Modifier
-                        .offset(x = landscapeGeom.rightPaneX, y = landscapeGeom.usableTop)
-                        .size(
-                            landscapeGeom.rightPaneWidth,
-                            (landscapeGeom.usableBottom - landscapeGeom.usableTop - qBottomClearance).coerceAtLeast(1.dp),
-                        )
-                } else {
-                    val qTop = smallY + small + (if (compactWindow) 12.dp else 20.dp * PlayerPaddingScale)
-                    Modifier
-                        .offset(y = qTop)
-                        .fillMaxWidth()
-                        .height((seekY + 50.dp - qTop - 8.dp).coerceAtLeast(1.dp))
-                        .padding(horizontal = smallX)
+            },
+    )
+    if (m.p < .01f && !m.landscape) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(glassTop.coerceAtLeast(0.dp))
+                .playerTrackSwipe(appearance.swipeTracks && active, model::next, model::previous),
+        )
+    }
+}
+
+@Composable
+private fun FullPlayerArtworkLayer(
+    m: FullPlayerMetrics,
+    song: btm.m.auraplayer.data.Song,
+    appearance: NowPlayingConfig,
+    coverPalette: com.materialkolor.palettes.CorePalette,
+    expressive: PlayerExpressiveColors?,
+    oneUi: PlayerOneUiColors?,
+    active: Boolean,
+    mixVisual: btm.m.auraplayer.auramix.AuraMixVisualTransition?,
+    spatialCoverState: SpatialCoverResolveState,
+    motionVideoPath: String?,
+    motionVideoAllowed: Boolean,
+    model: AuraViewModel,
+) {
+    val immGeom = m.immGeom
+    if (immGeom != null) {
+        val topLeftDisplayCorner = rememberBottomScreenCornerRadius(0.dp, android.view.RoundedCorner.POSITION_TOP_LEFT)
+        val topRightDisplayCorner = rememberBottomScreenCornerRadius(0.dp, android.view.RoundedCorner.POSITION_TOP_RIGHT)
+        val bottomLeftDisplayCorner = rememberBottomScreenCornerRadius(0.dp, android.view.RoundedCorner.POSITION_BOTTOM_LEFT)
+        val bottomRightDisplayCorner = rememberBottomScreenCornerRadius(0.dp, android.view.RoundedCorner.POSITION_BOTTOM_RIGHT)
+        val portraitTopCorner = when {
+            m.compactWindow -> minOf(topLeftDisplayCorner, bottomRightDisplayCorner).coerceAtLeast(18.dp)
+            topLeftDisplayCorner > 0.dp -> topLeftDisplayCorner
+            else -> bottomRightDisplayCorner
+        }
+        val landscapeLeftTopCorner = if (m.compactWindow) topLeftDisplayCorner.coerceAtLeast(18.dp) else topLeftDisplayCorner
+        val landscapeLeftBottomCorner = if (m.compactWindow) bottomLeftDisplayCorner.coerceAtLeast(18.dp) else bottomLeftDisplayCorner
+        val landscapeGeom = m.landscapeGeom
+        val immCompactX = landscapeGeom?.lyricsCompactCoverX ?: m.smallX
+        val immCompactY = landscapeGeom?.lyricsCompactCoverY ?: m.smallY
+        val immTargetW = lerp(immGeom.coverWidth, m.small, m.effLyricsProgress)
+        val immTargetH = lerp(immGeom.coverHeight, m.small, m.effLyricsProgress)
+        val immTargetX = lerp(immGeom.coverX, immCompactX, m.effLyricsProgress)
+        val immTargetY = lerp(immGeom.coverY, immCompactY, m.effLyricsProgress)
+        val immCurW = lerp(m.miniCoverSize, immTargetW, m.e)
+        val immCurH = lerp(m.miniCoverSize, immTargetH, m.e)
+        val immCurX = lerp(m.miniCoverX, immTargetX, m.e)
+        val immCurY = lerp(m.miniCoverY, immTargetY, m.e)
+        val miniCorner = 13.dp * m.miniScale
+        val immCurTopStartRadius = lerp(
+            miniCorner,
+            lerp(if (landscapeGeom != null) landscapeLeftTopCorner else portraitTopCorner, 9.dp, m.effLyricsProgress),
+            m.e,
+        )
+        val immCurTopEndRadius = lerp(
+            miniCorner,
+            lerp(if (landscapeGeom != null) 0.dp else topRightDisplayCorner.takeIf { it > 0.dp } ?: portraitTopCorner, 9.dp, m.effLyricsProgress),
+            m.e,
+        )
+        val immCurBottomStartRadius = if (landscapeGeom != null) {
+            lerp(miniCorner, lerp(landscapeLeftBottomCorner, 9.dp, m.effLyricsProgress), m.e)
+        } else {
+            immersiveCoverBottomCornerRadius(miniCorner, 9.dp, m.e, m.effLyricsProgress)
+        }
+        val immCurBottomEndRadius = immersiveCoverBottomCornerRadius(miniCorner, 9.dp, m.e, m.effLyricsProgress)
+        val immFeather = (m.e * (1f - m.effLyricsProgress)).coerceIn(0f, 1f)
+        Cover(
+            uri = song.artwork,
+            modifier = Modifier
+                .offset(immCurX, immCurY)
+                .size(immCurW, immCurH)
+                .graphicsLayer {
+                    translationX = m.miniShift
+                    this.alpha = m.miniAlpha * (1f - m.coverflowReveal) * m.shareChromeAlpha
                 }
-                PlayerQueue(
-                    model,
-                    expressive = expressive,
-                    oneUi = oneUi,
-                    modifier = queueMod
-                        .graphicsLayer { this.alpha = p * queueBlend; translationY = (1f - p) * 24.dp.toPx() }
-                        .blur(((1f - p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp),
-                )
+                .blur(m.shareChromeBlur)
+                .playerTrackSwipe(appearance.swipeTracks && active && m.p < .01f && !m.coverflowActive, model::next, model::previous),
+            radius = immCurTopStartRadius,
+            topEndRadius = immCurTopEndRadius,
+            bottomRadius = immCurBottomStartRadius,
+            bottomEndRadius = immCurBottomEndRadius,
+            onClick = { if (!m.shareActive && m.coverflowReveal < 0.5f) m.sharedClick() },
+            animation = appearance.coverAnimation,
+            animate = active && m.e > .99f && m.coverflowReveal < 0.5f,
+            transitionKey = song.key,
+            mixVisual = mixVisual,
+            placeholderTint = m.activeInk.copy(alpha = .3f),
+            spatialState = spatialCoverState,
+            spatialActive = m.spatialCoverRendering && m.coverflowReveal < 0.5f,
+            spatialTilt = m.spatialCoverTilt,
+            immersiveFeather = immFeather,
+            immersiveHorizontal = landscapeGeom != null,
+            motionVideoPath = motionVideoPath,
+            motionPlaying = motionVideoAllowed && m.motionOverlayAlpha > 0.01f && m.coverflowReveal < 0.5f && mixVisual == null,
+            motionOverlayAlpha = m.motionOverlayAlpha * (1f - m.coverflowReveal),
+        )
+        val immScrimStrength = m.alpha * (1f - m.effLyricsProgress) * (1f - m.coverflowReveal)
+        if (immScrimStrength > 0.001f) {
+            val scrimTone = when {
+                expressive != null -> expressive.surface
+                oneUi != null -> oneUi.background
+                else -> Color(coverPalette.a2.tone(14))
             }
             if (landscapeGeom != null) {
-                // Landscape Normal Controls inside Right Column
-                val normalCtrlAlpha = if (coverflowActive) 0f else ((1f - p) * controlsVisibility).coerceIn(0f, 1f)
-                val landscapeHeaderReserve = with(density) {
-                    maxOf(46.dp, if (textHeight > 0) textHeight.toDp() else 48.dp)
-                }
-                val rightCtrlTop = landscapeGeom.controlStackTop + landscapeHeaderReserve + 8.dp
-                val rightCtrlHeight = (landscapeGeom.controlStackTop + landscapeGeom.controlStackHeight - rightCtrlTop).coerceAtLeast(110.dp)
-                if (normalCtrlAlpha > 0.001f) {
-                    val lScale = landscapeGeom.controlsScale
-                    val sliderH = when (appearance.glowProgress) {
-                        GlowProgressStyle.ONE -> 32.dp
-                        GlowProgressStyle.HYPER -> 26.dp
-                        GlowProgressStyle.OFF -> 22.dp
-                    } * lScale.coerceAtLeast(0.84f)
-                    Column(
-                        Modifier
-                            .offset(x = landscapeGeom.rightPaneX, y = rightCtrlTop)
-                            .size(landscapeGeom.rightPaneWidth, rightCtrlHeight)
-                            .graphicsLayer { this.alpha = normalCtrlAlpha }
-                            .blur(((1f - normalCtrlAlpha) * 12f).dp, BlurredEdgeTreatment.Unbounded),
-                    ) {
-                        PlayerProgressSection(
-                            model = model,
-                            song = song,
-                            appearance = appearance,
-                            coverPalette = coverPalette,
-                            expressive = expressive,
-                            oneUi = oneUi,
-                            backdrop = backdrop,
-                            active = active,
-                            queueOpen = queueOpen,
-                            controlsVisibility = normalCtrlAlpha,
-                            sliderHeight = sliderH,
-                            footerHeight = (26.dp * lScale.coerceAtLeast(0.88f)).coerceAtLeast(24.dp),
-                            horizontalInset = 0.dp,
-                            onQualityMenuExpanded = { qualityMenuOpen = it },
-                            modifier = Modifier.graphicsLayer { this.alpha = 1f - queueBlend },
-                        )
-                        Spacer(Modifier.weight(1f))
-                        PlayerTransportSection(
-                            model = model,
-                            expressive = expressive,
-                            oneUi = oneUi,
-                            scale = lScale.coerceIn(0.80f, 1.0f),
-                            rowHeight = (74.dp * lScale).coerceIn(54.dp, 82.dp),
-                        )
-                        Spacer(Modifier.weight(1f))
-                        if (appearance.showVolume) {
-                            PlayerVolumeSection(
-                                expressive = expressive,
-                                oneUi = oneUi,
-                                height = (38.dp * lScale).coerceIn(30.dp, 42.dp),
-                            )
+                val scrimLeft = immGeom.coverWidth * 0.46f
+                val scrimWidth = (immGeom.coverWidth - scrimLeft + 44.dp).coerceAtLeast(1.dp)
+                Box(
+                    Modifier
+                        .offset(x = scrimLeft)
+                        .width(scrimWidth)
+                        .fillMaxHeight()
+                        .graphicsLayer {
+                            translationX = m.miniShift
+                            this.alpha = immScrimStrength * m.shareChromeAlpha
                         }
-                        PlayerBottomActionsSection(
-                            model = model,
-                            song = song,
-                            lyricsOpen = lyricsOpen,
-                            queueOpen = queueOpen,
-                            expressive = expressive,
-                            oneUi = oneUi,
-                            rowHeight = (46.dp * lScale).coerceIn(36.dp, 50.dp),
-                            bottomTouch = (44.dp * lScale).coerceIn(34.dp, 48.dp),
-                            bottomIcon = (28.dp * lScale).coerceIn(22.dp, 31.dp),
-                            onLyrics = onLyrics,
-                            onQueue = onQueue,
-                        )
-                    }
-                }
-                // Landscape Non-Immersed Lyrics/Queue Controls inside Left Column below compact cover
-                val leftCtrlAlpha = (p * controlsVisibility).coerceIn(0f, 1f)
-                if (leftCtrlAlpha > 0.001f) {
-                    val leftCtrlTop = landscapeGeom.lyricsCompactCoverY + landscapeGeom.lyricsCompactCoverSize + 8.dp
-                    val leftCtrlHeight = (landscapeGeom.usableBottom - leftCtrlTop).coerceAtLeast(100.dp)
-                    val clScale = (leftCtrlHeight.value / 190f).coerceIn(0.60f, 0.88f)
-                    val showLeftVolume = appearance.showVolume && leftCtrlHeight >= 158.dp
-                    Column(
-                        Modifier
-                            .offset(x = landscapeGeom.leftPaneX, y = leftCtrlTop)
-                            .size(landscapeGeom.leftPaneWidth, leftCtrlHeight)
-                            .graphicsLayer { this.alpha = leftCtrlAlpha }
-                            .blur(((1f - leftCtrlAlpha) * 12f).dp, BlurredEdgeTreatment.Unbounded),
-                    ) {
-                        PlayerProgressSection(
-                            model = model,
-                            song = song,
-                            appearance = appearance,
-                            coverPalette = coverPalette,
-                            expressive = expressive,
-                            oneUi = oneUi,
-                            backdrop = backdrop,
-                            active = active,
-                            queueOpen = queueOpen,
-                            controlsVisibility = leftCtrlAlpha,
-                            sliderHeight = 20.dp * clScale.coerceAtLeast(0.84f),
-                            footerHeight = 20.dp * clScale.coerceAtLeast(0.84f),
-                            horizontalInset = 0.dp,
-                            onQualityMenuExpanded = { qualityMenuOpen = it },
-                            modifier = Modifier.graphicsLayer { this.alpha = 1f - queueBlend },
-                        )
-                        Spacer(Modifier.weight(1f))
-                        PlayerTransportSection(
-                            model = model,
-                            expressive = expressive,
-                            oneUi = oneUi,
-                            scale = clScale.coerceIn(0.72f, 0.88f),
-                            rowHeight = (58.dp * clScale).coerceIn(46.dp, 64.dp),
-                        )
-                        if (showLeftVolume) {
-                            Spacer(Modifier.weight(0.6f))
-                            PlayerVolumeSection(
-                                expressive = expressive,
-                                oneUi = oneUi,
-                                height = (32.dp * clScale).coerceIn(26.dp, 36.dp),
-                            )
-                        }
-                        Spacer(Modifier.weight(0.6f))
-                        PlayerBottomActionsSection(
-                            model = model,
-                            song = song,
-                            lyricsOpen = lyricsOpen,
-                            queueOpen = queueOpen,
-                            expressive = expressive,
-                            oneUi = oneUi,
-                            rowHeight = (42.dp * clScale).coerceIn(34.dp, 46.dp),
-                            bottomTouch = (40.dp * clScale).coerceIn(32.dp, 44.dp),
-                            bottomIcon = (26.dp * clScale).coerceIn(20.dp, 29.dp),
-                            onLyrics = onLyrics,
-                            onQueue = onQueue,
-                        )
-                    }
-                }
+                        .blur(m.shareChromeBlur)
+                        .background(
+                            Brush.horizontalGradient(
+                                0f to Color.Transparent,
+                                0.40f to scrimTone.copy(alpha = 0.22f),
+                                0.72f to scrimTone.copy(alpha = 0.44f),
+                                1f to Color.Transparent,
+                            ),
+                        ),
+                )
             } else {
-                val portraitCtrlVis = (controlsVisibility * (if (usesStageDock) p else 1f)).coerceIn(0f, 1f)
-                if (portraitCtrlVis > .001f) {
-                    Column(
-                        Modifier
-                            .offset(y = seekY)
-                            .fillMaxWidth()
-                            .graphicsLayer { this.alpha = portraitCtrlVis * tiledChromeVis.value }
-                            .blur(((1f - portraitCtrlVis) * 14f).dp, BlurredEdgeTreatment.Unbounded)
-                            .height(
-                                controlSize(
-                                    (fullCard.height - 76.dp).coerceAtLeast(1.dp),
-                                    (h - normalSeekY - portraitNav - 10.dp).coerceAtLeast(baseControlsHeight),
-                                ),
-                            )
-                            .padding(horizontal = margin),
-                    ) {
-                        val sliderNormalHeight = when (appearance.glowProgress) {
-                            GlowProgressStyle.ONE -> 36.dp
-                            GlowProgressStyle.HYPER -> 30.dp
-                            GlowProgressStyle.OFF -> 24.dp
-                        } * compactScale
-                        val sliderFullHeight = when (appearance.glowProgress) {
-                            GlowProgressStyle.ONE -> 31.dp
-                            GlowProgressStyle.HYPER -> 26.dp
-                            GlowProgressStyle.OFF -> 20.dp
-                        } * portraitControlsScale
-                        val footerNormal = 26.dp * compactScale
-                        val footerFull = 20.dp * portraitControlsScale
-                        val sliderInset = 0.dp
-                        PlayerProgressSection(
-                            model = model,
-                            song = song,
-                            appearance = appearance,
-                            coverPalette = coverPalette,
-                            expressive = expressive,
-                            oneUi = oneUi,
-                            backdrop = backdrop,
-                            active = active,
-                            queueOpen = queueOpen,
-                            controlsVisibility = portraitCtrlVis,
-                            sliderHeight = controlSize(sliderFullHeight, sliderNormalHeight),
-                            footerHeight = controlSize(footerFull, footerNormal),
-                            horizontalInset = sliderInset,
-                            onQualityMenuExpanded = { qualityMenuOpen = it },
-                            modifier = Modifier.graphicsLayer { this.alpha = 1f - queueBlend },
-                        )
-                        Spacer(Modifier.weight(1f))
-                        PlayerTransportSection(
-                            model = model,
-                            expressive = expressive,
-                            oneUi = oneUi,
-                            scale = portraitControlsScale,
-                            rowHeight = controlSize(64.dp * portraitControlsScale, 100.dp * compactScale),
-                        )
-                        Spacer(Modifier.weight(1f))
-                        if (appearance.showVolume) {
-                            PlayerVolumeSection(
-                                expressive = expressive,
-                                oneUi = oneUi,
-                                height = controlSize(32.dp * portraitControlsScale, 44.dp * compactScale),
-                            )
+                val scrimTop = immGeom.coverHeight * 0.44f
+                val scrimHeight = (immGeom.coverHeight - scrimTop + 44.dp).coerceAtLeast(1.dp)
+                Box(
+                    Modifier
+                        .offset(y = scrimTop)
+                        .fillMaxWidth()
+                        .height(scrimHeight)
+                        .graphicsLayer {
+                            translationX = m.miniShift
+                            this.alpha = immScrimStrength * m.shareChromeAlpha
                         }
-                        val bottomTouch = controlSize(40.dp * portraitControlsScale, 48.dp * compactScale)
-                        val bottomIcon = controlSize(27.dp * portraitControlsScale, 32.dp * compactScale)
-                        PlayerBottomActionsSection(
-                            model = model,
-                            song = song,
-                            lyricsOpen = lyricsOpen,
-                            queueOpen = queueOpen,
-                            expressive = expressive,
-                            oneUi = oneUi,
-                            rowHeight = controlSize(44.dp * portraitControlsScale, 56.dp * compactScale),
-                            bottomTouch = bottomTouch,
-                            bottomIcon = bottomIcon,
-                            onLyrics = onLyrics,
-                            onQueue = onQueue,
-                        )
-                    }
-                }
+                        .blur(m.shareChromeBlur)
+                        .background(
+                            Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                0.40f to scrimTone.copy(alpha = 0.22f),
+                                0.72f to scrimTone.copy(alpha = 0.44f),
+                                1f to Color.Transparent,
+                            ),
+                        ),
+                )
             }
         }
-        val lyricVisual = remember(appearance.lyricTheme) { lyricThemeSpec(appearance.lyricTheme) }
-        val lyricChromeBlend = if (appearance.lyricTheme == btm.m.auraplayer.playback.LyricTheme.BLUR) {
-            0f
-        } else {
-            (p * (1f - queueBlend)).coerceIn(0f, 1f)
+    } else {
+        val sharedSize = lerp(m.miniCoverSize, m.fullCoverSize, m.e)
+        val sharedX = lerp(m.miniCoverX, m.targetCoverX, m.e)
+        val sharedY = lerp(m.miniCoverY, m.targetCoverY, m.e)
+        val sharedScale = sharedSize / m.coverSize
+        val stageCoverHeroRadius = when {
+            m.coverflowMetrics != null -> (m.coverflowMetrics.cardSize * 0.088f).coerceIn(16.dp, 26.dp)
+            m.tiledWallMetrics != null -> m.tiledWallMetrics.cornerRadius * 1.825f
+            else -> m.baseCoverRadius
         }
-        val lyricInk = if (lyricChromeBlend > 0f) lerp(activeInk, lyricVisual.inkColor, lyricChromeBlend) else activeInk
-        val lyricSubInk = if (lyricChromeBlend > 0f) lerp(secondaryInk, lyricVisual.secondaryInkColor, lyricChromeBlend) else secondaryInk
-        if (alpha > 0f && p > 0f && queueBlend < .999f) {
-            val lyricBoxModifier = if (landscapeGeom != null) {
-                val bottomReserve = 52.dp * controlsVisibility
+        val sharedRadius = lerp(13.dp * m.miniScale, stageCoverHeroRadius + (9.dp - stageCoverHeroRadius) * m.p, m.e)
+        Cover(
+            uri = song.artwork,
+            modifier = Modifier
+                .offset(sharedX, sharedY)
+                .size(m.coverSize)
+                .graphicsLayer {
+                    transformOrigin = TransformOrigin(0f, 0f)
+                    scaleX = sharedScale
+                    scaleY = sharedScale
+                    translationX = m.miniShift
+                    val portraitFullscreenHidden = m.fullscreen && !m.landscape && !m.coverflowActive
+                    this.alpha = m.miniAlpha * (if (portraitFullscreenHidden) 1f - m.e * (1f - m.p) else 1f) * m.coverflowSharedVis * m.shareChromeAlpha
+                }
+                .blur(m.shareChromeBlur)
+                .playerTrackSwipe(appearance.swipeTracks && active && m.p < .01f && !m.fullscreen && !m.coverflowActive, model::next, model::previous),
+            radius = sharedRadius / sharedScale,
+            onClick = { if (!m.shareActive && m.coverflowSharedVis > 0.5f) m.sharedClick() },
+            animation = appearance.coverAnimation,
+            animate = active && m.e > .99f && m.coverflowSharedVis > 0.05f,
+            transitionKey = song.key,
+            mixVisual = mixVisual,
+            placeholderTint = m.activeInk.copy(alpha = .3f),
+            spatialState = spatialCoverState,
+            spatialActive = m.spatialCoverRendering && m.coverflowSharedVis > 0.05f,
+            spatialTilt = m.spatialCoverTilt,
+            motionVideoPath = motionVideoPath,
+            motionPlaying = motionVideoAllowed && m.motionOverlayAlpha > 0.01f && m.coverflowSharedVis > 0.05f && mixVisual == null,
+            motionOverlayAlpha = m.motionOverlayAlpha * m.coverflowSharedVis,
+        )
+    }
+}
+
+@Composable
+private fun FullPlayerCoverThemeStageLayer(
+    m: FullPlayerMetrics,
+    model: AuraViewModel,
+    song: btm.m.auraplayer.data.Song,
+    appearance: NowPlayingConfig,
+    coverPalette: com.materialkolor.palettes.CorePalette,
+    expressive: PlayerExpressiveColors?,
+    oneUi: PlayerOneUiColors?,
+    backdrop: Backdrop,
+    miuixBackdrop: top.yukonga.miuix.kmp.blur.Backdrop,
+    menuTint: Color,
+    mixVisual: btm.m.auraplayer.auramix.AuraMixVisualTransition?,
+    spatialCoverState: SpatialCoverResolveState,
+    spatialTilt: Offset,
+    motionVideoPath: String?,
+    motionVideoAllowed: Boolean,
+    active: Boolean,
+    lyricsOpen: Boolean,
+    queueOpen: Boolean,
+    onLyrics: () -> Unit,
+    onQueue: () -> Unit,
+    onQualityMenuExpanded: (Boolean) -> Unit,
+    onDragActiveChange: (Boolean) -> Unit,
+) {
+    val stageMod = Modifier
+        .fillMaxSize()
+        .graphicsLayer { this.alpha = m.stageRevealAlpha * m.shareChromeAlpha }
+        .blur(((1f - m.stageRevealAlpha) * 14f).dp + m.shareChromeBlur)
+    val stageInteractive = !m.shareActive && m.stageRevealAlpha > 0.45f
+    val stageMotionAllowed = motionVideoAllowed && m.stageRevealAlpha > 0.30f
+    val stageParams = CoverThemeStageParams(
+        model = model,
+        song = song,
+        appearance = appearance,
+        coverPalette = coverPalette,
+        expressive = expressive,
+        oneUi = oneUi,
+        backdrop = backdrop,
+        miuixBackdrop = miuixBackdrop,
+        menuTint = menuTint,
+        activeInk = m.activeInk,
+        secondaryInk = m.secondaryInk,
+        mixVisual = mixVisual,
+        spatialCoverState = spatialCoverState,
+        spatialCoverRendering = m.spatialCoverRendering,
+        spatialTilt = spatialTilt,
+        motionVideoPath = motionVideoPath,
+        motionVideoAllowed = stageMotionAllowed,
+        active = active,
+        interactive = stageInteractive,
+        lyricsOpen = lyricsOpen,
+        queueOpen = queueOpen,
+        topInset = m.effectiveStatus,
+        leftInset = m.effectiveLeftInset,
+        rightInset = m.effectiveRightInset,
+        bottomInset = m.effectiveBottomInset,
+        headerTopPadding = m.coverThemeHeaderTopPad,
+        reserveSpatialCubeSlot = m.hasCubeOnTitleRow,
+        maxWidth = m.w,
+        maxHeight = m.h,
+        heroContentAlpha = m.stageHeroContentAlpha,
+        onLyrics = onLyrics,
+        onQueue = onQueue,
+        onQualityMenuExpanded = onQualityMenuExpanded,
+        onDragActiveChange = onDragActiveChange,
+    )
+    when (m.activeCoverTheme) {
+        CoverTheme.COVERFLOW -> PlayerCoverflowStage(params = stageParams, modifier = stageMod)
+        CoverTheme.TILED -> PlayerTiledStage(params = stageParams, modifier = stageMod)
+        CoverTheme.SQUARE -> Unit
+    }
+}
+
+@Composable
+private fun FullPlayerChromeAndLyricsLayer(
+    m: FullPlayerMetrics,
+    model: AuraViewModel,
+    song: btm.m.auraplayer.data.Song,
+    appearance: NowPlayingConfig,
+    coverPalette: com.materialkolor.palettes.CorePalette,
+    expressive: PlayerExpressiveColors?,
+    oneUi: PlayerOneUiColors?,
+    backdrop: Backdrop,
+    active: Boolean,
+    lyricsOpen: Boolean,
+    queueOpen: Boolean,
+    queueBlend: Float,
+    immersive: Boolean,
+    isMultiWindow: Boolean,
+    tiledChromeAlpha: Float,
+    textHeight: Int,
+    spatialTilt: Offset,
+    shareTransition: LyricShareTransitionState?,
+    onClose: () -> Unit,
+    onLyrics: () -> Unit,
+    onQueue: () -> Unit,
+    onQualityMenuExpanded: (Boolean) -> Unit,
+    openSharePage: (Int, Rect?, Rect?) -> Unit,
+) {
+    val landscapeGeom = m.landscapeGeom
+    val immGeom = m.immGeom
+    val lyricInk = m.lyricInk
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer { this.alpha = m.alpha * m.shareChromeAlpha }
+            .blur(((1f - m.alpha) * 14f).dp + m.shareChromeBlur),
+    ) {
+        val handleAlpha = when {
+            m.landscape && immersive -> 0.48f
+            immGeom != null && m.p < 0.5f -> 0.48f + 0.52f * (m.p / 0.5f)
+            else -> 1f
+        }
+        val handleY = when {
+            m.coverflowActive -> m.coverThemeHeaderTop + (m.buttonSize - 28.dp) / 2f
+            m.landscape || m.compactWindow -> m.effectiveStatus + 2.dp
+            immGeom != null -> m.effectiveStatus + 6.dp
+            else -> m.effectiveStatus + 12.dp * PlayerPaddingScale
+        }
+        Box(
+            Modifier
+                .align(Alignment.TopCenter)
+                .offset(y = handleY)
+                .size(104.dp, 28.dp)
+                .graphicsLayer { this.alpha = handleAlpha * tiledChromeAlpha }
+                .clip(RoundedCornerShape(50))
+                .semantics { contentDescription = tr("collapse_player", "收起播放器") }
+                .playerSurfaceClick(onClose),
+            contentAlignment = Alignment.Center,
+        ) {
+            val pillWidth = if (m.landscape || isMultiWindow) 52.dp else 80.dp
+            val pillHeight = if (m.landscape || isMultiWindow) 4.5.dp else 6.dp
+            when {
+                expressive != null -> Box(Modifier.width(48.dp).height(4.5.dp).clip(RoundedCornerShape(50)).background(expressive.dragHandleColor))
+                oneUi != null -> Box(Modifier.width(48.dp).height(4.5.dp).clip(RoundedCornerShape(50)).background(oneUi.track))
+                else -> Box(Modifier.width(pillWidth).height(pillHeight).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = .36f)))
+            }
+        }
+        if (queueBlend > .001f && m.p > 0f) {
+            val queueMod = if (landscapeGeom != null) {
                 Modifier
                     .offset(x = landscapeGeom.rightPaneX, y = landscapeGeom.usableTop)
                     .size(
                         landscapeGeom.rightPaneWidth,
-                        (landscapeGeom.usableBottom - landscapeGeom.usableTop - bottomReserve).coerceAtLeast(1.dp),
+                        (landscapeGeom.usableBottom - landscapeGeom.usableTop).coerceAtLeast(1.dp),
                     )
             } else {
-                val portraitLyricsTop = smallY + small + (if (compactWindow) 10.dp else 20.dp * PlayerPaddingScale)
-                val bottomReserve = 56.dp * controlsVisibility
-                val portraitLyricsBottom = seekY - bottomReserve + (h - portraitNav - seekY) * (1f - controlsVisibility)
+                val qTop = m.smallY + m.small + (if (m.compactWindow) 12.dp else 20.dp * PlayerPaddingScale)
                 Modifier
-                    .offset(y = portraitLyricsTop)
+                    .offset(y = qTop)
                     .fillMaxWidth()
-                    .height((portraitLyricsBottom - portraitLyricsTop).coerceAtLeast(1.dp))
+                    .height((m.seekY + 50.dp - qTop - 8.dp).coerceAtLeast(1.dp))
+                    .padding(horizontal = m.smallX)
             }
-            val lyricHorizontalPadDp = when {
-                landscapeGeom != null -> 10f
-                w < 330.dp -> 14f
-                else -> 26f
+            PlayerQueue(
+                model,
+                expressive = expressive,
+                oneUi = oneUi,
+                modifier = queueMod
+                    .graphicsLayer { this.alpha = m.p * queueBlend; translationY = (1f - m.p) * 24.dp.toPx() }
+                    .blur(((1f - m.p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp),
+            )
+        }
+        if (landscapeGeom != null) {
+            val normalCtrlAlpha = if (m.coverflowActive) 0f else ((1f - m.p) * m.controlsVisibility).coerceIn(0f, 1f)
+            val landscapeHeaderReserve = with(m.density) {
+                maxOf(46.dp, if (textHeight > 0) textHeight.toDp() else 48.dp)
             }
-            val effectiveLyricScale = model.lyricSize.scale * when {
-                landscapeGeom != null && landscapeGeom.rightPaneWidth < 360.dp -> (landscapeGeom.rightPaneWidth.value / 370f).coerceIn(0.76f, 1f)
-                !landscape && w < 330.dp -> (w.value / 345f).coerceIn(0.76f, 1f)
-                else -> 1f
+            val rightCtrlTop = landscapeGeom.controlStackTop + landscapeHeaderReserve + 8.dp
+            val rightCtrlHeight = (landscapeGeom.controlStackTop + landscapeGeom.controlStackHeight - rightCtrlTop).coerceAtLeast(110.dp)
+            if (normalCtrlAlpha > 0.001f) {
+                val lScale = landscapeGeom.controlsScale
+                val sliderH = when (appearance.glowProgress) {
+                    GlowProgressStyle.ONE -> 32.dp
+                    GlowProgressStyle.HYPER -> 26.dp
+                    GlowProgressStyle.OFF -> 22.dp
+                } * lScale.coerceAtLeast(0.84f)
+                Column(
+                    Modifier
+                        .offset(x = landscapeGeom.rightPaneX, y = rightCtrlTop)
+                        .size(landscapeGeom.rightPaneWidth, rightCtrlHeight)
+                        .graphicsLayer { this.alpha = normalCtrlAlpha }
+                        .blur(((1f - normalCtrlAlpha) * 12f).dp, BlurredEdgeTreatment.Unbounded),
+                ) {
+                    PlayerProgressSection(
+                        model = model,
+                        song = song,
+                        appearance = appearance,
+                        coverPalette = coverPalette,
+                        expressive = expressive,
+                        oneUi = oneUi,
+                        backdrop = backdrop,
+                        active = active,
+                        queueOpen = queueOpen,
+                        controlsVisibility = normalCtrlAlpha,
+                        sliderHeight = sliderH,
+                        footerHeight = (26.dp * lScale.coerceAtLeast(0.88f)).coerceAtLeast(24.dp),
+                        horizontalInset = 0.dp,
+                        onQualityMenuExpanded = onQualityMenuExpanded,
+                        modifier = Modifier.graphicsLayer { this.alpha = 1f - queueBlend },
+                    )
+                    Spacer(Modifier.weight(1f))
+                    PlayerTransportSection(
+                        model = model,
+                        expressive = expressive,
+                        oneUi = oneUi,
+                        scale = lScale.coerceIn(0.80f, 1.0f),
+                        rowHeight = (74.dp * lScale).coerceIn(54.dp, 82.dp),
+                    )
+                    Spacer(Modifier.weight(1f))
+                    if (appearance.showVolume) {
+                        PlayerVolumeSection(
+                            expressive = expressive,
+                            oneUi = oneUi,
+                            height = (38.dp * lScale).coerceIn(30.dp, 42.dp),
+                        )
+                    }
+                    PlayerBottomActionsSection(
+                        model = model,
+                        song = song,
+                        lyricsOpen = lyricsOpen,
+                        queueOpen = queueOpen,
+                        expressive = expressive,
+                        oneUi = oneUi,
+                        rowHeight = (46.dp * lScale).coerceIn(36.dp, 50.dp),
+                        bottomTouch = (44.dp * lScale).coerceIn(34.dp, 48.dp),
+                        bottomIcon = (28.dp * lScale).coerceIn(22.dp, 31.dp),
+                        onLyrics = onLyrics,
+                        onQueue = onQueue,
+                    )
+                }
             }
-            Box(lyricBoxModifier
+            val leftCtrlAlpha = (m.p * m.controlsVisibility).coerceIn(0f, 1f)
+            if (leftCtrlAlpha > 0.001f) {
+                val leftCtrlTop = landscapeGeom.lyricsCompactCoverY + landscapeGeom.lyricsCompactCoverSize + 8.dp
+                val leftCtrlHeight = (landscapeGeom.usableBottom - leftCtrlTop).coerceAtLeast(100.dp)
+                val clScale = (leftCtrlHeight.value / 190f).coerceIn(0.60f, 0.88f)
+                val showLeftVolume = appearance.showVolume && leftCtrlHeight >= 158.dp
+                Column(
+                    Modifier
+                        .offset(x = landscapeGeom.leftPaneX, y = leftCtrlTop)
+                        .size(landscapeGeom.leftPaneWidth, leftCtrlHeight)
+                        .graphicsLayer { this.alpha = leftCtrlAlpha }
+                        .blur(((1f - leftCtrlAlpha) * 12f).dp, BlurredEdgeTreatment.Unbounded),
+                ) {
+                    PlayerProgressSection(
+                        model = model,
+                        song = song,
+                        appearance = appearance,
+                        coverPalette = coverPalette,
+                        expressive = expressive,
+                        oneUi = oneUi,
+                        backdrop = backdrop,
+                        active = active,
+                        queueOpen = queueOpen,
+                        controlsVisibility = leftCtrlAlpha,
+                        sliderHeight = 20.dp * clScale.coerceAtLeast(0.84f),
+                        footerHeight = 20.dp * clScale.coerceAtLeast(0.84f),
+                        horizontalInset = 0.dp,
+                        onQualityMenuExpanded = onQualityMenuExpanded,
+                        modifier = Modifier.graphicsLayer { this.alpha = 1f - queueBlend },
+                    )
+                    Spacer(Modifier.weight(1f))
+                    PlayerTransportSection(
+                        model = model,
+                        expressive = expressive,
+                        oneUi = oneUi,
+                        scale = clScale.coerceIn(0.72f, 0.88f),
+                        rowHeight = (58.dp * clScale).coerceIn(46.dp, 64.dp),
+                    )
+                    if (showLeftVolume) {
+                        Spacer(Modifier.weight(0.6f))
+                        PlayerVolumeSection(
+                            expressive = expressive,
+                            oneUi = oneUi,
+                            height = (32.dp * clScale).coerceIn(26.dp, 36.dp),
+                        )
+                    }
+                    Spacer(Modifier.weight(0.6f))
+                    PlayerBottomActionsSection(
+                        model = model,
+                        song = song,
+                        lyricsOpen = lyricsOpen,
+                        queueOpen = queueOpen,
+                        expressive = expressive,
+                        oneUi = oneUi,
+                        rowHeight = (42.dp * clScale).coerceIn(34.dp, 46.dp),
+                        bottomTouch = (40.dp * clScale).coerceIn(32.dp, 44.dp),
+                        bottomIcon = (26.dp * clScale).coerceIn(20.dp, 29.dp),
+                        onLyrics = onLyrics,
+                        onQueue = onQueue,
+                    )
+                }
+            }
+        } else {
+            val portraitCtrlVis = (m.controlsVisibility * (if (m.usesStageDock) m.p else 1f)).coerceIn(0f, 1f)
+            if (portraitCtrlVis > .001f) {
+                Column(
+                    Modifier
+                        .offset(y = m.seekY)
+                        .fillMaxWidth()
+                        .graphicsLayer { this.alpha = portraitCtrlVis * tiledChromeAlpha }
+                        .blur(((1f - portraitCtrlVis) * 14f).dp, BlurredEdgeTreatment.Unbounded)
+                        .height(
+                            m.controlSize(
+                                (m.fullCard.height - 76.dp).coerceAtLeast(1.dp),
+                                (m.h - m.normalSeekY - m.portraitNav - 10.dp).coerceAtLeast(m.baseControlsHeight),
+                            ),
+                        )
+                        .padding(horizontal = m.margin),
+                ) {
+                    val sliderNormalHeight = when (appearance.glowProgress) {
+                        GlowProgressStyle.ONE -> 36.dp
+                        GlowProgressStyle.HYPER -> 30.dp
+                        GlowProgressStyle.OFF -> 24.dp
+                    } * m.compactScale
+                    val sliderFullHeight = when (appearance.glowProgress) {
+                        GlowProgressStyle.ONE -> 31.dp
+                        GlowProgressStyle.HYPER -> 26.dp
+                        GlowProgressStyle.OFF -> 20.dp
+                    } * m.portraitControlsScale
+                    PlayerProgressSection(
+                        model = model,
+                        song = song,
+                        appearance = appearance,
+                        coverPalette = coverPalette,
+                        expressive = expressive,
+                        oneUi = oneUi,
+                        backdrop = backdrop,
+                        active = active,
+                        queueOpen = queueOpen,
+                        controlsVisibility = portraitCtrlVis,
+                        sliderHeight = m.controlSize(sliderFullHeight, sliderNormalHeight),
+                        footerHeight = m.controlSize(20.dp * m.portraitControlsScale, 26.dp * m.compactScale),
+                        horizontalInset = 0.dp,
+                        onQualityMenuExpanded = onQualityMenuExpanded,
+                        modifier = Modifier.graphicsLayer { this.alpha = 1f - queueBlend },
+                    )
+                    Spacer(Modifier.weight(1f))
+                    PlayerTransportSection(
+                        model = model,
+                        expressive = expressive,
+                        oneUi = oneUi,
+                        scale = m.portraitControlsScale,
+                        rowHeight = m.controlSize(64.dp * m.portraitControlsScale, 100.dp * m.compactScale),
+                    )
+                    Spacer(Modifier.weight(1f))
+                    if (appearance.showVolume) {
+                        PlayerVolumeSection(
+                            expressive = expressive,
+                            oneUi = oneUi,
+                            height = m.controlSize(32.dp * m.portraitControlsScale, 44.dp * m.compactScale),
+                        )
+                    }
+                    PlayerBottomActionsSection(
+                        model = model,
+                        song = song,
+                        lyricsOpen = lyricsOpen,
+                        queueOpen = queueOpen,
+                        expressive = expressive,
+                        oneUi = oneUi,
+                        rowHeight = m.controlSize(44.dp * m.portraitControlsScale, 56.dp * m.compactScale),
+                        bottomTouch = m.controlSize(40.dp * m.portraitControlsScale, 48.dp * m.compactScale),
+                        bottomIcon = m.controlSize(27.dp * m.portraitControlsScale, 32.dp * m.compactScale),
+                        onLyrics = onLyrics,
+                        onQueue = onQueue,
+                    )
+                }
+            }
+        }
+    }
+    if (m.p > 0f && queueBlend < .999f) {
+        val lyricBoxModifier = if (landscapeGeom != null) {
+            val bottomReserve = 52.dp * m.controlsVisibility
+            Modifier
+                .offset(x = landscapeGeom.rightPaneX, y = landscapeGeom.usableTop)
+                .size(
+                    landscapeGeom.rightPaneWidth,
+                    (landscapeGeom.usableBottom - landscapeGeom.usableTop - bottomReserve).coerceAtLeast(1.dp),
+                )
+        } else {
+            val portraitLyricsTop = m.smallY + m.small + (if (m.compactWindow) 10.dp else 20.dp * PlayerPaddingScale)
+            val bottomReserve = 56.dp * m.controlsVisibility
+            val portraitLyricsBottom = m.seekY - bottomReserve + (m.h - m.portraitNav - m.seekY) * (1f - m.controlsVisibility)
+            Modifier
+                .offset(y = portraitLyricsTop)
+                .fillMaxWidth()
+                .height((portraitLyricsBottom - portraitLyricsTop).coerceAtLeast(1.dp))
+        }
+        val lyricHorizontalPadDp = when {
+            landscapeGeom != null -> 10f
+            m.w < 330.dp -> 14f
+            else -> 26f
+        }
+        val effectiveLyricScale = model.lyricSize.scale * when {
+            landscapeGeom != null && landscapeGeom.rightPaneWidth < 360.dp -> (landscapeGeom.rightPaneWidth.value / 370f).coerceIn(0.76f, 1f)
+            !m.landscape && m.w < 330.dp -> (m.w.value / 345f).coerceIn(0.76f, 1f)
+            else -> 1f
+        }
+        val mainLyricScale = effectiveLyricScale * lyricScaleMultiplier(appearance.mainLyricScalePercent)
+        val bgLyricScale = effectiveLyricScale * lyricScaleMultiplier(appearance.bgLyricScalePercent)
+        Box(
+            lyricBoxModifier
                 .graphicsLayer {
-                    val shareExitAlpha = if (shareActive) 1f - lyricShareSmoothStep(.06f, .62f, shareP) else 1f
-                    this.alpha = alpha * p * (1f - queueBlend) * shareExitAlpha
+                    val shareExitAlpha = if (m.shareActive) 1f - lyricShareSmoothStep(.06f, .62f, m.shareP) else 1f
+                    this.alpha = m.alpha * m.p * (1f - queueBlend) * shareExitAlpha
                     var tx = 0f
-                    var ty = (1f - p) * 24.dp.toPx()
-                    if (shareActive) {
-                        val tState = shareTransition
-                        val vp = tState.sourceViewportBounds
-                        val srcCenter = tState.sourceRowBounds?.center ?: vp?.center
-                        val dstCenter = tState.targetRowBounds?.center ?: tState.targetCardBounds?.center
-                        val srcH = tState.sourceRowBounds?.height?.takeIf { it > 0f }
-                        val dstH = tState.targetRowBounds?.height?.takeIf { it > 0f }
+                    var ty = (1f - m.p) * 24.dp.toPx()
+                    if (m.shareActive && shareTransition != null) {
+                        val vp = shareTransition.sourceViewportBounds
+                        val srcCenter = shareTransition.sourceRowBounds?.center ?: vp?.center
+                        val dstCenter = shareTransition.targetRowBounds?.center ?: shareTransition.targetCardBounds?.center
+                        val srcH = shareTransition.sourceRowBounds?.height?.takeIf { it > 0f }
+                        val dstH = shareTransition.targetRowBounds?.height?.takeIf { it > 0f }
                         val endScale = if (srcH != null && dstH != null) (dstH / srcH).coerceIn(.48f, .88f) else .62f
-                        val scale = 1f + (endScale - 1f) * shareP
+                        val scale = 1f + (endScale - 1f) * m.shareP
                         if (vp != null && vp.width > 0f && vp.height > 0f && srcCenter != null) {
                             transformOrigin = TransformOrigin(
                                 ((srcCenter.x - vp.left) / vp.width).coerceIn(0f, 1f),
@@ -1364,332 +1836,437 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                         scaleX = scale
                         scaleY = scale
                         if (srcCenter != null && dstCenter != null) {
-                            tx += (dstCenter.x - srcCenter.x) * shareP
-                            ty += (dstCenter.y - srcCenter.y) * shareP
+                            tx += (dstCenter.x - srcCenter.x) * m.shareP
+                            ty += (dstCenter.y - srcCenter.y) * m.shareP
                         }
                     }
                     translationX = tx
                     translationY = ty
                 }
-                .blur(((1f - alpha) * 14f + (1f - p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp)) {
-                if (model.lyrics.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(if (model.lyricsLoading) tr("lyrics_loading", "正在获取歌词…") else tr("lyrics_empty", "暂无歌词"), color = lyricInk.copy(alpha = .55f), fontSize = 20.sp)
-                } else AndroidView(factory = { PlayerLyricView(it) }, update = {
-                    val lyricTilt = if (appearance.spatialLyrics) {
-                        scaleSpatialParallaxTilt(spatialTilt, appearance.spatialLyricsSensitivity)
-                    } else {
-                        Offset.Zero
-                    }
-                    it.lyricTheme(appearance.lyricTheme)
-                    it.tokyoLandmark(appearance.tokyoSceneLandmark)
-                    it.spatialLyrics(appearance.spatialLyrics)
-                    it.spatialTilt(lyricTilt.x, lyricTilt.y)
-                    it.inkColor(lyricInk.toArgb())
-                    it.submit(
-                        lines = model.lyrics,
-                        translation = model.showTranslation,
-                        pronunciation = model.showPronunciation,
-                        textScale = effectiveLyricScale,
-                        horizontalPaddingDp = lyricHorizontalPadDp,
+                .blur(((1f - m.alpha) * 14f + (1f - m.p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp),
+        ) {
+            if (model.lyrics.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        if (model.lyricsLoading) tr("lyrics_loading", "正在获取歌词…") else tr("lyrics_empty", "暂无歌词"),
+                        color = lyricInk.copy(alpha = .55f),
+                        fontSize = 20.sp,
                     )
-                    it.position(model.position, model.playing)
-                    it.onSeek = model::seekTo
-                    it.onLongPress = { index -> openSharePage(index, it.rowBoundsInWindow(index)?.toComposeRect(), it.viewportBoundsInWindow().toComposeRect()) }
-                    it.keepScreenOn = appearance.keepLyricsAwake && active && lyricsOpen
-                }, modifier = Modifier.fillMaxSize())
-            }
-        }
-        val metadataSize = if (squareCardFullscreen && !landscape) 1f - .12f * e * (1f - p) else 1f
-        val measuredTextHeight = with(density) { if (textHeight > 0) textHeight.toDp() else (46.sp * metadataSize).toDp() }
-        val miniTextX = 66.dp * miniScale
-        val miniTextWidth = (miniWidth - miniTextX - miniControlClearance).coerceAtLeast(24.dp)
-        val miniTextY = (miniHeight - measuredTextHeight * .7f * miniScale) / 2
-        val coverThemeDockLayout = if (usesStageDock) {
-            resolveCoverThemeDockLayout(
-                isLandscape = landscapeGeom != null,
-                dockCompact = coverflowMetrics?.dockCompact ?: tiledWallMetrics?.dockCompact ?: false,
-                showCardContainer = false,
-                glowProgress = appearance.glowProgress,
-                hasExpressive = expressive != null,
-                hasOneUi = oneUi != null,
-                playing = model.playbackRequested,
-            )
-        } else {
-            null
-        }
-        val compactTargetTextScale = 1f - (if (landscapeGeom != null) .14f else .22f)
-        val dockMetaScale = coverThemeDockLayout?.let { it.titleSizeSp / 20f }
-        val expandedTextScale = dockMetaScale?.let { it + (compactTargetTextScale - it) * p }
-            ?: (1f - (if (landscapeGeom != null) .14f else .22f) * p)
-        val textScale = .7f * miniScale + (expandedTextScale - .7f * miniScale) * e
-        val dockHorizontalMargin = coverflowMetrics?.dockHorizontalMargin ?: tiledWallMetrics?.dockHorizontalMargin ?: 0.dp
-        val dockBottomPadding = coverflowMetrics?.dockBottomPadding ?: tiledWallMetrics?.dockBottomPadding ?: 0.dp
-        val dockIncludeVolume = coverflowMetrics?.includeVolumeInDock ?: tiledWallMetrics?.includeVolumeInDock ?: false
-        val dockMetaX = if (coverThemeDockLayout != null) {
-            effectiveLeftInset + dockHorizontalMargin + coverThemeDockLayout.horizontalPad
-        } else {
-            0.dp
-        }
-        val dockMetaH = if (coverThemeDockLayout != null) measuredTextHeight * (dockMetaScale ?: 1f) else 0.dp
-        val dockMetaY = if (coverThemeDockLayout != null) {
-            val dockBottom = h - effectiveBottomInset - dockBottomPadding
-            if (landscapeGeom != null) {
-                val row2H = maxOf(dockMetaH, coverThemeDockLayout.transportHeight)
-                dockBottom - coverThemeDockLayout.verticalPad - row2H + (row2H - dockMetaH) / 2f
+                }
             } else {
-                val progressH = coverThemeDockLayout.sliderHeight + maxOf(coverThemeDockLayout.footerHeight, 24.dp)
-                val volumeHAndGap = if (dockIncludeVolume) coverThemeDockLayout.itemGap + coverThemeDockLayout.volumeHeight else 0.dp
-                dockBottom -
-                    coverThemeDockLayout.verticalPad -
-                    coverThemeDockLayout.actionHeight -
-                    coverThemeDockLayout.itemGap -
-                    volumeHAndGap -
-                    coverThemeDockLayout.transportHeight -
-                    coverThemeDockLayout.itemGap -
-                    progressH -
-                    coverThemeDockLayout.itemGap -
-                    dockMetaH
-            }
-        } else {
-            0.dp
-        }
-        val dockMetaRowW = if (coverThemeDockLayout != null) {
-            val dockInnerW = (w - effectiveLeftInset - effectiveRightInset - dockHorizontalMargin * 2 - coverThemeDockLayout.horizontalPad * 2)
-                .coerceAtLeast(24.dp)
-            if (landscapeGeom != null) {
-                (dockInnerW - coverThemeDockLayout.transportWidth - coverThemeDockLayout.landscapeMetaRowGap).coerceAtLeast(24.dp)
-            } else {
-                dockInnerW
-            }
-        } else {
-            0.dp
-        }
-        val dockMetaW = if (coverThemeDockLayout != null) {
-            val cubeReserve = if (hasCubeOnTitleRow) buttonSize + cubeGap else 0.dp
-            (dockMetaRowW - cubeReserve).coerceAtLeast(24.dp)
-        } else {
-            0.dp
-        }
-        val fullTextX = if (landscapeGeom != null) {
-            val normalMetaX = if (coverThemeDockLayout != null) dockMetaX else landscapeGeom.rightPaneX
-            val compactMetaX = landscapeGeom.lyricsCompactCoverX + landscapeGeom.lyricsCompactCoverSize + 12.dp
-            lerp(normalMetaX, compactMetaX, p)
-        } else {
-            val compactTextX = smallX + small + 12.dp * PlayerPaddingScale
-            val expandedTextX = when {
-                coverThemeDockLayout != null -> dockMetaX
-                squareCardFullscreen -> fullCard.left + 16.dp
-                else -> portraitColX
-            }
-            expandedTextX + (compactTextX - expandedTextX) * p
-        }
-        val fullTextY = if (landscapeGeom != null) {
-            val normalMetaY = if (coverThemeDockLayout != null) dockMetaY else landscapeGeom.controlStackTop
-            val compactMetaY = landscapeGeom.lyricsCompactCoverY + (landscapeGeom.lyricsCompactCoverSize - measuredTextHeight * .86f) / 2
-            lerp(normalMetaY, compactMetaY, p)
-        } else {
-            val compactTextY = smallY + (small - measuredTextHeight * .78f) / 2
-            val expandedTextY = if (coverThemeDockLayout != null) dockMetaY else titleY
-            expandedTextY + (compactTextY - expandedTextY) * p
-        }
-        val fullTextWidth = if (landscapeGeom != null) {
-            val cubeReserve = if (hasCubeOnTitleRow) buttonSize + cubeGap else 0.dp
-            val normalMetaW = if (coverThemeDockLayout != null) {
-                dockMetaW
-            } else {
-                (landscapeGeom.rightPaneWidth - 52.dp - cubeReserve).coerceAtLeast(24.dp)
-            }
-            val compactMetaW = (landscapeGeom.leftPaneWidth - landscapeGeom.lyricsCompactCoverSize - 12.dp - 48.dp).coerceAtLeast(24.dp)
-            lerp(normalMetaW, compactMetaW, p)
-        } else {
-            val compactTextX = smallX + small + 12.dp * PlayerPaddingScale
-            val cubeReserve = if (hasCubeOnTitleRow) buttonSize + cubeGap else 0.dp
-            val expandedTextWidth = when {
-                coverThemeDockLayout != null -> dockMetaW
-                squareCardFullscreen -> (fullCard.width - 84.dp - cubeReserve).coerceAtLeast(24.dp)
-                immGeom != null -> (portraitColW - buttonSize - 8.dp - cubeReserve).coerceAtLeast(24.dp)
-                else -> (portraitColW - cubeReserve).coerceAtLeast(24.dp)
-            }
-            expandedTextWidth + ((w - compactTextX - 68.dp).coerceAtLeast(24.dp) - expandedTextWidth) * p
-        }
-        val textWidth = (miniTextWidth + (fullTextWidth - miniTextWidth) * e) / textScale
-        val textColor = lerp(miniColor, lyricInk, e)
-        val baseArtistColor = oneUi?.subText ?: expressive?.secondaryInk ?: Color.White.copy(alpha = .8f)
-        val artistColor = lerp(miniColor.copy(alpha = .8f), if (lyricChromeBlend > 0f) lerp(baseArtistColor, lyricSubInk, lyricChromeBlend) else baseArtistColor, e)
-        val mixProgress = mixVisual?.progress?.coerceIn(0f, 1f)
-        val mixFromAlpha = mixProgress?.let { (1f - it).coerceIn(0f, 1f) } ?: 0f
-        val mixToAlpha = mixProgress?.coerceIn(0f, 1f) ?: 0f
-        val sharedMetaVis = if (usesStageDock) coverflowSharedVis else 1f
-        val landscapeMetaChrome = (if (landscapeGeom != null) 1f - e * p * (1f - controlsVisibility) else 1f) * sharedMetaVis
-        Box(Modifier.offset(lerp(miniTextX, fullTextX, e), miniTextY + (fullTextY - miniTextY) * e)
-            .width(textWidth).height(measuredTextHeight).graphicsLayer {
-                translationX = miniShift
-                this.alpha = miniAlpha * shareChromeAlpha * landscapeMetaChrome * tiledChromeVis.value
-            }.blur(shareChromeBlur + if (landscapeGeom != null || usesStageDock) ((1f - landscapeMetaChrome) * (if (coverflowActive) 6f else 14f)).dp else 0.dp)) {
-            Column(Modifier.fillMaxSize()
-                .width(textWidth).onSizeChanged { textHeight = it.height }.graphicsLayer {
-                    transformOrigin = TransformOrigin(0f, 0f); scaleX = textScale; scaleY = textScale
-                    this.alpha = miniAlpha * if (mixVisual == null) 1f else mixFromAlpha
-                }
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !shareActive && !tiledWallDragging && landscapeMetaChrome > 0.1f && (!usesStageDock || coverflowSharedVis > 0.5f), onClick = sharedClick)) {
-                Text(mixVisual?.fromTitle ?: song.title, color = textColor, fontSize = 20.sp * metadataSize, lineHeight = 25.sp * metadataSize,
-                    fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(mixVisual?.fromArtist ?: song.artist, color = artistColor, fontSize = 16.sp * metadataSize, lineHeight = 21.sp * metadataSize,
-                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            if (mixVisual != null) Column(Modifier.fillMaxSize().graphicsLayer {
-                transformOrigin = TransformOrigin(0f, 0f); scaleX = textScale; scaleY = textScale
-                this.alpha = miniAlpha * mixToAlpha
-            }) {
-                Text(mixVisual.toTitle, color = textColor, fontSize = 20.sp * metadataSize, lineHeight = 25.sp * metadataSize,
-                    fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(mixVisual.toArtist, color = artistColor, fontSize = 16.sp * metadataSize, lineHeight = 21.sp * metadataSize,
-                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            /* Keep the normal click target over the two metadata layers. */
-            Box(Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !shareActive && !tiledWallDragging && landscapeMetaChrome > 0.1f && (!usesStageDock || coverflowSharedVis > 0.5f), onClick = sharedClick))
-        }
-
-        // Action buttons live outside the content's blur layer so glass/blur remains sharp.
-        if (alpha > 0f) {
-            val compactX = w - (if (compactWindow) normalMargin + buttonSize else 68.dp)
-            val compactY = smallY + (small - buttonSize) / 2
-            val moreX: Dp
-            val moreY: Dp
-            if (landscapeGeom != null) {
-                val normalMoreX = if (coverflowActive) {
-                    w - effectiveRightInset - 20.dp - buttonSize
-                } else {
-                    landscapeGeom.rightPaneX + landscapeGeom.rightPaneWidth - buttonSize
-                }
-                val compactMoreX = landscapeGeom.leftPaneX + landscapeGeom.leftPaneWidth - buttonSize
-                val normalMoreY = if (coverflowActive) {
-                    coverThemeHeaderTop
-                } else {
-                    landscapeGeom.controlStackTop + (measuredTextHeight - buttonSize) / 2
-                }
-                val compactMoreY = landscapeGeom.lyricsCompactCoverY + (landscapeGeom.lyricsCompactCoverSize - buttonSize) / 2
-                moreX = lerp(normalMoreX, compactMoreX, p)
-                moreY = lerp(normalMoreY, compactMoreY, p)
-            } else {
-                val useRightCornerAnchor = squareCardFullscreen || compactWindow || coverSize < w * .66f
-                val bigX = if (coverflowActive) {
-                    w - effectiveRightInset - 20.dp - buttonSize
-                } else if (squareCardFullscreen) {
-                    fullCard.left + fullCard.width - 16.dp - buttonSize
-                } else if (immGeom != null) {
-                    portraitColX + portraitColW - buttonSize
-                } else if (useRightCornerAnchor) {
-                    maxOf(w / 2 + 52.dp, w - normalMargin - buttonSize).coerceAtMost(w - buttonSize - 6.dp)
-                } else {
-                    coverX + coverSize - buttonSize
-                }
-                val bigY = if (coverflowActive) {
-                    coverThemeHeaderTop
-                } else if (squareCardFullscreen || immGeom != null) {
-                    titleY + (measuredTextHeight - buttonSize) / 2
-                } else {
-                    effectiveStatus + (if (compactWindow) 2.dp else 8.dp)
-                }
-                moreX = bigX + (compactX - bigX) * p
-                moreY = bigY + (compactY - bigY) * p
-            }
-            val cubeModeVis = (1f - (p / 0.72f).coerceIn(0f, 1f))
-            val cubeRevealVis = if (usesStageDock) stageRevealAlpha else 1f
-            val cubeCombinedVis = cubeModeVis * cubeRevealVis
-            if (hasCubeOnTitleRow && cubeCombinedVis > 0.001f) {
-                val cubeX: Dp
-                val cubeY: Dp
-                if (coverThemeDockLayout != null) {
-                    cubeX = dockMetaX + dockMetaRowW - buttonSize
-                    cubeY = dockMetaY + (dockMetaH - buttonSize) / 2f
-                } else if (landscapeGeom != null) {
-                    cubeX = landscapeGeom.rightPaneX + landscapeGeom.rightPaneWidth - buttonSize * 2 - cubeGap
-                    cubeY = landscapeGeom.controlStackTop + (measuredTextHeight - buttonSize) / 2
-                } else if (squareCardFullscreen) {
-                    cubeX = fullCard.left + fullCard.width - 16.dp - buttonSize * 2 - cubeGap
-                    cubeY = titleY + (measuredTextHeight - buttonSize) / 2
-                } else if (immGeom != null) {
-                    cubeX = portraitColX + portraitColW - buttonSize * 2 - cubeGap
-                    cubeY = titleY + (measuredTextHeight - buttonSize) / 2
-                } else {
-                    cubeX = portraitColX + portraitColW - buttonSize
-                    cubeY = titleY + (measuredTextHeight - buttonSize) / 2
-                }
-                val cubeBlur = ((1f - cubeCombinedVis) * 14f).dp + shareChromeBlur
-                val cubeGenerating = spatialCoverState is SpatialCoverResolveState.Generating
-                PlayerSpatialCubeButton(
-                    active = spatialCoverRequested,
-                    generating = cubeGenerating,
-                    expressive = expressive,
-                    oneUi = oneUi,
-                    miuixBackdrop = miuixBackdrop,
-                    menuTint = menuTint,
-                    inkColor = activeInk,
-                    enabled = !shareActive && !tiledWallDragging && cubeCombinedVis > 0.1f,
-                    onClick = onToggleSpatialCover,
-                    modifier = Modifier
-                        .offset(cubeX, cubeY)
-                        .size(buttonSize)
-                        .graphicsLayer {
-                            val visScale = cubeCombinedVis * tiledChromeVis.value
-                            this.alpha = alpha * shareChromeAlpha * visScale
-                            scaleX = 0.84f + 0.16f * visScale
-                            scaleY = scaleX
+                AndroidView(
+                    factory = { PlayerLyricView(it) },
+                    update = {
+                        val lyricTilt = if (appearance.spatialLyrics) {
+                            scaleSpatialParallaxTilt(spatialTilt, appearance.spatialLyricsSensitivity)
+                        } else {
+                            Offset.Zero
                         }
-                        .blur(cubeBlur, BlurredEdgeTreatment.Unbounded),
-                )
-            }
-            val moreVis = if (landscapeGeom != null) (1f - p * (1f - controlsVisibility)) else 1f
-            if (moreVis > 0.001f) {
-                PlayerMoreActionButton(
-                    expressive = expressive,
-                    oneUi = oneUi,
-                    miuixBackdrop = miuixBackdrop,
-                    menuTint = menuTint,
-                    enabled = !shareActive && !tiledWallDragging && moreVis > 0.1f,
-                    onMore = onMore,
-                    modifier = Modifier
-                        .offset(moreX, moreY)
-                        .size(buttonSize)
-                        .graphicsLayer {
-                            this.alpha = alpha * shareChromeAlpha * moreVis * tiledChromeVis.value
-                            scaleX = 1f - .08f * p
-                            scaleY = scaleX
-                        }
-                        .blur(shareChromeBlur + if (landscapeGeom != null) ((1f - moreVis) * 14f).dp else 0.dp),
+                        it.lyricTheme(appearance.lyricTheme)
+                        it.tokyoLandmark(appearance.tokyoSceneLandmark)
+                        it.spatialLyrics(appearance.spatialLyrics)
+                        it.spatialTilt(lyricTilt.x, lyricTilt.y)
+                        it.inkColor(lyricInk.toArgb())
+                        it.submit(
+                            lines = model.lyrics,
+                            translation = model.showTranslation,
+                            pronunciation = model.showPronunciation,
+                            textScale = mainLyricScale,
+                            horizontalPaddingDp = lyricHorizontalPadDp,
+                            bgTextScale = bgLyricScale,
+                        )
+                        it.position(model.position, model.playing)
+                        it.onSeek = model::seekTo
+                        it.onLongPress = { index -> openSharePage(index, it.rowBoundsInWindow(index)?.toComposeRect(), it.viewportBoundsInWindow().toComposeRect()) }
+                        it.keepScreenOn = appearance.keepLyricsAwake && active && lyricsOpen
+                    },
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }
+    }
+}
 
-        if (alpha > 0f && p > 0f && queueBlend < .01f && controlsVisibility > .001f) {
-            val menuAnchorX = if (landscapeGeom != null) {
-                landscapeGeom.rightPaneX
-            } else if (squareCardFullscreen) {
-                margin
-            } else {
-                coverX
+@Composable
+private fun FullPlayerMetadataAndActionsLayer(
+    m: FullPlayerMetrics,
+    model: AuraViewModel,
+    song: btm.m.auraplayer.data.Song,
+    appearance: NowPlayingConfig,
+    expressive: PlayerExpressiveColors?,
+    oneUi: PlayerOneUiColors?,
+    miuixBackdrop: top.yukonga.miuix.kmp.blur.Backdrop,
+    menuTint: Color,
+    miniColor: Color,
+    mixVisual: btm.m.auraplayer.auramix.AuraMixVisualTransition?,
+    spatialCoverRequested: Boolean,
+    spatialCoverState: SpatialCoverResolveState,
+    tiledChromeAlpha: Float,
+    tiledWallDragging: Boolean,
+    textHeight: Int,
+    onTextHeightChange: (Int) -> Unit,
+    queueBlend: Float,
+    onToggleSpatialCover: () -> Unit,
+    onMore: () -> Unit,
+    onLyricMenuExpanded: (Boolean) -> Unit,
+) {
+    val landscapeGeom = m.landscapeGeom
+    val immGeom = m.immGeom
+    val metadataSize = if (m.squareCardFullscreen && !m.landscape) 1f - .12f * m.e * (1f - m.p) else 1f
+    val measuredTextHeight = with(m.density) { if (textHeight > 0) textHeight.toDp() else (46.sp * metadataSize).toDp() }
+    val miniTextX = 66.dp * m.miniScale
+    val miniTextWidth = (m.miniWidth - miniTextX - m.miniControlClearance).coerceAtLeast(24.dp)
+    val miniTextY = (m.miniHeight - measuredTextHeight * .7f * m.miniScale) / 2
+    val coverThemeDockLayout = if (m.usesStageDock) {
+        resolveCoverThemeDockLayout(
+            isLandscape = landscapeGeom != null,
+            dockCompact = m.coverflowMetrics?.dockCompact ?: m.tiledWallMetrics?.dockCompact ?: false,
+            showCardContainer = false,
+            glowProgress = appearance.glowProgress,
+            hasExpressive = expressive != null,
+            hasOneUi = oneUi != null,
+            playing = model.playbackRequested,
+        )
+    } else {
+        null
+    }
+    val compactTargetTextScale = 1f - (if (landscapeGeom != null) .14f else .22f)
+    val dockMetaScale = coverThemeDockLayout?.let { it.titleSizeSp / 20f }
+    val expandedTextScale = dockMetaScale?.let { it + (compactTargetTextScale - it) * m.p }
+        ?: (1f - (if (landscapeGeom != null) .14f else .22f) * m.p)
+    val textScale = .7f * m.miniScale + (expandedTextScale - .7f * m.miniScale) * m.e
+    val dockHorizontalMargin = m.coverflowMetrics?.dockHorizontalMargin ?: m.tiledWallMetrics?.dockHorizontalMargin ?: 0.dp
+    val dockBottomPadding = m.coverflowMetrics?.dockBottomPadding ?: m.tiledWallMetrics?.dockBottomPadding ?: 0.dp
+    val dockIncludeVolume = m.coverflowMetrics?.includeVolumeInDock ?: m.tiledWallMetrics?.includeVolumeInDock ?: false
+    val dockMetaX = if (coverThemeDockLayout != null) {
+        m.effectiveLeftInset + dockHorizontalMargin + coverThemeDockLayout.horizontalPad
+    } else {
+        0.dp
+    }
+    val dockMetaH = if (coverThemeDockLayout != null) measuredTextHeight * (dockMetaScale ?: 1f) else 0.dp
+    val dockMetaY = if (coverThemeDockLayout != null) {
+        val dockBottom = m.h - m.effectiveBottomInset - dockBottomPadding
+        if (landscapeGeom != null) {
+            val row2H = maxOf(dockMetaH, coverThemeDockLayout.transportHeight)
+            dockBottom - coverThemeDockLayout.verticalPad - row2H + (row2H - dockMetaH) / 2f
+        } else {
+            val progressH = coverThemeDockLayout.sliderHeight + maxOf(coverThemeDockLayout.footerHeight, 24.dp)
+            val volumeHAndGap = if (dockIncludeVolume) coverThemeDockLayout.itemGap + coverThemeDockLayout.volumeHeight else 0.dp
+            dockBottom -
+                coverThemeDockLayout.verticalPad -
+                coverThemeDockLayout.actionHeight -
+                coverThemeDockLayout.itemGap -
+                volumeHAndGap -
+                coverThemeDockLayout.transportHeight -
+                coverThemeDockLayout.itemGap -
+                progressH -
+                coverThemeDockLayout.itemGap -
+                dockMetaH
+        }
+    } else {
+        0.dp
+    }
+    val dockMetaRowW = if (coverThemeDockLayout != null) {
+        val dockInnerW = (m.w - m.effectiveLeftInset - m.effectiveRightInset - dockHorizontalMargin * 2 - coverThemeDockLayout.horizontalPad * 2)
+            .coerceAtLeast(24.dp)
+        if (landscapeGeom != null) {
+            (dockInnerW - coverThemeDockLayout.transportWidth - coverThemeDockLayout.landscapeMetaRowGap).coerceAtLeast(24.dp)
+        } else {
+            dockInnerW
+        }
+    } else {
+        0.dp
+    }
+    val dockMetaW = if (coverThemeDockLayout != null) {
+        val cubeReserve = if (m.hasCubeOnTitleRow) m.buttonSize + m.cubeGap else 0.dp
+        (dockMetaRowW - cubeReserve).coerceAtLeast(24.dp)
+    } else {
+        0.dp
+    }
+    val fullTextX = if (landscapeGeom != null) {
+        val normalMetaX = if (coverThemeDockLayout != null) dockMetaX else landscapeGeom.rightPaneX
+        val compactMetaX = landscapeGeom.lyricsCompactCoverX + landscapeGeom.lyricsCompactCoverSize + 12.dp
+        lerp(normalMetaX, compactMetaX, m.p)
+    } else {
+        val compactTextX = m.smallX + m.small + 12.dp * PlayerPaddingScale
+        val expandedTextX = when {
+            coverThemeDockLayout != null -> dockMetaX
+            m.squareCardFullscreen -> m.fullCard.left + 16.dp
+            else -> m.portraitColX
+        }
+        expandedTextX + (compactTextX - expandedTextX) * m.p
+    }
+    val fullTextY = if (landscapeGeom != null) {
+        val normalMetaY = if (coverThemeDockLayout != null) dockMetaY else landscapeGeom.controlStackTop
+        val compactMetaY = landscapeGeom.lyricsCompactCoverY + (landscapeGeom.lyricsCompactCoverSize - measuredTextHeight * .86f) / 2
+        lerp(normalMetaY, compactMetaY, m.p)
+    } else {
+        val compactTextY = m.smallY + (m.small - measuredTextHeight * .78f) / 2
+        val expandedTextY = if (coverThemeDockLayout != null) dockMetaY else m.titleY
+        expandedTextY + (compactTextY - expandedTextY) * m.p
+    }
+    val fullTextWidth = if (landscapeGeom != null) {
+        val cubeReserve = if (m.hasCubeOnTitleRow) m.buttonSize + m.cubeGap else 0.dp
+        val normalMetaW = if (coverThemeDockLayout != null) {
+            dockMetaW
+        } else {
+            (landscapeGeom.rightPaneWidth - 52.dp - cubeReserve).coerceAtLeast(24.dp)
+        }
+        val compactMetaW = (landscapeGeom.leftPaneWidth - landscapeGeom.lyricsCompactCoverSize - 12.dp - 48.dp).coerceAtLeast(24.dp)
+        lerp(normalMetaW, compactMetaW, m.p)
+    } else {
+        val compactTextX = m.smallX + m.small + 12.dp * PlayerPaddingScale
+        val cubeReserve = if (m.hasCubeOnTitleRow) m.buttonSize + m.cubeGap else 0.dp
+        val expandedTextWidth = when {
+            coverThemeDockLayout != null -> dockMetaW
+            m.squareCardFullscreen -> (m.fullCard.width - 84.dp - cubeReserve).coerceAtLeast(24.dp)
+            immGeom != null -> (m.portraitColW - m.buttonSize - 8.dp - cubeReserve).coerceAtLeast(24.dp)
+            else -> (m.portraitColW - cubeReserve).coerceAtLeast(24.dp)
+        }
+        expandedTextWidth + ((m.w - compactTextX - 68.dp).coerceAtLeast(24.dp) - expandedTextWidth) * m.p
+    }
+    val textWidth = (miniTextWidth + (fullTextWidth - miniTextWidth) * m.e) / textScale
+    val textColor = lerp(miniColor, m.lyricInk, m.e)
+    val baseArtistColor = oneUi?.subText ?: expressive?.secondaryInk ?: Color.White.copy(alpha = .8f)
+    val artistColor = lerp(
+        miniColor.copy(alpha = .8f),
+        if (m.lyricChromeBlend > 0f) lerp(baseArtistColor, m.lyricSubInk, m.lyricChromeBlend) else baseArtistColor,
+        m.e,
+    )
+    val mixProgress = mixVisual?.progress?.coerceIn(0f, 1f)
+    val mixFromAlpha = mixProgress?.let { (1f - it).coerceIn(0f, 1f) } ?: 0f
+    val mixToAlpha = mixProgress?.coerceIn(0f, 1f) ?: 0f
+    val sharedMetaVis = if (m.usesStageDock) m.coverflowSharedVis else 1f
+    val landscapeMetaChrome = (if (landscapeGeom != null) 1f - m.e * m.p * (1f - m.controlsVisibility) else 1f) * sharedMetaVis
+    Box(
+        Modifier
+            .offset(lerp(miniTextX, fullTextX, m.e), miniTextY + (fullTextY - miniTextY) * m.e)
+            .width(textWidth)
+            .height(measuredTextHeight)
+            .graphicsLayer {
+                translationX = m.miniShift
+                this.alpha = m.miniAlpha * m.shareChromeAlpha * landscapeMetaChrome * tiledChromeAlpha
             }
-            val menuAnchorY = if (landscapeGeom != null) {
-                landscapeGeom.usableBottom - 46.dp
-            } else {
-                seekY - 50.dp
-            }
-            val menuMaxTop = if (landscapeGeom != null) landscapeGeom.usableTop else effectiveStatus + 8.dp
-            LyricOptionsMenu(
-                model,
-                miuixBackdrop,
-                menuTint,
-                menuAnchorX,
-                menuAnchorY,
-                w,
-                menuMaxTop,
-                Modifier.graphicsLayer { this.alpha = alpha * p * controlsVisibility * shareChromeAlpha }
-                    .blur(((1f - p + 1f - controlsVisibility) * 14f).dp + shareChromeBlur),
-                onLyricMenuExpanded,
+            .blur(m.shareChromeBlur + if (landscapeGeom != null || m.usesStageDock) ((1f - landscapeMetaChrome) * (if (m.coverflowActive) 6f else 14f)).dp else 0.dp),
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .width(textWidth)
+                .onSizeChanged { onTextHeightChange(it.height) }
+                .graphicsLayer {
+                    transformOrigin = TransformOrigin(0f, 0f)
+                    scaleX = textScale
+                    scaleY = textScale
+                    this.alpha = m.miniAlpha * if (mixVisual == null) 1f else mixFromAlpha
+                }
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    enabled = !m.shareActive && !tiledWallDragging && landscapeMetaChrome > 0.1f && (!m.usesStageDock || m.coverflowSharedVis > 0.5f),
+                    onClick = m.sharedClick,
+                ),
+        ) {
+            Text(
+                mixVisual?.fromTitle ?: song.title,
+                color = textColor,
+                fontSize = 20.sp * metadataSize,
+                lineHeight = 25.sp * metadataSize,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                mixVisual?.fromArtist ?: song.artist,
+                color = artistColor,
+                fontSize = 16.sp * metadataSize,
+                lineHeight = 21.sp * metadataSize,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
+        if (mixVisual != null) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        scaleX = textScale
+                        scaleY = textScale
+                        this.alpha = m.miniAlpha * mixToAlpha
+                    },
+            ) {
+                Text(
+                    mixVisual.toTitle,
+                    color = textColor,
+                    fontSize = 20.sp * metadataSize,
+                    lineHeight = 25.sp * metadataSize,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    mixVisual.toArtist,
+                    color = artistColor,
+                    fontSize = 16.sp * metadataSize,
+                    lineHeight = 21.sp * metadataSize,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    enabled = !m.shareActive && !tiledWallDragging && landscapeMetaChrome > 0.1f && (!m.usesStageDock || m.coverflowSharedVis > 0.5f),
+                    onClick = m.sharedClick,
+                ),
+        )
+    }
 
+    if (m.alpha > 0f) {
+        val compactX = m.w - (if (m.compactWindow) m.normalMargin + m.buttonSize else 68.dp)
+        val compactY = m.smallY + (m.small - m.buttonSize) / 2
+        val moreX: Dp
+        val moreY: Dp
+        if (landscapeGeom != null) {
+            val normalMoreX = if (m.coverflowActive) {
+                m.w - m.effectiveRightInset - 20.dp - m.buttonSize
+            } else {
+                landscapeGeom.rightPaneX + landscapeGeom.rightPaneWidth - m.buttonSize
+            }
+            val compactMoreX = landscapeGeom.leftPaneX + landscapeGeom.leftPaneWidth - m.buttonSize
+            val normalMoreY = if (m.coverflowActive) {
+                m.coverThemeHeaderTop
+            } else {
+                landscapeGeom.controlStackTop + (measuredTextHeight - m.buttonSize) / 2
+            }
+            val compactMoreY = landscapeGeom.lyricsCompactCoverY + (landscapeGeom.lyricsCompactCoverSize - m.buttonSize) / 2
+            moreX = lerp(normalMoreX, compactMoreX, m.p)
+            moreY = lerp(normalMoreY, compactMoreY, m.p)
+        } else {
+            val useRightCornerAnchor = m.squareCardFullscreen || m.compactWindow || m.coverSize < m.w * .66f
+            val bigX = if (m.coverflowActive) {
+                m.w - m.effectiveRightInset - 20.dp - m.buttonSize
+            } else if (m.squareCardFullscreen) {
+                m.fullCard.left + m.fullCard.width - 16.dp - m.buttonSize
+            } else if (immGeom != null) {
+                m.portraitColX + m.portraitColW - m.buttonSize
+            } else if (useRightCornerAnchor) {
+                maxOf(m.w / 2 + 52.dp, m.w - m.normalMargin - m.buttonSize).coerceAtMost(m.w - m.buttonSize - 6.dp)
+            } else {
+                m.coverX + m.coverSize - m.buttonSize
+            }
+            val bigY = if (m.coverflowActive) {
+                m.coverThemeHeaderTop
+            } else if (m.squareCardFullscreen || immGeom != null) {
+                m.titleY + (measuredTextHeight - m.buttonSize) / 2
+            } else {
+                m.effectiveStatus + (if (m.compactWindow) 2.dp else 8.dp)
+            }
+            moreX = bigX + (compactX - bigX) * m.p
+            moreY = bigY + (compactY - bigY) * m.p
+        }
+        val cubeModeVis = (1f - (m.p / 0.72f).coerceIn(0f, 1f))
+        val cubeRevealVis = if (m.usesStageDock) m.stageRevealAlpha else 1f
+        val cubeCombinedVis = cubeModeVis * cubeRevealVis
+        if (m.hasCubeOnTitleRow && cubeCombinedVis > 0.001f) {
+            val cubeX: Dp
+            val cubeY: Dp
+            if (coverThemeDockLayout != null) {
+                cubeX = dockMetaX + dockMetaRowW - m.buttonSize
+                cubeY = dockMetaY + (dockMetaH - m.buttonSize) / 2f
+            } else if (landscapeGeom != null) {
+                cubeX = landscapeGeom.rightPaneX + landscapeGeom.rightPaneWidth - m.buttonSize * 2 - m.cubeGap
+                cubeY = landscapeGeom.controlStackTop + (measuredTextHeight - m.buttonSize) / 2
+            } else if (m.squareCardFullscreen) {
+                cubeX = m.fullCard.left + m.fullCard.width - 16.dp - m.buttonSize * 2 - m.cubeGap
+                cubeY = m.titleY + (measuredTextHeight - m.buttonSize) / 2
+            } else if (immGeom != null) {
+                cubeX = m.portraitColX + m.portraitColW - m.buttonSize * 2 - m.cubeGap
+                cubeY = m.titleY + (measuredTextHeight - m.buttonSize) / 2
+            } else {
+                cubeX = m.portraitColX + m.portraitColW - m.buttonSize
+                cubeY = m.titleY + (measuredTextHeight - m.buttonSize) / 2
+            }
+            val cubeBlur = ((1f - cubeCombinedVis) * 14f).dp + m.shareChromeBlur
+            val cubeGenerating = spatialCoverState is SpatialCoverResolveState.Generating
+            PlayerSpatialCubeButton(
+                active = spatialCoverRequested,
+                generating = cubeGenerating,
+                expressive = expressive,
+                oneUi = oneUi,
+                miuixBackdrop = miuixBackdrop,
+                menuTint = menuTint,
+                inkColor = m.activeInk,
+                enabled = !m.shareActive && !tiledWallDragging && cubeCombinedVis > 0.1f,
+                onClick = onToggleSpatialCover,
+                modifier = Modifier
+                    .offset(cubeX, cubeY)
+                    .size(m.buttonSize)
+                    .graphicsLayer {
+                        val visScale = cubeCombinedVis * tiledChromeAlpha
+                        this.alpha = m.alpha * m.shareChromeAlpha * visScale
+                        scaleX = 0.84f + 0.16f * visScale
+                        scaleY = scaleX
+                    }
+                    .blur(cubeBlur, BlurredEdgeTreatment.Unbounded),
+            )
+        }
+        val moreVis = if (landscapeGeom != null) (1f - m.p * (1f - m.controlsVisibility)) else 1f
+        if (moreVis > 0.001f) {
+            PlayerMoreActionButton(
+                expressive = expressive,
+                oneUi = oneUi,
+                miuixBackdrop = miuixBackdrop,
+                menuTint = menuTint,
+                enabled = !m.shareActive && !tiledWallDragging && moreVis > 0.1f,
+                onMore = onMore,
+                modifier = Modifier
+                    .offset(moreX, moreY)
+                    .size(m.buttonSize)
+                    .graphicsLayer {
+                        this.alpha = m.alpha * m.shareChromeAlpha * moreVis * tiledChromeAlpha
+                        scaleX = 1f - .08f * m.p
+                        scaleY = scaleX
+                    }
+                    .blur(m.shareChromeBlur + if (landscapeGeom != null) ((1f - moreVis) * 14f).dp else 0.dp),
+            )
+        }
+    }
+
+    if (m.alpha > 0f && m.p > 0f && queueBlend < .01f && m.controlsVisibility > .001f) {
+        val menuAnchorX = if (landscapeGeom != null) {
+            landscapeGeom.rightPaneX
+        } else if (m.squareCardFullscreen) {
+            m.margin
+        } else {
+            m.coverX
+        }
+        val menuAnchorY = if (landscapeGeom != null) {
+            landscapeGeom.usableBottom - 46.dp
+        } else {
+            m.seekY - 50.dp
+        }
+        val menuMaxTop = if (landscapeGeom != null) landscapeGeom.usableTop else m.effectiveStatus + 8.dp
+        LyricOptionsMenu(
+            model,
+            miuixBackdrop,
+            menuTint,
+            menuAnchorX,
+            menuAnchorY,
+            m.w,
+            menuMaxTop,
+            Modifier
+                .graphicsLayer { this.alpha = m.alpha * m.p * m.controlsVisibility * m.shareChromeAlpha }
+                .blur(((1f - m.p + 1f - m.controlsVisibility) * 14f).dp + m.shareChromeBlur),
+            onLyricMenuExpanded,
+        )
     }
 }
 

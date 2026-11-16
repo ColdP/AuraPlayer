@@ -40,7 +40,7 @@ class NeteaseApi(
     }
 
     fun requestBlocking(path: String, values: Map<String, String> = emptyMap(), authenticated: Boolean = true): JSONObject {
-        val cacheable = path in setOf("user/playlist", "playlist/track/all", "song/detail", "album", "artist/songs", "artist/detail", "artist/album")
+        val cacheable = path in setOf("user/playlist", "playlist/track/all", "song/detail", "lyric/new", "album", "artist/songs", "artist/detail", "artist/album")
         val key = cacheScope() + "/" + path + "/" + (values["uid"] ?: values["id"]).orEmpty() + "/" +
             values.toSortedMap().entries.joinToString("&") { "${it.key}=${it.value}" }
         if (cacheable) metadataCache?.read(key)?.let { return it }
@@ -381,6 +381,81 @@ class NeteaseApi(
     }
     suspend fun songArtists(id: Long): List<SongArtist> =
         parseSongs(request("song/detail", mapOf("ids" to "$id")).optJSONArray("songs") ?: JSONArray()).firstOrNull()?.artists.orEmpty()
+
+    suspend fun songCredits(songId: Long, fallback: Song? = null): SongCreditsData = withContext(Dispatchers.IO) {
+        kotlinx.coroutines.coroutineScope {
+            val lyricJob = async { request("lyric/new", mapOf("id" to "$songId")) }
+            val detailJob = async {
+                try {
+                    request("song/detail", mapOf("ids" to "$songId"))
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: IOException) {
+                    null
+                }
+            }
+            val lyricJson = lyricJob.await()
+            val detailJson = detailJob.await()
+            val detailSongObj = detailJson?.optJSONArray("songs")?.optJSONObject(0)
+            val detailPublishTime = detailSongObj?.optLong("publishTime", 0L) ?: 0L
+            val albumId = detailSongObj?.optJSONObject("al")?.optLong("id", 0L)
+                ?: detailSongObj?.optJSONObject("album")?.optLong("id", 0L)
+                ?: fallback?.albumId
+                ?: 0L
+            val albumPublishTime = if (detailPublishTime <= 0L && albumId > 0L) {
+                try {
+                    request("album", mapOf("id" to "$albumId")).optJSONObject("album")?.optLong("publishTime", 0L) ?: 0L
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: IOException) {
+                    0L
+                }
+            } else {
+                0L
+            }
+
+            val base = SongCreditsParser.parse(
+                songId = songId,
+                lyricJson = lyricJson,
+                detailJson = detailJson,
+                fallbackSong = fallback,
+                albumPublishTimeMs = albumPublishTime,
+            )
+
+            val missingAvatarIds = (base.songwriting + base.production)
+                .filter { it.avatarUrl.isBlank() && it.artistId > 0L }
+                .map { it.artistId }
+                .distinct()
+            if (missingAvatarIds.isEmpty()) {
+                return@coroutineScope base
+            }
+            val fetchedAvatars = missingAvatarIds.map { artistId ->
+                async {
+                    artistId to try {
+                        artistArtwork(artistId).replaceFirst("http://", "https://")
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (_: IOException) {
+                        ""
+                    }
+                }
+            }.awaitAll().toMap()
+
+            fun hydrate(list: List<SongCreditPerson>): List<SongCreditPerson> = list.map { person ->
+                if (person.avatarUrl.isBlank() && person.artistId > 0L) {
+                    val resolved = fetchedAvatars[person.artistId].orEmpty()
+                    if (resolved.isNotBlank()) person.copy(avatarUrl = resolved) else person
+                } else {
+                    person
+                }
+            }
+
+            base.copy(
+                songwriting = hydrate(base.songwriting),
+                production = hydrate(base.production),
+            )
+        }
+    }
     private suspend fun optionalArtistAlbums(id: Long): List<CatalogAlbum> = try {
         val response = request("artist/album", mapOf("id" to "$id", "offset" to "0", "limit" to "12"))
         val albums = response.optJSONArray("hotAlbums") ?: JSONArray()

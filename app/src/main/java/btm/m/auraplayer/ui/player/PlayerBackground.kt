@@ -13,7 +13,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
+import btm.m.auraplayer.data.LocalAudioArtwork
+import coil3.Image
+import coil3.ImageLoader
 import coil3.SingletonImageLoader
+import coil3.memory.MemoryCache
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.request.allowHardware
@@ -28,8 +32,86 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.*
 
+private const val DEFAULT_ARTWORK_SEED = 0xFF6750A4.toInt()
+private const val ARTWORK_SEED_CACHE_LIMIT = 512
+private const val ALBUM_SEED_CACHE_LIMIT = 256
+private val artworkSeedCache = LinkedHashMap<String, Int>(64, 0.75f, true)
+private val albumArtSeedCache = LinkedHashMap<String, Int>(64, 0.75f, true)
+
+internal data class CachedArtworkMemoryEntry(
+    val key: MemoryCache.Key,
+    val image: Image,
+    val exactUriMatch: Boolean,
+)
+
+internal fun findCachedArtworkMemoryEntry(
+    imageLoader: ImageLoader,
+    artwork: String,
+    requireSoftwareBitmap: Boolean = false,
+): CachedArtworkMemoryEntry? {
+    if (artwork.isBlank()) return null
+    val cache = imageLoader.memoryCache ?: return null
+    val targetAlbumArt = LocalAudioArtwork.parse(artwork)?.albumArtUri?.takeIf { it.isNotBlank() }
+    var bestExact: CachedArtworkMemoryEntry? = null
+    var bestExactArea = -1
+    var bestAlbum: CachedArtworkMemoryEntry? = null
+    var bestAlbumArea = -1
+    for (key in cache.keys) {
+        val keyUri = key.key
+        val exact = keyUri == artwork
+        val albumMatch = !exact && targetAlbumArt != null &&
+            LocalAudioArtwork.parse(keyUri)?.albumArtUri == targetAlbumArt
+        if (!exact && !albumMatch) continue
+        val image = cache[key]?.image ?: continue
+        if (requireSoftwareBitmap) {
+            val bitmap = runCatching { image.toBitmap() }.getOrNull() ?: continue
+            if (bitmap.config == Bitmap.Config.HARDWARE) continue
+        }
+        val area = image.width * image.height
+        if (exact) {
+            if (area > bestExactArea) {
+                bestExactArea = area
+                bestExact = CachedArtworkMemoryEntry(key, image, exactUriMatch = true)
+            }
+        } else if (area > bestAlbumArea) {
+            bestAlbumArea = area
+            bestAlbum = CachedArtworkMemoryEntry(key, image, exactUriMatch = false)
+        }
+    }
+    return bestExact ?: bestAlbum
+}
+
+private fun cachedInitialArtworkSeed(artwork: String): Int? {
+    if (artwork.isBlank()) return DEFAULT_ARTWORK_SEED
+    synchronized(artworkSeedCache) {
+        artworkSeedCache[artwork]?.let { return it }
+    }
+    val albumArt = LocalAudioArtwork.parse(artwork)?.albumArtUri?.takeIf { it.isNotBlank() } ?: return null
+    return synchronized(albumArtSeedCache) { albumArtSeedCache[albumArt] }
+}
+
+private fun recordArtworkSeed(artwork: String, seed: Int) {
+    if (artwork.isBlank()) return
+    synchronized(artworkSeedCache) {
+        artworkSeedCache[artwork] = seed
+        while (artworkSeedCache.size > ARTWORK_SEED_CACHE_LIMIT) {
+            val first = artworkSeedCache.entries.firstOrNull()?.key ?: break
+            artworkSeedCache.remove(first)
+        }
+    }
+    LocalAudioArtwork.parse(artwork)?.albumArtUri?.takeIf { it.isNotBlank() }?.let { albumArt ->
+        synchronized(albumArtSeedCache) {
+            albumArtSeedCache[albumArt] = seed
+            while (albumArtSeedCache.size > ALBUM_SEED_CACHE_LIMIT) {
+                val first = albumArtSeedCache.entries.firstOrNull()?.key ?: break
+                albumArtSeedCache.remove(first)
+            }
+        }
+    }
+}
+
 private fun coverMonetSeed(bitmap: Bitmap?): Int {
-    val fallback = 0xFF6750A4.toInt()
+    val fallback = DEFAULT_ARTWORK_SEED
     if (bitmap == null) return fallback
     val pixels = ArrayList<Int>(4096)
     for (y in 0 until 64) for (x in 0 until 64) {
@@ -43,13 +125,40 @@ private fun coverMonetSeed(bitmap: Bitmap?): Int {
 @Composable
 internal fun rememberPlayerArtworkSeed(artwork: String): Int {
     val context = LocalContext.current
-    val seed by produceState(0xFF6750A4.toInt(), artwork) {
-        value = withContext(Dispatchers.IO) {
-            val bitmap = if (artwork.isBlank()) null else runCatching {
-                (SingletonImageLoader.get(context).execute(ImageRequest.Builder(context).data(artwork).size(128).allowHardware(false).build()) as? SuccessResult)?.image?.toBitmap()
-            }.getOrNull()
+    val initialSeed = remember(artwork) { cachedInitialArtworkSeed(artwork) }
+    val seed by produceState(initialSeed ?: DEFAULT_ARTWORK_SEED, artwork) {
+        if (artwork.isBlank()) {
+            value = DEFAULT_ARTWORK_SEED
+            return@produceState
+        }
+        synchronized(artworkSeedCache) { artworkSeedCache[artwork] }?.let {
+            value = it
+            return@produceState
+        }
+        val imageLoader = SingletonImageLoader.get(context)
+        val cachedSoftware = findCachedArtworkMemoryEntry(
+            imageLoader = imageLoader,
+            artwork = artwork,
+            requireSoftwareBitmap = true,
+        )
+        val computed = withContext(Dispatchers.IO) {
+            val bitmap = if (cachedSoftware != null && cachedSoftware.exactUriMatch) {
+                runCatching { cachedSoftware.image.toBitmap() }.getOrNull()
+            } else {
+                runCatching {
+                    (imageLoader.execute(
+                        ImageRequest.Builder(context)
+                            .data(artwork)
+                            .size(128)
+                            .allowHardware(false)
+                            .build(),
+                    ) as? SuccessResult)?.image?.toBitmap()
+                }.getOrNull()
+            }
             coverMonetSeed(bitmap)
         }
+        recordArtworkSeed(artwork, computed)
+        value = computed
     }
     return seed
 }

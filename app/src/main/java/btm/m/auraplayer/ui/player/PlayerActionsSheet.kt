@@ -141,7 +141,7 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
                 action(MiuixIcons.Regular.Album, tr("album", "专辑"), song.album, !song.cloud || song.albumId > 0, position = SheetItemPosition.TOP) {
                     openCollectionFromSheet { model.openSongAlbum(song) }
                 }
-                val artistPos = if (!song.cloud) SheetItemPosition.MIDDLE else SheetItemPosition.BOTTOM
+                val artistPos = SheetItemPosition.MIDDLE
                 if (artists.size > 1) {
                     SheetDropdown(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, menuBackdrop,
                         DropdownEntry(artists.map { artist ->
@@ -152,7 +152,18 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
                 } else action(MiuixIcons.Regular.ContactsCircle, tr("artist", "艺术家"), song.artist, !song.cloud || song.artistId > 0, position = artistPos) {
                     openCollectionFromSheet { model.openSongArtist(song) }
                 }
-                if (!song.cloud) {
+                if (song.cloud) {
+                    action(
+                        MiuixIcons.Regular.Merge,
+                        tr("production_team", "制作团队"),
+                        position = SheetItemPosition.BOTTOM,
+                    ) {
+                        model.rememberSongForCredits(song)
+                        dismiss()
+                        closePlayer()
+                        openPage(songCreditsRoute(song))
+                    }
+                } else {
                     action(MiuixIcons.Regular.File, tr("tag_editor", "标签编辑器"), position = SheetItemPosition.MIDDLE) {
                         dismiss(); closePlayer(); openPage(tagEditorRoute(song))
                     }

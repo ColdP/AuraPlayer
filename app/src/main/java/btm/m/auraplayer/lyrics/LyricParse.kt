@@ -1106,4 +1106,25 @@ object LyricParse {
         result.bg = line.bg
         return result
     }
+
+    @JvmStatic
+    fun isTranslatableLine(line: LyricLine): Boolean =
+        line.text.isNotBlank() && translatable(line)
+
+    @JvmStatic
+    fun withLineTranslation(line: LyricLine, translation: String?): LyricLine {
+        val copy = LyricLine(
+            line.text,
+            translation,
+            line.roma,
+            line.start,
+            line.end,
+            line.opposite,
+            line.sylStart,
+            line.sylEnd,
+            line.charEnd,
+        )
+        copy.bg = line.bg
+        return copy
+    }
 }

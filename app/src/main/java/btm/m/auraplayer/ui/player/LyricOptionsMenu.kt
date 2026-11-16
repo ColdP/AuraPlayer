@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.*
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.R
 import btm.m.auraplayer.lyrics.LyricSize
+import btm.m.auraplayer.playback.LyricTranslationSource
 import btm.m.auraplayer.ui.tr
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.Backdrop
@@ -51,9 +52,9 @@ internal fun LyricOptionsMenu(
     val p = progress.value.coerceIn(0f, 1f)
     val buttonSize = 44.dp
     val menuWidth = (minOf(260.dp, (screenWidth - anchorX - 16.dp).coerceAtLeast(buttonSize)) * .9f).coerceAtLeast(buttonSize)
-    // Seven 44dp rows plus the divider and size label fit in this compact surface. Keeping the
-    // cap close to the measured content prevents a large empty tail below “极大”.
-    val menuHeight = minOf(348.dp, (anchorY + buttonSize - topInset).coerceAtLeast(buttonSize))
+    // Seven 44dp rows plus the divider and size label fit in 348dp; expand when dual translation sources appear.
+    val baseMenuHeight = if (model.hasDualTranslationSources) 468.dp else 348.dp
+    val menuHeight = minOf(baseMenuHeight, (anchorY + buttonSize - topInset).coerceAtLeast(buttonSize))
     val width = buttonSize + (menuWidth - buttonSize) * p
     val height = buttonSize + (menuHeight - buttonSize) * p
     val shape = RoundedCornerShape(22.dp + 4.dp * p)
@@ -83,6 +84,22 @@ internal fun LyricOptionsMenu(
                         if (model.showTranslation) tr("hide_translation", "隐藏翻译") else tr("show_translation", "显示翻译"),
                         model.showTranslation, enabled = expanded,
                     ) { model.lyricsOptions(!model.showTranslation, model.showPronunciation) }
+                    if (model.hasDualTranslationSources) {
+                        Box(Modifier.padding(horizontal = 16.dp, vertical = 7.dp).fillMaxWidth()
+                            .height(1.dp).background(Color.White.copy(alpha = .16f)))
+                        Text(tr("translation_source", "翻译来源"), color = Color.White.copy(alpha = .65f), fontSize = 12.sp,
+                            modifier = Modifier.padding(start = 18.dp, bottom = 4.dp))
+                        OptionRow(
+                            tr("translation_source_llm", "大模型翻译"),
+                            model.lyricTranslationSource == LyricTranslationSource.LLM,
+                            enabled = expanded,
+                        ) { model.changeLyricTranslationSource(LyricTranslationSource.LLM) }
+                        OptionRow(
+                            tr("translation_source_network", "网络检索"),
+                            model.lyricTranslationSource == LyricTranslationSource.NETWORK,
+                            enabled = expanded,
+                        ) { model.changeLyricTranslationSource(LyricTranslationSource.NETWORK) }
+                    }
                     Box(Modifier.padding(horizontal = 16.dp, vertical = 7.dp).fillMaxWidth()
                         .height(1.dp).background(Color.White.copy(alpha = .16f)))
                     Text(tr("lyrics_size", "歌词大小"), color = Color.White.copy(alpha = .65f), fontSize = 12.sp,

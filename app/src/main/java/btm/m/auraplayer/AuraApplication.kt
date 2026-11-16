@@ -13,6 +13,7 @@ import okio.Path.Companion.toOkioPath
 class AuraApplication : Application(), SingletonImageLoader.Factory {
     lateinit var nowPlaying: btm.m.auraplayer.playback.NowPlayingSettings; private set
     lateinit var rearScreen: btm.m.auraplayer.rear.RearScreenSettings; private set
+    lateinit var llmTranslation: btm.m.auraplayer.lyrics.LlmTranslationSettings; private set
     lateinit var rearPrivilege: btm.m.auraplayer.rear.RearScreenPrivilegeManager; private set
     lateinit var effects: btm.m.auraplayer.audio.EffectsStore; private set
     lateinit var auraMix: btm.m.auraplayer.auramix.AuraMixSettings; private set
@@ -30,6 +31,7 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         navigationMaterial = btm.m.auraplayer.ui.navigation.NavigationMaterialStore(this)
         nowPlaying = btm.m.auraplayer.playback.NowPlayingSettings(this)
         rearScreen = btm.m.auraplayer.rear.RearScreenSettings(this)
+        llmTranslation = btm.m.auraplayer.lyrics.LlmTranslationSettings(this)
         rearPrivilege = btm.m.auraplayer.rear.RearScreenPrivilegeManager(this)
         effects = btm.m.auraplayer.audio.EffectsStore(this)
         auraMix = btm.m.auraplayer.auramix.AuraMixSettings(this)
