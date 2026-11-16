@@ -113,7 +113,7 @@ internal fun presetSummary(p: DspPreset): String = when (p.id) {
     else -> p.description
 }
 
-@Composable private fun EffectsCard(content: @Composable ColumnScope.() -> Unit) =
+@Composable internal fun EffectsCard(content: @Composable ColumnScope.() -> Unit) =
     SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp), content = content)
 
 @Composable private fun PresetRow(p: DspPreset, selected: Boolean, select: () -> Unit) {
@@ -520,11 +520,12 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
     PresetDraftDialog(store, saving, onDismiss = { saving = false }, onSaved = { saving = false })
 }
 
-@Composable fun AudioPreferencesPage(model: AuraViewModel, padding: PaddingValues) {
+@Composable fun AudioPreferencesPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Unit = {}) {
     val app = LocalContext.current.applicationContext as AuraApplication
     val store = app.effects
     val auraMix by app.auraMix.state.collectAsState()
     val state by store.state.collectAsState()
+    val auraSingState by app.auraSing.uiState.collectAsState()
     LaunchedEffect(state.fade) {
         app.auraMix.update { current -> current.copy(enabled = state.fade, mode = if (current.autoCalculate) btm.m.auraplayer.auramix.AuraMixMode.SMART else btm.m.auraplayer.auramix.AuraMixMode.TRADITIONAL) }
     }
@@ -563,5 +564,19 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
             ) { store.audio(nativePrevious = it) }
         } }
         item { AudioScanGroup(model) }
+        item {
+            Group(tr("experimental_features", "实验性功能")) {
+                Preference(
+                    title = tr("aura_sing_title", "Aura Sing"),
+                    summary = if (auraSingState.enabled) {
+                        tr("aura_sing_entry_enabled_summary", "已开启 · %s").format(
+                            tr(auraSingState.model.labelKey, auraSingState.model.fallbackLabel),
+                        )
+                    } else {
+                        tr("aura_sing_entry_summary", "AI 伴唱与人声/伴奏音轨分离实验性功能")
+                    },
+                ) { open("aura_sing") }
+            }
+        }
     }
 }

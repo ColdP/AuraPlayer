@@ -110,6 +110,10 @@ fun SpatialCoverDownloadsPage(padding: PaddingValues) {
     val states = SpatialModelDownloadManager.states
     val runtimeResource = remember { SpatialModelStore.runtimeResource() }
     val runtimeAbi = remember { SpatialModelStore.runtimeAbi() }
+    val qnnResource = remember { btm.m.auraplayer.sing.AuraSingQualcommNpu.runtimeResource() }
+    val isEliteSoc = remember { btm.m.auraplayer.sing.AuraSingQualcommNpu.isSnapdragon8EliteOrAbove() }
+    val isQtiSoc = remember { btm.m.auraplayer.sing.AuraSingQualcommNpu.isQualcommSoC() }
+    val socLabel = remember { btm.m.auraplayer.sing.AuraSingQualcommNpu.socModelName().ifBlank { "Snapdragon" } }
     var pendingDelete by remember { mutableStateOf<Pair<String, SpatialModelResource>?>(null) }
 
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -149,6 +153,35 @@ fun SpatialCoverDownloadsPage(padding: PaddingValues) {
                         color = MiuixTheme.colorScheme.error,
                     )
                 }
+            }
+        }
+        if (qnnResource != null) {
+            item(key = btm.m.auraplayer.sing.AuraSingQualcommNpu.QNN_RESOURCE_ID) {
+                val qnnTitle = tr("aura_sing_qnn_runtime_title", "Qualcomm QNN NPU 运行库（骁龙 8 Elite+）")
+                val qnnSummary = when {
+                    isEliteSoc -> tr(
+                        "spatial_qnn_runtime_summary_elite",
+                        "已检测到骁龙旗舰芯片（%s）。与 Aura Sing 共用，按需下载后空间封面也将启用 Hexagon HTP NPU 与 Adreno GPU 硬件加速（约 53 MB）。",
+                    ).format(socLabel)
+                    isQtiSoc -> tr(
+                        "spatial_qnn_runtime_summary_qcom",
+                        "当前检测到高通平台（%s）。与 Aura Sing 共用，按需下载以尝试启用 QNN HTP / Adreno GPU 加速。",
+                    ).format(socLabel)
+                    else -> tr(
+                        "spatial_qnn_runtime_summary_other",
+                        "与 Aura Sing 共用，高通骁龙 8 Elite 及以上专属 Hexagon NPU (v79/v81) & Adreno GPU 加速运行库（约 53 MB）。",
+                    )
+                }
+                SpatialResourceCard(
+                    title = qnnTitle,
+                    summary = qnnSummary,
+                    sizeText = formatSpatialBytes(qnnResource.sizeBytes),
+                    state = states[qnnResource.id] ?: SpatialModelDownloadState.Idle,
+                    downloadLabel = tr("aura_sing_download_qnn_runtime", "下载 NPU 运行库"),
+                    onDownload = { SpatialModelDownloadManager.start(context, qnnResource) },
+                    onCancel = { SpatialModelDownloadManager.cancel(qnnResource.id) },
+                    onDelete = { pendingDelete = qnnTitle to qnnResource },
+                )
             }
         }
         items(SpatialDepthModel.entries.toList(), key = { it.id }) { model ->
@@ -223,7 +256,7 @@ fun SpatialCoverDownloadsPage(padding: PaddingValues) {
 }
 
 @Composable
-private fun SpatialResourceCard(
+internal fun SpatialResourceCard(
     title: String,
     summary: String,
     sizeText: String,

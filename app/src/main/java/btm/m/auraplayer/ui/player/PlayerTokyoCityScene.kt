@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package btm.m.auraplayer.ui.player
 
 import androidx.compose.ui.geometry.Offset
@@ -5,6 +6,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import btm.m.auraplayer.playback.TokyoSceneLandmark
@@ -16,6 +18,7 @@ import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.min
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 internal data class TokyoLightingState(
     val zenithColor: Color,
@@ -39,6 +42,9 @@ internal data class TokyoLightingState(
     val nightness: Float,
     val cityLights: Float,
     val towerGlow: Float,
+    val sunDirX: Float = -0.45f,
+    val sunDirY: Float = 0.72f,
+    val sunDirZ: Float = 0.52f,
 )
 
 internal data class TokyoWalkBlend(
@@ -210,125 +216,140 @@ private data class TokyoLightingKeyframe(
     val state: TokyoLightingState,
 )
 
-// Pastel anime cel-shaded lighting keyframes with soft indigo/plum ink contours
+// Luminous anime Cel-Shading keyframes (clean warm-ivory concrete, lavender-indigo shadows, crisp ink).
 private val KEYFRAME_NIGHT = TokyoLightingState(
-    zenithColor = Color(0xFF0A1128),
-    horizonColor = Color(0xFF212B4F),
-    sunGlowColor = Color(0xFF6B84C2),
-    facadeFrontDay = Color(0xFF232B47),
-    facadeSideDay = Color(0xFF161D35),
-    facadeNight = Color(0xFF1A223D),
-    celShadowColor = Color(0xFF0F162E),
-    rimHighlightColor = Color(0xFF8FB4FF),
-    inkOutlineColor = Color(0xFF0B1022),
-    roadBaseColor = Color(0xFF101526),
-    towerOrangeColor = Color(0xFFB84930),
-    towerWhiteColor = Color(0xFF5D6A8A),
-    towerGlowColor = Color(0xFFFFA154),
-    windowWarmColor = Color(0xFFFFDBA0),
-    windowCoolColor = Color(0xFF8AE2FF),
-    billboardAccentA = Color(0xFF56E4FF),
-    billboardAccentB = Color(0xFFFF6BA4),
+    zenithColor = Color(0xFF0A122C),
+    horizonColor = Color(0xFF23305A),
+    sunGlowColor = Color(0xFF7B98DC),
+    facadeFrontDay = Color(0xFF293458),
+    facadeSideDay = Color(0xFF1A2340),
+    facadeNight = Color(0xFF1F294A),
+    celShadowColor = Color(0xFF111832),
+    rimHighlightColor = Color(0xFF9AC0FF),
+    inkOutlineColor = Color(0xFF0D1226),
+    roadBaseColor = Color(0xFF13192D),
+    towerOrangeColor = Color(0xFFC45238),
+    towerWhiteColor = Color(0xFF6B7BA0),
+    towerGlowColor = Color(0xFFFFA85C),
+    windowWarmColor = Color(0xFFFFDF9E),
+    windowCoolColor = Color(0xFF8BE4FF),
+    billboardAccentA = Color(0xFF5AE6FF),
+    billboardAccentB = Color(0xFFFF72AA),
     daylight = 0.0f,
     nightness = 1.0f,
     cityLights = 1.0f,
     towerGlow = 1.0f,
+    sunDirX = 0.45f,
+    sunDirY = 0.64f,
+    sunDirZ = 0.62f,
 )
 
 private val KEYFRAME_DAWN = TokyoLightingState(
-    zenithColor = Color(0xFF1F2B56),
-    horizonColor = Color(0xFFE08C7E),
-    sunGlowColor = Color(0xFFFFBE8A),
-    facadeFrontDay = Color(0xFF625A78),
-    facadeSideDay = Color(0xFF3E3A5C),
-    facadeNight = Color(0xFF474264),
-    celShadowColor = Color(0xFF2D2B4F),
-    rimHighlightColor = Color(0xFFFFCBA8),
-    inkOutlineColor = Color(0xFF211E3A),
-    roadBaseColor = Color(0xFF2A2B42),
-    towerOrangeColor = Color(0xFFEC6B48),
-    towerWhiteColor = Color(0xFFF2E6EC),
-    towerGlowColor = Color(0xFFFFB26E),
-    windowWarmColor = Color(0xFFFFD898),
-    windowCoolColor = Color(0xFFABE0FF),
-    billboardAccentA = Color(0xFF74DCFF),
-    billboardAccentB = Color(0xFFFF8EAF),
+    zenithColor = Color(0xFF283A6E),
+    horizonColor = Color(0xFFEA9C8E),
+    sunGlowColor = Color(0xFFFFC99C),
+    facadeFrontDay = Color(0xFF9E8CA8),
+    facadeSideDay = Color(0xFF565178),
+    facadeNight = Color(0xFF5D577E),
+    celShadowColor = Color(0xFF3E3A64),
+    rimHighlightColor = Color(0xFFFFD6B8),
+    inkOutlineColor = Color(0xFF282246),
+    roadBaseColor = Color(0xFF343550),
+    towerOrangeColor = Color(0xFFF07352),
+    towerWhiteColor = Color(0xFFF8ECEF),
+    towerGlowColor = Color(0xFFFFBA7A),
+    windowWarmColor = Color(0xFFFFDC9C),
+    windowCoolColor = Color(0xFFAFE2FF),
+    billboardAccentA = Color(0xFF7AE0FF),
+    billboardAccentB = Color(0xFFFF96B6),
     daylight = 0.34f,
     nightness = 0.30f,
     cityLights = 0.45f,
     towerGlow = 0.38f,
+    sunDirX = -0.62f,
+    sunDirY = 0.36f,
+    sunDirZ = 0.70f,
 )
 
 private val KEYFRAME_MORNING = TokyoLightingState(
-    zenithColor = Color(0xFF1E4F86),
-    horizonColor = Color(0xFF6CA4CC),
-    sunGlowColor = Color(0xFFFFEAC0),
-    facadeFrontDay = Color(0xFF7A94B2),
-    facadeSideDay = Color(0xFF496488),
-    facadeNight = Color(0xFF5A7598),
-    celShadowColor = Color(0xFF324D75),
-    rimHighlightColor = Color(0xFFFFF5DE),
-    inkOutlineColor = Color(0xFF1E2D4C),
-    roadBaseColor = Color(0xFF3A465C),
-    towerOrangeColor = Color(0xFFF0633C),
-    towerWhiteColor = Color(0xFFF4F7FC),
-    towerGlowColor = Color(0xFFFFBC80),
-    windowWarmColor = Color(0xFFFFE6BA),
-    windowCoolColor = Color(0xFFC2E8FF),
-    billboardAccentA = Color(0xFF6AD0FF),
-    billboardAccentB = Color(0xFFFF92B2),
+    zenithColor = Color(0xFF2B6BB0),
+    horizonColor = Color(0xFF92C2E6),
+    sunGlowColor = Color(0xFFFFF0CA),
+    facadeFrontDay = Color(0xFFE0E5EE),
+    facadeSideDay = Color(0xFF6B85AE),
+    facadeNight = Color(0xFF7D95BC),
+    celShadowColor = Color(0xFF506B98),
+    rimHighlightColor = Color(0xFFFFFAEA),
+    inkOutlineColor = Color(0xFF223357),
+    roadBaseColor = Color(0xFF4B5870),
+    towerOrangeColor = Color(0xFFF26A44),
+    towerWhiteColor = Color(0xFFF6F9FF),
+    towerGlowColor = Color(0xFFFFC48A),
+    windowWarmColor = Color(0xFFFFE8BE),
+    windowCoolColor = Color(0xFFC4EAFF),
+    billboardAccentA = Color(0xFF6CD6FF),
+    billboardAccentB = Color(0xFFFF98B8),
     daylight = 0.84f,
     nightness = 0.0f,
     cityLights = 0.14f,
     towerGlow = 0.0f,
+    sunDirX = -0.52f,
+    sunDirY = 0.70f,
+    sunDirZ = 0.49f,
 )
 
 private val KEYFRAME_NOON = TokyoLightingState(
-    zenithColor = Color(0xFF1B4D84),
-    horizonColor = Color(0xFF649EC8),
-    sunGlowColor = Color(0xFFFFF4D8),
-    facadeFrontDay = Color(0xFF839DBD),
-    facadeSideDay = Color(0xFF4E6B90),
-    facadeNight = Color(0xFF607EA2),
-    celShadowColor = Color(0xFF344F7A),
+    zenithColor = Color(0xFF2366AC),
+    horizonColor = Color(0xFF8CC0E6),
+    sunGlowColor = Color(0xFFFFF8E4),
+    facadeFrontDay = Color(0xFFECEAE6),
+    facadeSideDay = Color(0xFF6D88B3),
+    facadeNight = Color(0xFF849DC2),
+    celShadowColor = Color(0xFF516C9A),
     rimHighlightColor = Color(0xFFFFFFFF),
-    inkOutlineColor = Color(0xFF1D2C4A),
-    roadBaseColor = Color(0xFF414E64),
-    towerOrangeColor = Color(0xFFF46036),
-    towerWhiteColor = Color(0xFFF8FAFF),
-    towerGlowColor = Color(0xFFFFC896),
-    windowWarmColor = Color(0xFFFFEAC4),
-    windowCoolColor = Color(0xFFD2EEFF),
-    billboardAccentA = Color(0xFF75DAFF),
-    billboardAccentB = Color(0xFFFF9AB8),
+    inkOutlineColor = Color(0xFF213154),
+    roadBaseColor = Color(0xFF525F78),
+    towerOrangeColor = Color(0xFFF5653D),
+    towerWhiteColor = Color(0xFFFAFCFF),
+    towerGlowColor = Color(0xFFFFCD9A),
+    windowWarmColor = Color(0xFFFFEDC8),
+    windowCoolColor = Color(0xFFD6F0FF),
+    billboardAccentA = Color(0xFF78DEFF),
+    billboardAccentB = Color(0xFFFFA0BE),
     daylight = 1.0f,
     nightness = 0.0f,
     cityLights = 0.10f,
     towerGlow = 0.0f,
+    sunDirX = -0.35f,
+    sunDirY = 0.86f,
+    sunDirZ = 0.37f,
 )
 
 private val KEYFRAME_DUSK = TokyoLightingState(
-    zenithColor = Color(0xFF231D4B),
-    horizonColor = Color(0xFFE37056),
-    sunGlowColor = Color(0xFFFF9658),
-    facadeFrontDay = Color(0xFF564262),
-    facadeSideDay = Color(0xFF2F2647),
-    facadeNight = Color(0xFF382C50),
-    celShadowColor = Color(0xFF231D3C),
-    rimHighlightColor = Color(0xFFFFA86B),
-    inkOutlineColor = Color(0xFF1E1636),
-    roadBaseColor = Color(0xFF261F38),
-    towerOrangeColor = Color(0xFFE55B3C),
-    towerWhiteColor = Color(0xFFCBB8CC),
-    towerGlowColor = Color(0xFFFF9448),
-    windowWarmColor = Color(0xFFFFD384),
-    windowCoolColor = Color(0xFF88DAFF),
-    billboardAccentA = Color(0xFF56E4FF),
-    billboardAccentB = Color(0xFFFF709A),
+    zenithColor = Color(0xFF2B2259),
+    horizonColor = Color(0xFFEE7B60),
+    sunGlowColor = Color(0xFFFFA166),
+    facadeFrontDay = Color(0xFF9A7B92),
+    facadeSideDay = Color(0xFF42355D),
+    facadeNight = Color(0xFF4B3C68),
+    celShadowColor = Color(0xFF2F254D),
+    rimHighlightColor = Color(0xFFFFB87A),
+    inkOutlineColor = Color(0xFF23193D),
+    roadBaseColor = Color(0xFF2C2542),
+    towerOrangeColor = Color(0xFFEC6444),
+    towerWhiteColor = Color(0xFFDDC9DA),
+    towerGlowColor = Color(0xFFFF9B52),
+    windowWarmColor = Color(0xFFFFD88E),
+    windowCoolColor = Color(0xFF8CE0FF),
+    billboardAccentA = Color(0xFF5AE6FF),
+    billboardAccentB = Color(0xFFFF78A2),
     daylight = 0.24f,
     nightness = 0.45f,
     cityLights = 0.88f,
     towerGlow = 0.92f,
+    sunDirX = -0.74f,
+    sunDirY = 0.26f,
+    sunDirZ = 0.62f,
 )
 
 private val TOKYO_CIRCADIAN_KEYFRAMES = listOf(
@@ -385,6 +406,10 @@ internal fun resolveCurrentTokyoLighting(setting: TokyoSceneTime): TokyoLighting
 }
 
 private fun lerpLighting(a: TokyoLightingState, b: TokyoLightingState, t: Float): TokyoLightingState {
+    val sx = lerpF(a.sunDirX, b.sunDirX, t)
+    val sy = lerpF(a.sunDirY, b.sunDirY, t)
+    val sz = lerpF(a.sunDirZ, b.sunDirZ, t)
+    val len = sqrt(sx * sx + sy * sy + sz * sz).coerceAtLeast(0.001f)
     return TokyoLightingState(
         zenithColor = lerp(a.zenithColor, b.zenithColor, t),
         horizonColor = lerp(a.horizonColor, b.horizonColor, t),
@@ -407,6 +432,9 @@ private fun lerpLighting(a: TokyoLightingState, b: TokyoLightingState, t: Float)
         nightness = lerpF(a.nightness, b.nightness, t),
         cityLights = lerpF(a.cityLights, b.cityLights, t),
         towerGlow = lerpF(a.towerGlow, b.towerGlow, t),
+        sunDirX = sx / len,
+        sunDirY = sy / len,
+        sunDirZ = sz / len,
     )
 }
 
@@ -421,12 +449,14 @@ internal data class TokyoFarTowerSpec(
 
 internal class TokyoCityBlueprint {
     val farTowers: List<TokyoFarTowerSpec> = listOf(
-        TokyoFarTowerSpec(-145f, 300f, 30f, 102f, stepTier = true, 0.2f),
-        TokyoFarTowerSpec(-102f, 285f, 28f, 134f, stepTier = false, 1.4f),
-        TokyoFarTowerSpec(-58f, 305f, 34f, 94f, stepTier = true, 2.7f),
-        TokyoFarTowerSpec(62f, 290f, 32f, 126f, stepTier = true, 3.6f),
-        TokyoFarTowerSpec(108f, 275f, 34f, 146f, stepTier = false, 4.9f),
-        TokyoFarTowerSpec(152f, 305f, 34f, 110f, stepTier = true, 5.5f),
+        TokyoFarTowerSpec(-215f, 315f, 34f, 88f, stepTier = true, 0.7f),
+        TokyoFarTowerSpec(-162f, 295f, 32f, 114f, stepTier = true, 0.2f),
+        TokyoFarTowerSpec(-112f, 282f, 28f, 140f, stepTier = false, 1.4f),
+        TokyoFarTowerSpec(-66f, 304f, 34f, 98f, stepTier = true, 2.7f),
+        TokyoFarTowerSpec(68f, 290f, 32f, 128f, stepTier = true, 3.6f),
+        TokyoFarTowerSpec(116f, 276f, 34f, 148f, stepTier = false, 4.9f),
+        TokyoFarTowerSpec(168f, 302f, 34f, 112f, stepTier = true, 5.5f),
+        TokyoFarTowerSpec(222f, 316f, 36f, 92f, stepTier = false, 1.9f),
     )
 }
 
@@ -446,26 +476,32 @@ internal fun drawTokyoCityscapeScene(
     val h = scope.size.height
     if (w <= 1f || h <= 1f) return
 
+    // Adapt camera framing seamlessly between tall portrait phones (9:19.5 / 9:16)
+    // and wide landscape / split-pane viewports (16:9 / 19.5:9).
+    val aspect = (w / h).coerceIn(0.40f, 2.60f)
+    val landscapeMix = ((aspect - 0.85f) / 0.85f).coerceIn(0f, 1f)
+
     val strideRad = phase * 1.48f * (2f * PI.toFloat())
-    val walkBobY = (abs(sin(strideRad)) - 0.5f) * 0.34f
-    val walkSwayX = cos(strideRad * 0.5f) * 0.42f
+    val walkBobY = (abs(sin(strideRad)) - 0.5f) * 0.30f
+    val walkSwayX = cos(strideRad * 0.5f) * 0.36f
 
-    val camHeight = walkBlend.shibuya * 7.4f +
-        walkBlend.shinjuku * 4.4f +
+    val camHeight = walkBlend.shibuya * 7.2f +
+        walkBlend.shinjuku * 4.5f +
         walkBlend.tokyoTower * 5.2f +
-        walkBlend.asakusa * 3.8f +
-        walkBlend.odaiba * 6.4f + walkBobY
+        walkBlend.asakusa * 3.9f +
+        walkBlend.odaiba * 6.2f + walkBobY
 
-    val yawBias = walkBlend.shinjuku * 0.025f - walkBlend.tokyoTower * 0.02f + walkBlend.odaiba * 0.025f
-    val horizonFrac = 0.48f + walkBlend.shinjuku * 0.02f + walkBlend.odaiba * 0.01f
-    val horizonY = h * horizonFrac + spatialTilt.y * h * 0.045f + walkBobY * 4.2f
+    val yawBias = walkBlend.shinjuku * 0.024f - walkBlend.tokyoTower * 0.018f + walkBlend.odaiba * 0.022f
+    val horizonFrac = lerpF(0.47f, 0.495f, landscapeMix) + walkBlend.shinjuku * 0.015f
+    val horizonY = h * horizonFrac + spatialTilt.y * h * 0.042f + walkBobY * 3.8f
 
     val yaw = -spatialTilt.x * 0.068f + yawBias
-    val pitch = spatialTilt.y * 0.036f - 0.015f
-    val focal = min(w, h) * (1.06f + walkBlend.shinjuku * 0.08f)
+    val pitch = spatialTilt.y * 0.036f - 0.014f
+    val baseFocal = lerpF(w * 1.12f, h * 1.32f, landscapeMix)
+    val focal = baseFocal * (1f + walkBlend.shinjuku * 0.05f - walkBlend.odaiba * 0.04f)
 
     val cam = Camera3D(
-        x = spatialTilt.x * 8.5f + walkSwayX,
+        x = spatialTilt.x * 7.5f + walkSwayX,
         y = camHeight,
         z = -18f,
         sinYaw = sin(yaw),
@@ -484,19 +520,19 @@ internal fun drawTokyoCityscapeScene(
     drawTokyoFarSkyline(scope, cam, scratch, lighting, phase, blend, blueprint.farTowers)
 
     if (walkBlend.odaiba > 0.01f) {
-        drawOdaibaDistrict(scope, cam, scratch, lighting, phase, blend * walkBlend.odaiba)
+        drawOdaibaDistrict(scope, cam, scratch, lighting, phase, landscapeMix, blend * walkBlend.odaiba)
     }
     if (walkBlend.tokyoTower > 0.01f) {
-        drawTokyoTowerDistrict(scope, cam, scratch, lighting, phase, blend * walkBlend.tokyoTower)
+        drawTokyoTowerDistrict(scope, cam, scratch, lighting, phase, landscapeMix, blend * walkBlend.tokyoTower)
     }
     if (walkBlend.asakusa > 0.01f) {
-        drawAsakusaDistrict(scope, cam, scratch, lighting, phase, blend * walkBlend.asakusa)
+        drawAsakusaDistrict(scope, cam, scratch, lighting, phase, landscapeMix, blend * walkBlend.asakusa)
     }
     if (walkBlend.shinjuku > 0.01f) {
-        drawShinjukuDistrict(scope, cam, scratch, lighting, phase, blend * walkBlend.shinjuku)
+        drawShinjukuDistrict(scope, cam, scratch, lighting, phase, landscapeMix, blend * walkBlend.shinjuku)
     }
     if (walkBlend.shibuya > 0.01f) {
-        drawShibuyaDistrict(scope, cam, scratch, lighting, phase, blend * walkBlend.shibuya)
+        drawShibuyaDistrict(scope, cam, scratch, lighting, phase, landscapeMix, blend * walkBlend.shibuya)
     }
 
     drawAnimePetalsAndLightMotes(scope, lighting, phase, spatialTilt, blend)
@@ -525,7 +561,7 @@ private fun drawSkyFallback(
     )
     scope.drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(lighting.sunGlowColor.copy(alpha = 0.34f * blend), Color.Transparent),
+            colors = listOf(lighting.sunGlowColor.copy(alpha = 0.36f * blend), Color.Transparent),
             center = orbCenter,
             radius = min(w, h) * 0.42f,
         ),
@@ -543,12 +579,15 @@ private fun drawTokyoFarSkyline(
     blend: Float,
     farTowers: List<TokyoFarTowerSpec>,
 ) {
+    // Aerial-perspective pastel silhouettes with subtle cel step split & atmospheric outline.
     val celBody = lerp(
         lighting.horizonColor,
-        Color(0xFF1A2240),
-        0.48f + 0.38f * lighting.nightness,
-    ).copy(alpha = 0.74f * blend)
-    val inkCol = lerp(lighting.inkOutlineColor, lighting.horizonColor, 0.48f).copy(alpha = 0.62f * blend)
+        lerp(Color(0xFF42547A), Color(0xFF1A2240), lighting.nightness),
+        0.52f + 0.34f * lighting.nightness,
+    ).copy(alpha = 0.76f * blend)
+    val celLitStrip = lerp(celBody, lighting.sunGlowColor, 0.18f * (0.3f + 0.7f * lighting.daylight))
+        .copy(alpha = 0.74f * blend)
+    val inkCol = lerp(lighting.inkOutlineColor, lighting.horizonColor, 0.56f).copy(alpha = 0.52f * blend)
 
     for (tower in farTowers) {
         val hw = tower.width * 0.5f
@@ -558,7 +597,15 @@ private fun drawTokyoFarSkyline(
             cam.projectPoint(tower.x - hw, tower.height, tower.z, 3, scratch)
         if (!ok) continue
         fillQuad(scope, scratch, 0, 1, 2, 3, celBody)
-        strokeQuad(scope, scratch, 0, 1, 2, 3, inkCol, 0.9f)
+        // Lit side rim sliver facing sun
+        if (cam.projectPoint(tower.x - hw, 0f, tower.z, 4, scratch) &&
+            cam.projectPoint(tower.x - hw + tower.width * 0.24f, 0f, tower.z, 5, scratch) &&
+            cam.projectPoint(tower.x - hw + tower.width * 0.24f, tower.height, tower.z, 6, scratch) &&
+            cam.projectPoint(tower.x - hw, tower.height, tower.z, 7, scratch)
+        ) {
+            fillQuad(scope, scratch, 4, 5, 6, 7, celLitStrip)
+        }
+        strokeQuad(scope, scratch, 0, 1, 2, 3, inkCol, 0.85f)
 
         if (tower.stepTier &&
             cam.projectPoint(tower.x - hw * 0.55f, tower.height, tower.z, 4, scratch) &&
@@ -567,7 +614,7 @@ private fun drawTokyoFarSkyline(
             cam.projectPoint(tower.x - hw * 0.55f, tower.height + 12f, tower.z, 7, scratch)
         ) {
             fillQuad(scope, scratch, 4, 5, 6, 7, celBody)
-            strokeQuad(scope, scratch, 4, 5, 6, 7, inkCol, 0.85f)
+            strokeQuad(scope, scratch, 4, 5, 6, 7, inkCol, 0.8f)
         }
 
         if (lighting.cityLights > 0.12f) {
@@ -593,63 +640,57 @@ private fun drawWalkingRoadBed(
     laneAccentColor: Color,
     phase: Float,
     blend: Float,
+    pedestrianPromenade: Boolean = false,
 ) {
     if (blend <= 0.01f) return
-    val ok = cam.projectPoint(-160f, 0f, -6f, 0, scratch) &&
-        cam.projectPoint(160f, 0f, -6f, 1, scratch) &&
-        cam.projectPoint(200f, 0f, 220f, 2, scratch) &&
-        cam.projectPoint(-200f, 0f, 220f, 3, scratch)
-    if (ok) {
-        fillQuad(
-            scope = scope,
-            scratch = scratch,
-            i0 = 0,
-            i1 = 1,
-            i2 = 2,
-            i3 = 3,
-            brush = Brush.verticalGradient(
-                0.0f to lerp(lighting.roadBaseColor, lighting.horizonColor, 0.26f).copy(alpha = 0.90f * blend),
-                1.0f to lighting.roadBaseColor.copy(alpha = 0.96f * blend),
-                startY = scratch.sy[2].coerceAtMost(scope.size.height),
-                endY = scratch.sy[0].coerceAtLeast(cam.horizonY + 12f),
-            ),
-        )
-    }
+    val roadNearCol = lighting.roadBaseColor.copy(alpha = 0.96f * blend)
+    val roadFarCol = lerp(lighting.roadBaseColor, lighting.horizonColor, 0.30f).copy(alpha = 0.90f * blend)
+    drawClippedQuad3D(
+        scope, cam, scratch,
+        -190f, 0f, -14f,
+        190f, 0f, -14f,
+        240f, 0f, 225f,
+        -240f, 0f, 225f,
+        lerp(roadNearCol, roadFarCol, 0.38f),
+    )
 
-    // Raised anime cel-shaded sidewalks + dark curb outlines
-    val sidewalkCol = lerp(lighting.facadeSideDay, lighting.roadBaseColor, 0.34f).copy(alpha = 0.92f * blend)
-    drawGroundRect(scope, cam, scratch, -95f, -roadHalfW, -4f, 180f, sidewalkCol)
-    drawGroundRect(scope, cam, scratch, roadHalfW, 95f, -4f, 180f, sidewalkCol)
+    // Raised Japanese sidewalks with 3D vertical curb riser & tactile yellow Braille blocks
+    val sidewalkCol = lerp(lighting.facadeSideDay, lighting.roadBaseColor, 0.38f).copy(alpha = 0.93f * blend)
+    val curbRiserCol = lerp(lighting.celShadowColor, lighting.inkOutlineColor, 0.35f).copy(alpha = 0.94f * blend)
+    val outerSpan = 160f
+    drawGroundRect(scope, cam, scratch, -outerSpan, -roadHalfW, -14f, 185f, sidewalkCol, y = 0.22f)
+    drawGroundRect(scope, cam, scratch, roadHalfW, outerSpan, -14f, 185f, sidewalkCol, y = 0.22f)
 
-    val ink = lighting.inkOutlineColor.copy(alpha = 0.85f * blend)
-    if (cam.projectPoint(-roadHalfW, 0.1f, -4f, 0, scratch) &&
-        cam.projectPoint(-roadHalfW, 0.1f, 180f, 1, scratch)
-    ) {
-        scope.drawLine(ink, Offset(scratch.sx[0], scratch.sy[0]), Offset(scratch.sx[1], scratch.sy[1]), 1.6f)
-    }
-    if (cam.projectPoint(roadHalfW, 0.1f, -4f, 2, scratch) &&
-        cam.projectPoint(roadHalfW, 0.1f, 180f, 3, scratch)
-    ) {
-        scope.drawLine(ink, Offset(scratch.sx[2], scratch.sy[2]), Offset(scratch.sx[3], scratch.sy[3]), 1.6f)
-    }
+    val ink = lighting.inkOutlineColor.copy(alpha = 0.84f * blend)
+    drawClippedQuad3D(scope, cam, scratch, -roadHalfW, 0f, -14f, -roadHalfW, 0.22f, -14f, -roadHalfW, 0.22f, 185f, -roadHalfW, 0f, 185f, curbRiserCol, ink, 1.15f)
+    drawClippedQuad3D(scope, cam, scratch, roadHalfW, 0f, -14f, roadHalfW, 0.22f, -14f, roadHalfW, 0.22f, 185f, roadHalfW, 0f, 185f, curbRiserCol, ink, 1.15f)
+
+    // Iconic Japanese yellow tactile paving strips along both sidewalks
+    val tactileCol = lerp(Color(0xFFE5BA42), lighting.horizonColor, 0.16f + 0.36f * lighting.nightness)
+        .copy(alpha = lerpF(0.65f, 0.88f, lighting.daylight) * blend)
+    drawGroundRect(scope, cam, scratch, -roadHalfW - 1.55f, -roadHalfW - 0.95f, -10f, 155f, tactileCol, y = 0.24f)
+    drawGroundRect(scope, cam, scratch, roadHalfW + 0.95f, roadHalfW + 1.55f, -10f, 155f, tactileCol, y = 0.24f)
 
     val strideSpacing = 20f
     val travelZ = (phase * 7.8f) % strideSpacing
+    if (!pedestrianPromenade) {
+        // Center road dashed divider lines
+        val laneDashCol = lerp(Color(0xFFD5DFED), lighting.horizonColor, 0.25f)
+            .copy(alpha = lerpF(0.45f, 0.72f, lighting.daylight) * blend)
+        for (slot in 0..8) {
+            val z0 = slot * strideSpacing - travelZ
+            if (z0 < -10f || z0 > 165f) continue
+            drawGroundRect(scope, cam, scratch, -0.22f, 0.22f, z0, z0 + 7.2f, laneDashCol, y = 0.05f)
+        }
+    }
+
     val curbGlow = laneAccentColor.copy(alpha = (0.20f + 0.42f * lighting.cityLights) * blend)
     for (slot in 0..7) {
         val z0 = slot * strideSpacing - travelZ
-        if (z0 < -2f || z0 > 155f) continue
+        if (z0 < -8f || z0 > 155f) continue
         val z1 = z0 + 6.5f
-        if (cam.projectPoint(-roadHalfW, 0.14f, z0, 0, scratch) &&
-            cam.projectPoint(-roadHalfW, 0.14f, z1, 1, scratch)
-        ) {
-            scope.drawLine(curbGlow, Offset(scratch.sx[0], scratch.sy[0]), Offset(scratch.sx[1], scratch.sy[1]), 1.8f)
-        }
-        if (cam.projectPoint(roadHalfW, 0.14f, z0, 2, scratch) &&
-            cam.projectPoint(roadHalfW, 0.14f, z1, 3, scratch)
-        ) {
-            scope.drawLine(curbGlow, Offset(scratch.sx[2], scratch.sy[2]), Offset(scratch.sx[3], scratch.sy[3]), 1.8f)
-        }
+        drawClippedQuad3D(scope, cam, scratch, -roadHalfW - 0.18f, 0.24f, z0, -roadHalfW, 0.24f, z0, -roadHalfW, 0.24f, z1, -roadHalfW - 0.18f, 0.24f, z1, curbGlow)
+        drawClippedQuad3D(scope, cam, scratch, roadHalfW, 0.24f, z0, roadHalfW + 0.18f, 0.24f, z0, roadHalfW + 0.18f, 0.24f, z1, roadHalfW, 0.24f, z1, curbGlow)
     }
 }
 
@@ -659,25 +700,26 @@ private fun drawShibuyaDistrict(
     scratch: TokyoRenderScratch,
     lighting: TokyoLightingState,
     phase: Float,
+    landscapeMix: Float,
     blend: Float,
 ) {
     drawWalkingRoadBed(scope, cam, scratch, lighting, roadHalfW = 19f, laneAccentColor = lighting.billboardAccentA, phase = phase, blend = blend)
 
-    // Elevated Yamanote viaduct + animated anime commuter train across Shibuya!
-    drawElevatedTrainViaduct(scope, cam, scratch, lighting, zBridge = 94f, deckY = 17.5f, phase = phase, blend = blend)
+    // Elevated Yamanote viaduct + animated commuter train across Shibuya!
+    drawElevatedTrainViaduct(scope, cam, scratch, lighting, zBridge = 96f, deckY = 17.5f, phase = phase, blend = blend)
 
-    // Cel-shaded Zebra crosswalks with crisp edge contrast + damp asphalt specular shine
+    // 4-way Shibuya Scramble Zebra crosswalks
     val stripeColor = lerp(Color(0xFFC8D2E0), Color(0xFFF3F7FC), lighting.daylight * 0.5f + 0.28f)
-        .copy(alpha = lerpF(0.60f, 0.84f, lighting.daylight) * blend)
+        .copy(alpha = lerpF(0.62f, 0.86f, lighting.daylight) * blend)
     val loopLen = 58f
     val scrollZ = (phase * 6.5f) % loopLen
     for (rep in 0..2) {
         val plazaZ = 34f + rep * loopLen - scrollZ
-        if (plazaZ < -8f || plazaZ > 145f) continue
+        if (plazaZ < -12f || plazaZ > 145f) continue
         for (step in -5..5) {
             val sx0 = step * 3.1f
-            drawGroundRect(scope, cam, scratch, sx0 - 0.8f, sx0 + 0.8f, plazaZ - 14f, plazaZ - 10f, stripeColor)
-            drawGroundRect(scope, cam, scratch, sx0 - 0.8f, sx0 + 0.8f, plazaZ + 10f, plazaZ + 14f, stripeColor)
+            drawGroundRect(scope, cam, scratch, sx0 - 0.8f, sx0 + 0.8f, plazaZ - 14f, plazaZ - 10f, stripeColor, y = 0.06f)
+            drawGroundRect(scope, cam, scratch, sx0 - 0.8f, sx0 + 0.8f, plazaZ + 10f, plazaZ + 14f, stripeColor, y = 0.06f)
             val u = step * 3.0f
             drawDiagonalStripe(scope, cam, scratch, u, plazaZ + u * 0.62f, 1.5f, 1.15f, -0.62f, stripeColor)
             drawDiagonalStripe(scope, cam, scratch, u, plazaZ - u * 0.62f, 1.5f, 1.15f, 0.62f, stripeColor)
@@ -688,24 +730,49 @@ private fun drawShibuyaDistrict(
     val bScroll = (phase * 7.8f) % blockSpacing
     for (slot in 4 downTo 0) {
         val zCenter = 22f + slot * blockSpacing - bScroll
-        if (zCenter < 6f || zCenter > 170f) continue
+        if (zCenter < -10f || zCenter > 175f) continue
+
+        // Secondary background urban block tier so wide landscape (16:9 / 19.5:9) is richly populated
+        if (landscapeMix > 0.04f) {
+            drawCelBuildingPair(
+                scope = scope, cam = cam, scratch = scratch, lighting = lighting,
+                xInner = 54f, width = 28f, depth = 24f, zCenter = zCenter + 8f,
+                leftHeight = 64f + ((slot + 1) % 3) * 14f,
+                rightHeight = 68f + (slot % 3) * 12f,
+                style = TokyoBuildingStyle.GLASS_TOWER,
+                hasMegaScreen = false, hasBalconies = false, phase = phase,
+                blend = blend * (0.65f + 0.30f * landscapeMix),
+                seed = 700 + slot * 17,
+            )
+        }
+
         drawCelBuildingPair(
             scope = scope,
             cam = cam,
             scratch = scratch,
             lighting = lighting,
-            xInner = 20f,
+            xInner = 20.5f,
             width = 24f,
             depth = 22f,
             zCenter = zCenter,
             leftHeight = 46f + (slot % 2) * 14f,
             rightHeight = 54f + ((slot + 1) % 3) * 12f,
+            style = TokyoBuildingStyle.GLASS_TOWER,
             hasMegaScreen = true,
             hasBalconies = false,
             phase = phase,
             blend = blend,
             seed = 50 + slot * 13,
         )
+
+        // Roadside street trees & glowing Japanese vending machines on sidewalks
+        if (slot % 2 == 0) {
+            drawStreetTree3D(scope, cam, scratch, -17.6f, zCenter - 11f, 9.2f, lighting, phase, blend, slot * 5)
+            drawStreetTree3D(scope, cam, scratch, 17.6f, zCenter + 11f, 9.2f, lighting, phase, blend, slot * 5 + 1)
+        } else {
+            drawVendingMachine3D(scope, cam, scratch, -19.2f, zCenter - 11f, facingSign = 1f, lighting = lighting, blend = blend, seed = slot)
+            drawVendingMachine3D(scope, cam, scratch, 19.2f, zCenter + 11f, facingSign = -1f, lighting = lighting, blend = blend, seed = slot + 1)
+        }
     }
 }
 
@@ -715,6 +782,7 @@ private fun drawShinjukuDistrict(
     scratch: TokyoRenderScratch,
     lighting: TokyoLightingState,
     phase: Float,
+    landscapeMix: Float,
     blend: Float,
 ) {
     drawWalkingRoadBed(scope, cam, scratch, lighting, roadHalfW = 11.5f, laneAccentColor = lighting.billboardAccentB, phase = phase, blend = blend)
@@ -729,7 +797,7 @@ private fun drawShinjukuDistrict(
         fillQuad(
             scope, scratch, 0, 1, 2, 3,
             Brush.horizontalGradient(
-                0.0f to lighting.billboardAccentB.copy(alpha = 0.20f * lighting.cityLights * blend),
+                0.0f to lighting.billboardAccentB.copy(alpha = 0.22f * lighting.cityLights * blend),
                 0.5f to lighting.billboardAccentA.copy(alpha = 0.16f * lighting.cityLights * blend),
                 1.0f to Color(0xFFFFB25C).copy(alpha = 0.18f * lighting.cityLights * blend),
                 startX = scratch.sx[0].coerceAtMost(scratch.sx[1]),
@@ -741,13 +809,27 @@ private fun drawShinjukuDistrict(
     // Iconic crimson Kabukicho Ichibangai Entrance Archway spanning overhead (`z = 54m`)
     drawKabukichoGateArch(scope, cam, scratch, zGate = 54f, halfSpan = 11.5f, lighting = lighting, blend = blend)
 
-    // Dense cel-shaded buildings with balconies, vertical bracketed neon signs & utility pole catenary wires!
+    // Dense cel-shaded zakkyo buildings, flanking skyline in landscape, bracket signs & catenary wires!
     val spacing = 22f
     val bScroll = (phase * 7.8f) % spacing
     var prevPoleZ: Float? = null
     for (slot in 6 downTo 0) {
         val zCenter = 12f + slot * spacing - bScroll
-        if (zCenter < 5f || zCenter > 155f) continue
+        if (zCenter < -8f || zCenter > 160f) continue
+
+        if (landscapeMix > 0.04f) {
+            drawCelBuildingPair(
+                scope = scope, cam = cam, scratch = scratch, lighting = lighting,
+                xInner = 34f, width = 24f, depth = 20f, zCenter = zCenter + 4f,
+                leftHeight = 56f + (slot % 3) * 12f,
+                rightHeight = 60f + ((slot + 1) % 3) * 14f,
+                style = TokyoBuildingStyle.GLASS_TOWER,
+                hasMegaScreen = false, hasBalconies = false, phase = phase,
+                blend = blend * (0.68f + 0.26f * landscapeMix),
+                seed = 820 + slot * 13,
+            )
+        }
+
         drawCelBuildingPair(
             scope = scope,
             cam = cam,
@@ -759,6 +841,7 @@ private fun drawShinjukuDistrict(
             zCenter = zCenter,
             leftHeight = 40f + (slot % 3) * 10f,
             rightHeight = 44f + ((slot + 1) % 3) * 12f,
+            style = TokyoBuildingStyle.ZAKKYO_COMMERCIAL,
             hasMegaScreen = false,
             hasBalconies = true,
             phase = phase,
@@ -767,8 +850,10 @@ private fun drawShinjukuDistrict(
         )
         drawVerticalBracketSign3D(scope, cam, scratch, -12.0f, 3.3f, zCenter - 2.5f, 8.5f, 25.5f, -1, lighting, phase, blend, slot * 7)
         drawVerticalBracketSign3D(scope, cam, scratch, 12.0f, 3.3f, zCenter + 2.5f, 10f, 28.5f, 1, lighting, phase, blend, slot * 11 + 3)
+        if (slot % 2 == 1) {
+            drawVendingMachine3D(scope, cam, scratch, -11.6f, zCenter + 6.5f, facingSign = 1f, lighting = lighting, blend = blend, seed = slot + 2)
+        }
 
-        // Roadside utility poles + overhead anime power lines spanning across alley!
         drawUtilityPole3D(scope, cam, scratch, -10.8f, zCenter, 19f, lighting, blend)
         drawUtilityPole3D(scope, cam, scratch, 10.8f, zCenter + 4f, 19f, lighting, blend)
         if (slot % 2 == 0) {
@@ -791,36 +876,20 @@ private fun drawKabukichoGateArch(
     lighting: TokyoLightingState,
     blend: Float,
 ) {
-    val ink = lighting.inkOutlineColor.copy(alpha = 0.90f * blend)
-    val ow = (26f / scratch.sz[0].coerceAtLeast(16f)).coerceIn(1.1f, 2.0f)
-    val archRed = lerp(Color(0xFFD63838), Color(0xFFFF4A4A), 0.35f + 0.55f * lighting.cityLights).copy(alpha = 0.94f * blend)
-
+    val ow = (26f / (zGate - cam.z).coerceAtLeast(16f)).coerceIn(1.1f, 2.0f)
+    val archRed = lerp(Color(0xFFD63838), Color(0xFFFF4A4A), 0.35f + 0.55f * lighting.cityLights)
     for (side in listOf(-1f, 1f)) {
         val xCol = side * halfSpan
-        if (cam.projectPoint(xCol - 0.6f, 0f, zGate, 0, scratch) &&
-            cam.projectPoint(xCol + 0.6f, 0f, zGate, 1, scratch) &&
-            cam.projectPoint(xCol + 0.6f, 12.8f, zGate, 2, scratch) &&
-            cam.projectPoint(xCol - 0.6f, 12.8f, zGate, 3, scratch)
-        ) {
-            fillQuad(scope, scratch, 0, 1, 2, 3, archRed)
-            strokeQuad(scope, scratch, 0, 1, 2, 3, ink, ow)
-        }
+        drawCelBox3D(scope, cam, scratch, lighting, xCol - 0.65f, xCol + 0.65f, 0f, 12.8f, zGate - 0.6f, zGate + 0.6f, archRed, 0.08f, ow, blend)
     }
-    // Overhead illuminated crimson Ichibangai sign beam + stylized neon white bars
-    if (cam.projectPoint(-halfSpan - 0.8f, 11.4f, zGate, 0, scratch) &&
-        cam.projectPoint(halfSpan + 0.8f, 11.4f, zGate, 1, scratch) &&
-        cam.projectPoint(halfSpan + 0.8f, 15.2f, zGate, 2, scratch) &&
-        cam.projectPoint(-halfSpan - 0.8f, 15.2f, zGate, 3, scratch)
+    drawCelBox3D(scope, cam, scratch, lighting, -halfSpan - 0.9f, halfSpan + 0.9f, 11.4f, 15.2f, zGate - 0.7f, zGate + 0.7f, archRed, 0.08f, ow, blend)
+    if (cam.projectPoint(-halfSpan * 0.62f, 13.3f, zGate - 0.72f, 0, scratch) &&
+        cam.projectPoint(halfSpan * 0.62f, 13.3f, zGate - 0.72f, 1, scratch)
     ) {
-        fillQuad(scope, scratch, 0, 1, 2, 3, archRed)
-        strokeQuad(scope, scratch, 0, 1, 2, 3, ink, ow)
-        val cx = (scratch.sx[3] + scratch.sx[2]) * 0.5f
-        val cy = (scratch.sy[3] + scratch.sy[0]) * 0.5f
-        val spanW = abs(scratch.sx[2] - scratch.sx[3]) * 0.62f
         scope.drawLine(
-            color = Color(0xFFFFF2DF).copy(alpha = (0.45f + 0.50f * lighting.cityLights) * blend),
-            start = Offset(cx - spanW * 0.5f, cy),
-            end = Offset(cx + spanW * 0.5f, cy),
+            color = Color(0xFFFFF2DF).copy(alpha = (0.48f + 0.48f * lighting.cityLights) * blend),
+            start = Offset(scratch.sx[0], scratch.sy[0]),
+            end = Offset(scratch.sx[1], scratch.sy[1]),
             strokeWidth = (ow * 2.2f).coerceAtLeast(2.0f),
             cap = StrokeCap.Round,
         )
@@ -833,6 +902,7 @@ private fun drawTokyoTowerDistrict(
     scratch: TokyoRenderScratch,
     lighting: TokyoLightingState,
     phase: Float,
+    landscapeMix: Float,
     blend: Float,
 ) {
     drawWalkingRoadBed(scope, cam, scratch, lighting, roadHalfW = 16f, laneAccentColor = lighting.towerGlowColor, phase = phase, blend = blend)
@@ -841,11 +911,43 @@ private fun drawTokyoTowerDistrict(
     val bScroll = (phase * 7.8f) % spacing
     for (slot in 5 downTo 0) {
         val zPos = 14f + slot * spacing - bScroll
-        if (zPos < 6f || zPos > 140f) continue
-        drawCelBuilding3D(scope, cam, scratch, lighting, -34f, zPos, 22f, 18f, 42f, isRightWall = true, hasMegaScreen = false, hasBalconies = true, phase = phase, blend = blend * 0.92f, seed = 210 + slot)
-        drawCelBuilding3D(scope, cam, scratch, lighting, 36f, zPos, 22f, 18f, 46f, isRightWall = false, hasMegaScreen = false, hasBalconies = true, phase = phase, blend = blend * 0.92f, seed = 230 + slot)
+        if (zPos < -8f || zPos > 145f) continue
 
-        // Anime streetlamps with clean lamp-head cap, pole outline & warm light pool
+        if (landscapeMix > 0.04f) {
+            drawCelBuildingPair(
+                scope = scope, cam = cam, scratch = scratch, lighting = lighting,
+                xInner = 48f, width = 26f, depth = 20f, zCenter = zPos + 5f,
+                leftHeight = 52f + (slot % 2) * 14f,
+                rightHeight = 56f + ((slot + 1) % 3) * 12f,
+                style = TokyoBuildingStyle.GLASS_TOWER,
+                hasMegaScreen = false, hasBalconies = false, phase = phase,
+                blend = blend * (0.65f + 0.30f * landscapeMix),
+                seed = 900 + slot * 11,
+            )
+        }
+
+        drawCelBuildingPair(
+            scope = scope,
+            cam = cam,
+            scratch = scratch,
+            lighting = lighting,
+            xInner = 23f,
+            width = 22f,
+            depth = 18f,
+            zCenter = zPos,
+            leftHeight = 42f + (slot % 3) * 8f,
+            rightHeight = 46f + ((slot + 1) % 3) * 9f,
+            style = TokyoBuildingStyle.ZAKKYO_COMMERCIAL,
+            hasMegaScreen = false,
+            hasBalconies = true,
+            phase = phase,
+            blend = blend * 0.94f,
+            seed = 210 + slot * 17,
+        )
+
+        // Roadside trees & streetlamps
+        drawStreetTree3D(scope, cam, scratch, -18.5f, zPos - 7f, 8.8f, lighting, phase, blend, slot * 7)
+        drawStreetTree3D(scope, cam, scratch, 18.5f, zPos + 7f, 8.8f, lighting, phase, blend, slot * 7 + 1)
         for (sideX in listOf(-15.2f, 15.2f)) {
             if (cam.projectPoint(sideX, 0f, zPos, 0, scratch) &&
                 cam.projectPoint(sideX, 8.6f, zPos, 1, scratch)
@@ -873,29 +975,70 @@ private fun drawAsakusaDistrict(
     scratch: TokyoRenderScratch,
     lighting: TokyoLightingState,
     phase: Float,
+    landscapeMix: Float,
     blend: Float,
 ) {
-    drawWalkingRoadBed(scope, cam, scratch, lighting, roadHalfW = 13f, laneAccentColor = Color(0xFFFF724A), phase = phase, blend = blend)
+    drawWalkingRoadBed(scope, cam, scratch, lighting, roadHalfW = 13f, laneAccentColor = Color(0xFFFF724A), phase = phase, blend = blend, pedestrianPromenade = true)
+
+    // Stone Nakamise flagstones (石畳) pattern down center approach
+    val stoneCol = lerp(Color(0xFF9EA6B8), lighting.celShadowColor, 0.28f + 0.48f * lighting.nightness)
+        .copy(alpha = lerpF(0.45f, 0.72f, lighting.daylight) * blend)
+    val flagStep = 14f
+    val fScroll = (phase * 7.8f) % flagStep
+    for (i in 0..9) {
+        val fz = i * flagStep - fScroll
+        if (fz < -8f || fz > 145f) continue
+        drawGroundRect(scope, cam, scratch, -9.5f, 9.5f, fz, fz + 0.55f, stoneCol, y = 0.05f)
+    }
 
     // Distant Tokyo Skytree truss spire rendered with clean cel contour
     if (cam.projectPoint(32f, 0f, 230f, 0, scratch) &&
         cam.projectPoint(32f, 155f, 230f, 1, scratch)
     ) {
-        val skyColor = lerp(Color(0xFF7D97B8), Color(0xFF4CD8FF), lighting.cityLights * 0.6f).copy(alpha = 0.62f * blend)
-        scope.drawLine(lighting.inkOutlineColor.copy(alpha = 0.55f * blend), Offset(scratch.sx[0], scratch.sy[0]), Offset(scratch.sx[1], scratch.sy[1]), 4.4f, StrokeCap.Round)
-        scope.drawLine(skyColor, Offset(scratch.sx[0], scratch.sy[0]), Offset(scratch.sx[1], scratch.sy[1]), 2.6f, StrokeCap.Round)
+        val skyColor = lerp(Color(0xFF7D97B8), Color(0xFF4CD8FF), lighting.cityLights * 0.6f).copy(alpha = 0.66f * blend)
+        scope.drawLine(lighting.inkOutlineColor.copy(alpha = 0.58f * blend), Offset(scratch.sx[0], scratch.sy[0]), Offset(scratch.sx[1], scratch.sy[1]), 4.6f, StrokeCap.Round)
+        scope.drawLine(skyColor, Offset(scratch.sx[0], scratch.sy[0]), Offset(scratch.sx[1], scratch.sy[1]), 2.8f, StrokeCap.Round)
     }
 
     val archSpacing = 24f
     val aScroll = (phase * 7.8f) % archSpacing
     for (slot in 5 downTo 0) {
         val zArch = 11f + slot * archSpacing - aScroll
-        if (zArch < 5f || zArch > 150f) continue
+        if (zArch < -8f || zArch > 155f) continue
 
-        drawCelBuilding3D(scope, cam, scratch, lighting, -25f, zArch, 18f, 18f, 14f, isRightWall = true, hasMegaScreen = false, hasBalconies = false, phase = phase, blend = blend * 0.90f, seed = 310 + slot)
-        drawCelBuilding3D(scope, cam, scratch, lighting, 25f, zArch, 18f, 18f, 14f, isRightWall = false, hasMegaScreen = false, hasBalconies = false, phase = phase, blend = blend * 0.90f, seed = 330 + slot)
+        if (landscapeMix > 0.04f) {
+            drawCelBuildingPair(
+                scope = scope, cam = cam, scratch = scratch, lighting = lighting,
+                xInner = 38f, width = 22f, depth = 18f, zCenter = zArch + 6f,
+                leftHeight = 36f + (slot % 3) * 10f,
+                rightHeight = 40f + ((slot + 1) % 3) * 10f,
+                style = TokyoBuildingStyle.ZAKKYO_COMMERCIAL,
+                hasMegaScreen = false, hasBalconies = false, phase = phase,
+                blend = blend * (0.62f + 0.30f * landscapeMix),
+                seed = 640 + slot * 19,
+            )
+        }
 
-        // Authentic multi-part Kawara curved-tile archways with detailed ribbed Chochin lanterns!
+        // Authentic sloped Kawara-roof Machiya souvenir stalls flanking Nakamise-dori
+        drawCelBuildingPair(
+            scope = scope,
+            cam = cam,
+            scratch = scratch,
+            lighting = lighting,
+            xInner = 16f,
+            width = 18f,
+            depth = 18f,
+            zCenter = zArch,
+            leftHeight = 11.5f,
+            rightHeight = 11.5f,
+            style = TokyoBuildingStyle.MACHIYA_TRADITIONAL,
+            hasMegaScreen = false,
+            hasBalconies = false,
+            phase = phase,
+            blend = blend * 0.94f,
+            seed = 310 + slot,
+        )
+
         val sway = sin(phase * 1.9f + slot * 0.8f) * 0.40f
         drawKawaraArchGate3D(
             scope = scope,
@@ -907,6 +1050,7 @@ private fun drawAsakusaDistrict(
             lighting = lighting,
             swayOffset = sway,
             blend = blend,
+            isMainKaminarimon = slot == 2,
         )
     }
 }
@@ -917,16 +1061,17 @@ private fun drawOdaibaDistrict(
     scratch: TokyoRenderScratch,
     lighting: TokyoLightingState,
     phase: Float,
+    landscapeMix: Float,
     blend: Float,
 ) {
     // 1. Anime Tokyo Bay water with crisp multi-band cel reflection highlights
-    val waterOk = cam.projectPoint(-200f, 0f, 34f, 0, scratch) &&
-        cam.projectPoint(200f, 0f, 34f, 1, scratch) &&
-        cam.projectPoint(240f, 0f, 220f, 2, scratch) &&
-        cam.projectPoint(-240f, 0f, 220f, 3, scratch)
-    if (waterOk) {
-        val waterTop = lerp(Color(0xFF285586), Color(0xFF0A142C), 0.30f + 0.68f * lighting.nightness)
-        val waterBot = lerp(Color(0xFF193C64), Color(0xFF070E20), 0.30f + 0.68f * lighting.nightness)
+    val waterTop = lerp(Color(0xFF33689E), Color(0xFF0C1732), 0.25f + 0.70f * lighting.nightness)
+    val waterBot = lerp(Color(0xFF1F4975), Color(0xFF081024), 0.25f + 0.70f * lighting.nightness)
+    if (cam.projectPoint(-240f, 0f, 34f, 0, scratch) &&
+        cam.projectPoint(240f, 0f, 34f, 1, scratch) &&
+        cam.projectPoint(280f, 0f, 225f, 2, scratch) &&
+        cam.projectPoint(-280f, 0f, 225f, 3, scratch)
+    ) {
         fillQuad(
             scope, scratch, 0, 1, 2, 3,
             Brush.verticalGradient(
@@ -936,57 +1081,61 @@ private fun drawOdaibaDistrict(
                 endY = scratch.sy[0].coerceAtLeast(cam.horizonY + 12f),
             ),
         )
+    } else {
+        drawClippedQuad3D(scope, cam, scratch, -240f, 0f, 34f, 240f, 0f, 34f, 280f, 0f, 225f, -280f, 0f, 225f, lerp(waterTop, waterBot, 0.5f).copy(alpha = 0.95f * blend))
     }
 
-    val shimmerColor = lerp(lighting.rimHighlightColor, lighting.billboardAccentA, lighting.nightness * 0.6f)
-    for (r in 0..13) {
-        val rz = 44f + r * 10.5f
-        val rx = sin(phase * 1.3f + r * 1.3f) * 26f
+    // Cel horizontal wave glints + inverted tower reflections on Tokyo Bay surface
+    val shimmerColor = lerp(lighting.rimHighlightColor, lighting.billboardAccentA, lighting.nightness * 0.55f)
+    for (r in 0..14) {
+        val rz = 42f + r * 10.5f
+        val rx = sin(phase * 1.2f + r * 1.4f) * (24f + landscapeMix * 16f)
         val halfSpan = 8f + (r % 3) * 5.5f
         if (cam.projectPoint(rx - halfSpan, 0.1f, rz, 0, scratch) &&
             cam.projectPoint(rx + halfSpan, 0.1f, rz, 1, scratch)
         ) {
-            val alpha = (0.24f + 0.28f * abs(sin(phase * 2.0f + r))) * blend
+            val alpha = (0.24f + 0.30f * abs(sin(phase * 2.0f + r))) * blend
             scope.drawLine(shimmerColor.copy(alpha = alpha), Offset(scratch.sx[0], scratch.sy[0]), Offset(scratch.sx[1], scratch.sy[1]), 1.9f, StrokeCap.Round)
         }
     }
 
-    // Timber coastal boardwalk + cel-outlined glass promenade balustrade
-    val boardColor = lerp(Color(0xFF544740), Color(0xFF22283A), lighting.nightness * 0.7f).copy(alpha = 0.95f * blend)
-    drawGroundRect(scope, cam, scratch, -95f, 95f, -4f, 34f, boardColor)
-    if (cam.projectPoint(-80f, 2.2f, 34f, 0, scratch) &&
-        cam.projectPoint(80f, 2.2f, 34f, 1, scratch)
+    // Timber coastal boardwalk promenade + cel-outlined glass balustrade + seaside trees
+    val boardColor = lerp(Color(0xFF68584E), Color(0xFF22283C), lighting.nightness * 0.72f).copy(alpha = 0.95f * blend)
+    drawGroundRect(scope, cam, scratch, -160f, 160f, -14f, 34f, boardColor, y = 0.04f)
+    if (cam.projectPoint(-130f, 2.2f, 34f, 0, scratch) &&
+        cam.projectPoint(130f, 2.2f, 34f, 1, scratch)
     ) {
-        scope.drawLine(lighting.rimHighlightColor.copy(alpha = 0.72f * blend), Offset(scratch.sx[0], scratch.sy[0]), Offset(scratch.sx[1], scratch.sy[1]), 2.2f)
+        scope.drawLine(lighting.rimHighlightColor.copy(alpha = 0.76f * blend), Offset(scratch.sx[0], scratch.sy[0]), Offset(scratch.sx[1], scratch.sy[1]), 2.2f)
     }
-    for (post in -3..3) {
-        val px = post * 12f
+    for (post in -4..4) {
+        val px = post * 14f
         if (cam.projectPoint(px, 0f, 34f, 0, scratch) &&
             cam.projectPoint(px, 2.3f, 34f, 1, scratch)
         ) {
             scope.drawLine(lighting.inkOutlineColor.copy(alpha = 0.88f * blend), Offset(scratch.sx[0], scratch.sy[0]), Offset(scratch.sx[1], scratch.sy[1]), 2.0f)
         }
     }
+    drawStreetTree3D(scope, cam, scratch, -24f, 24f, 9.5f, lighting, phase, blend, 91)
+    drawStreetTree3D(scope, cam, scratch, 28f, 26f, 8.8f, lighting, phase, blend, 92)
 
-    // 2. Iconic Rainbow Bridge with double-tier H-frame cel pylons, crossbeams & truss deck
+    // Waterfront Odaiba towers & Fuji-TV inspired spherical truss landmark across bay
+    drawCelBuilding3D(
+        scope, cam, scratch, lighting, -78f, 168f, 30f, 24f, 64f,
+        isRightWall = true, style = TokyoBuildingStyle.GLASS_TOWER,
+        hasMegaScreen = true, hasBalconies = false, phase = phase, blend = blend * 0.88f, seed = 512,
+    )
+
+    // 2. Iconic Rainbow Bridge with double-tier H-frame cel pylons & suspension cables
     val bz = 136f
     val deckY = 18f
     val pylonH = 54f
-    val towerCol = lerp(Color(0xFFE6EEF8), Color(0xFF94A5C4), lighting.nightness * 0.55f).copy(alpha = 0.95f * blend)
+    val towerCol = lerp(Color(0xFFE6EEF8), Color(0xFF94A5C4), lighting.nightness * 0.55f).copy(alpha = 0.96f * blend)
     val ink = lighting.inkOutlineColor.copy(alpha = 0.88f * blend)
     val bridgeLight = lerp(Color(0xFFFFDEA8), lighting.billboardAccentA, lighting.nightness * 0.5f).copy(alpha = (0.48f + 0.48f * lighting.cityLights) * blend)
 
     for (px in listOf(-38f, 38f)) {
-        // Left & right legs of each H-frame pylon + upper horizontal cross-strut
         for (legOff in listOf(-2.4f, 2.4f)) {
-            if (cam.projectPoint(px + legOff - 0.8f, 0f, bz, 0, scratch) &&
-                cam.projectPoint(px + legOff + 0.8f, 0f, bz, 1, scratch) &&
-                cam.projectPoint(px + legOff + 0.65f, pylonH, bz, 2, scratch) &&
-                cam.projectPoint(px + legOff - 0.65f, pylonH, bz, 3, scratch)
-            ) {
-                fillQuad(scope, scratch, 0, 1, 2, 3, towerCol)
-                strokeQuad(scope, scratch, 0, 1, 2, 3, ink, 1.1f)
-            }
+            drawCelBox3D(scope, cam, scratch, lighting, px + legOff - 0.8f, px + legOff + 0.8f, 0f, pylonH, bz - 0.8f, bz + 0.8f, towerCol, 0.22f, 1.1f, blend)
         }
         if (cam.projectPoint(px - 2.4f, pylonH - 8f, bz, 4, scratch) &&
             cam.projectPoint(px + 2.4f, pylonH - 8f, bz, 5, scratch) &&
@@ -998,14 +1147,11 @@ private fun drawOdaibaDistrict(
         }
     }
 
-    if (cam.projectPoint(-110f, deckY, bz, 0, scratch) &&
-        cam.projectPoint(110f, deckY, bz, 1, scratch) &&
-        cam.projectPoint(110f, deckY + 3.0f, bz, 2, scratch) &&
-        cam.projectPoint(-110f, deckY + 3.0f, bz, 3, scratch)
+    drawCelBox3D(scope, cam, scratch, lighting, -125f, 125f, deckY, deckY + 3.0f, bz - 1.2f, bz + 1.2f, towerCol, 0.22f, 1.1f, blend)
+    if (cam.projectPoint(-125f, deckY + 3.0f, bz - 1.2f, 0, scratch) &&
+        cam.projectPoint(125f, deckY + 3.0f, bz - 1.2f, 1, scratch)
     ) {
-        fillQuad(scope, scratch, 0, 1, 2, 3, towerCol)
-        strokeQuad(scope, scratch, 0, 1, 2, 3, ink, 1.1f)
-        scope.drawLine(bridgeLight, Offset(scratch.sx[3], scratch.sy[3]), Offset(scratch.sx[2], scratch.sy[2]), 2.4f)
+        scope.drawLine(bridgeLight, Offset(scratch.sx[0], scratch.sy[0]), Offset(scratch.sx[1], scratch.sy[1]), 2.4f)
     }
 
     val cableSegments = 14
@@ -1029,7 +1175,7 @@ private fun drawOdaibaDistrict(
         }
     }
 
-    for (anchor in listOf(Pair(-38f, -102f), Pair(38f, 102f))) {
+    for (anchor in listOf(Pair(-38f, -110f), Pair(38f, 110f))) {
         if (cam.projectPoint(anchor.first, pylonH, bz, 4, scratch) &&
             cam.projectPoint(anchor.second, deckY + 3f, bz, 5, scratch)
         ) {
@@ -1050,6 +1196,8 @@ private fun drawOdaibaDistrict(
         lighting = lighting,
         blend = blend,
     )
+    @Suppress("UNUSED_VARIABLE")
+    val _inkRef = ink
 }
 
 private fun drawCelBuildingPair(
@@ -1063,14 +1211,15 @@ private fun drawCelBuildingPair(
     zCenter: Float,
     leftHeight: Float,
     rightHeight: Float,
+    style: TokyoBuildingStyle,
     hasMegaScreen: Boolean,
     hasBalconies: Boolean,
     phase: Float,
     blend: Float,
     seed: Int,
 ) {
-    drawCelBuilding3D(scope, cam, scratch, lighting, -(xInner + width * 0.5f), zCenter, width, depth, leftHeight, isRightWall = true, hasMegaScreen = hasMegaScreen, hasBalconies = hasBalconies, phase = phase, blend = blend, seed = seed)
-    drawCelBuilding3D(scope, cam, scratch, lighting, (xInner + width * 0.5f), zCenter, width, depth, rightHeight, isRightWall = false, hasMegaScreen = hasMegaScreen, hasBalconies = hasBalconies, phase = phase, blend = blend, seed = seed + 7)
+    drawCelBuilding3D(scope, cam, scratch, lighting, -(xInner + width * 0.5f), zCenter, width, depth, leftHeight, isRightWall = true, style = style, hasMegaScreen = hasMegaScreen, hasBalconies = hasBalconies, phase = phase, blend = blend, seed = seed)
+    drawCelBuilding3D(scope, cam, scratch, lighting, (xInner + width * 0.5f), zCenter, width, depth, rightHeight, isRightWall = false, style = style, hasMegaScreen = hasMegaScreen, hasBalconies = hasBalconies, phase = phase, blend = blend, seed = seed + 7)
 }
 
 private fun drawTokyoTowerStructure(
@@ -1092,10 +1241,10 @@ private fun drawTokyoTowerStructure(
 
     if (lighting.towerGlow > 0.08f && cam.projectPoint(towerX, totalHeight * 0.54f, towerZ, 0, scratch)) {
         val center = Offset(scratch.sx[0], scratch.sy[0])
-        val haloRadius = scope.size.minDimension * 0.36f
+        val haloRadius = scope.size.minDimension * 0.38f
         scope.drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(lighting.towerGlowColor.copy(alpha = 0.25f * lighting.towerGlow * blend), Color.Transparent),
+                colors = listOf(lighting.towerGlowColor.copy(alpha = 0.28f * lighting.towerGlow * blend), Color.Transparent),
                 center = center,
                 radius = haloRadius,
             ),
@@ -1104,7 +1253,7 @@ private fun drawTokyoTowerStructure(
         )
     }
 
-    val inkCol = lighting.inkOutlineColor.copy(alpha = 0.78f * blend)
+    val inkCol = lighting.inkOutlineColor.copy(alpha = 0.80f * blend)
 
     for (tier in 0 until tiers) {
         val y0 = totalHeight * (tier.toFloat() / tiers)
@@ -1113,7 +1262,7 @@ private fun drawTokyoTowerStructure(
         val w1 = towerHalfWidth(y1)
         val dayMetal = if (tier % 2 == 0) lighting.towerOrangeColor else lighting.towerWhiteColor
         val litMetal = lerp(dayMetal, lighting.towerGlowColor, lighting.towerGlow * 0.72f)
-        val backStrut = litMetal.copy(alpha = 0.54f * blend)
+        val backStrut = litMetal.copy(alpha = 0.56f * blend)
         val frontStrut = litMetal.copy(alpha = 0.96f * blend)
 
         val projected = cam.projectPoint(towerX - w0, y0, towerZ - w0, 0, scratch) &&
@@ -1134,7 +1283,6 @@ private fun drawTokyoTowerStructure(
         drawTowerEdge(scope, scratch, 3, 6, backStrut, braceWidth * 0.8f)
         drawTowerEdge(scope, scratch, 2, 7, backStrut, braceWidth * 0.8f)
 
-        // Cel-outlined front structural legs + X-braces!
         drawTowerEdge(scope, scratch, 0, 4, inkCol, legWidth + 1.5f)
         drawTowerEdge(scope, scratch, 1, 5, inkCol, legWidth + 1.5f)
         drawTowerEdge(scope, scratch, 0, 4, frontStrut, legWidth)
@@ -1177,27 +1325,13 @@ private fun drawTowerDeck(
     blend: Float,
 ) {
     val hw = halfW
-    val ok = cam.projectPoint(tx - hw, deckY, tz - hw, 0, scratch) &&
-        cam.projectPoint(tx + hw, deckY, tz - hw, 1, scratch) &&
-        cam.projectPoint(tx + hw, deckY + deckH, tz - hw, 2, scratch) &&
-        cam.projectPoint(tx - hw, deckY + deckH, tz - hw, 3, scratch)
-    if (!ok) return
-
-    val inkCol = lighting.inkOutlineColor.copy(alpha = 0.85f * blend)
-    val deckBody = lerp(lighting.towerWhiteColor, lighting.towerGlowColor, lighting.towerGlow * 0.45f).copy(alpha = 0.96f * blend)
-    fillQuad(scope, scratch, 0, 1, 2, 3, deckBody)
-    strokeQuad(scope, scratch, 0, 1, 2, 3, inkCol, 1.2f)
+    val deckBody = lerp(lighting.towerWhiteColor, lighting.towerGlowColor, lighting.towerGlow * 0.45f)
+    drawCelBox3D(scope, cam, scratch, lighting, tx - hw, tx + hw, deckY, deckY + deckH, tz - hw, tz + hw, deckBody, 0.16f, 1.2f, blend)
 
     val winY0 = deckY + deckH * 0.34f
     val winY1 = deckY + deckH * 0.72f
-    if (cam.projectPoint(tx - hw * 0.9f, winY0, tz - hw, 4, scratch) &&
-        cam.projectPoint(tx + hw * 0.9f, winY0, tz - hw, 5, scratch) &&
-        cam.projectPoint(tx + hw * 0.9f, winY1, tz - hw, 6, scratch) &&
-        cam.projectPoint(tx - hw * 0.9f, winY1, tz - hw, 7, scratch)
-    ) {
-        val windowTint = lerp(Color(0xFF2B4D70), Color(0xFFFFDFA6), lighting.towerGlow * 0.85f).copy(alpha = 0.94f * blend)
-        fillQuad(scope, scratch, 4, 5, 6, 7, windowTint)
-    }
+    val windowTint = lerp(Color(0xFF2B4D70), Color(0xFFFFDFA6), lighting.towerGlow * 0.85f).copy(alpha = 0.94f * blend)
+    drawClippedQuad3D(scope, cam, scratch, tx - hw * 0.9f, winY0, tz - hw - 0.04f, tx + hw * 0.9f, winY0, tz - hw - 0.04f, tx + hw * 0.9f, winY1, tz - hw - 0.04f, tx - hw * 0.9f, winY1, tz - hw - 0.04f, windowTint)
 }
 
 private fun drawTowerEdge(
@@ -1226,13 +1360,16 @@ private fun drawGroundRect(
     z0: Float,
     z1: Float,
     color: Color,
+    y: Float = 0.04f,
 ) {
-    val ok = cam.projectPoint(x0, 0.04f, z0, 0, scratch) &&
-        cam.projectPoint(x1, 0.04f, z0, 1, scratch) &&
-        cam.projectPoint(x1, 0.04f, z1, 2, scratch) &&
-        cam.projectPoint(x0, 0.04f, z1, 3, scratch)
-    if (!ok) return
-    fillQuad(scope, scratch, 0, 1, 2, 3, color)
+    drawClippedQuad3D(
+        scope, cam, scratch,
+        x0, y, z0,
+        x1, y, z0,
+        x1, y, z1,
+        x0, y, z1,
+        color,
+    )
 }
 
 private fun drawDiagonalStripe(
@@ -1250,12 +1387,14 @@ private fun drawDiagonalStripe(
     val dz = halfLen * slope
     val nx = -slope * halfWid * 0.7f
     val nz = halfWid * 0.7f
-    val ok = cam.projectPoint(cx - dx - nx, 0.06f, cz - dz - nz, 0, scratch) &&
-        cam.projectPoint(cx + dx - nx, 0.06f, cz + dz - nz, 1, scratch) &&
-        cam.projectPoint(cx + dx + nx, 0.06f, cz + dz + nz, 2, scratch) &&
-        cam.projectPoint(cx - dx + nx, 0.06f, cz - dz + nz, 3, scratch)
-    if (!ok) return
-    fillQuad(scope, scratch, 0, 1, 2, 3, color)
+    drawClippedQuad3D(
+        scope, cam, scratch,
+        cx - dx - nx, 0.06f, cz - dz - nz,
+        cx + dx - nx, 0.06f, cz + dz - nz,
+        cx + dx + nx, 0.06f, cz + dz + nz,
+        cx - dx + nx, 0.06f, cz - dz + nz,
+        color,
+    )
 }
 
 private fun drawAnimePetalsAndLightMotes(
@@ -1267,10 +1406,9 @@ private fun drawAnimePetalsAndLightMotes(
 ) {
     val w = scope.size.width
     val h = scope.size.height
-    val petalColor = lerp(Color(0xFFFFD6E5), Color(0xFFFFB28A), 1f - lighting.daylight)
+    val petalColor = lerp(Color(0xFFFFDAE8), Color(0xFFFFB68E), 1f - lighting.daylight)
     val ink = lighting.inkOutlineColor.copy(alpha = 0.28f * blend)
 
-    // Soft anime sakura petals / atmospheric sun motes drifting smoothly through foreground depth
     for (p in 0..13) {
         val seed = p * 1.618f
         val xNorm = ((0.08f * p + phase * 0.025f + sin(phase * 0.9f + seed) * 0.04f - tilt.x * 0.08f) % 1f + 1f) % 1f
@@ -1304,7 +1442,7 @@ private fun drawTokyoAtmosphereVeil(
     scope.drawRect(
         brush = Brush.verticalGradient(
             (hFrac - 0.11f).coerceAtLeast(0f) to Color.Transparent,
-            hFrac to lighting.horizonColor.copy(alpha = lerpF(0.26f, 0.18f, lighting.nightness) * blend),
+            hFrac to lighting.horizonColor.copy(alpha = lerpF(0.28f, 0.18f, lighting.nightness) * blend),
             (hFrac + 0.13f).coerceAtMost(1f) to Color.Transparent,
         ),
     )
@@ -1312,7 +1450,7 @@ private fun drawTokyoAtmosphereVeil(
     scope.drawRect(
         brush = Brush.radialGradient(
             colors = listOf(
-                Color(0xFF060914).copy(alpha = lerpF(0.30f, 0.14f, lighting.nightness) * blend),
+                Color(0xFF060914).copy(alpha = lerpF(0.24f, 0.12f, lighting.nightness) * blend),
                 Color.Transparent,
             ),
             center = center,

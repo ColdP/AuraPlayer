@@ -4,13 +4,18 @@ package btm.m.auraplayer.playback
 import android.view.Surface
 import btm.m.auraplayer.lyrics.SpatialGyroFilter
 import btm.m.auraplayer.lyrics.computePvRowShiftX
+import btm.m.auraplayer.ui.player.Camera3D
 import btm.m.auraplayer.ui.player.LyricPvEffect
+import btm.m.auraplayer.ui.player.TokyoRenderScratch
 import btm.m.auraplayer.ui.player.agslShaderSourceForLyricTheme
+import btm.m.auraplayer.ui.player.clipAndBuildQuad
 import btm.m.auraplayer.ui.player.lerpWalkBlend
 import btm.m.auraplayer.ui.player.lyricThemeSpec
 import btm.m.auraplayer.ui.player.resolveCityWalkBillboardStyle
 import btm.m.auraplayer.ui.player.resolveTokyoLighting
 import btm.m.auraplayer.ui.player.resolveTokyoWalkBlend
+import btm.m.auraplayer.ui.player.shadeCelSurface
+import kotlin.math.sqrt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -230,5 +235,50 @@ class LyricThemeSettingsTest {
         val billboard = resolveCityWalkBillboardStyle(TokyoSceneLandmark.SHINJUKU_NEON, 4f)
         assertEquals("SHINJUKU · KABUKICHO", billboard.districtTag)
         assertTrue(billboard.wallTiltYDeg >= 25f)
+    }
+
+    @Test
+    fun celShadingAndNearPlaneClippingStayNormalizedAcrossAspectRatios() {
+        val noon = resolveTokyoLighting(TokyoSceneTime.NOON, 12, 0)
+        val night = resolveTokyoLighting(TokyoSceneTime.NIGHT, 22, 0)
+        val noonSunMag = sqrt(noon.sunDirX * noon.sunDirX + noon.sunDirY * noon.sunDirY + noon.sunDirZ * noon.sunDirZ)
+        assertEquals(1.0f, noonSunMag, 0.001f)
+
+        val litFace = shadeCelSurface(noon.facadeFrontDay, noon, noon.sunDirX, noon.sunDirY, noon.sunDirZ, fogT = 0f)
+        val shadowFace = shadeCelSurface(noon.facadeFrontDay, noon, -noon.sunDirX, -noon.sunDirY, -noon.sunDirZ, fogT = 0f)
+        assertTrue(litFace.red > shadowFace.red && litFace.blue > shadowFace.blue)
+        assertTrue(night.facadeFrontDay.blue > night.facadeFrontDay.red)
+
+        val scratch = TokyoRenderScratch()
+        val cam = Camera3D(
+            x = 0f,
+            y = 5f,
+            z = -18f,
+            sinYaw = 0f,
+            cosYaw = 1f,
+            sinPitch = 0f,
+            cosPitch = 1f,
+            focal = 1200f,
+            halfW = 540f,
+            horizonY = 1100f,
+        )
+        // Quad extending behind the camera (-22 < -18) should still clip cleanly to visible vertices.
+        val count = cam.clipAndBuildQuad(
+            -10f, 0f, -22f,
+            10f, 0f, -22f,
+            10f, 0f, 10f,
+            -10f, 0f, 10f,
+            scratch,
+        )
+        assertEquals(4, count)
+        // Quad completely behind near plane returns 0 vertices.
+        val culled = cam.clipAndBuildQuad(
+            -10f, 0f, -30f,
+            10f, 0f, -30f,
+            10f, 0f, -20f,
+            -10f, 0f, -20f,
+            scratch,
+        )
+        assertEquals(0, culled)
     }
 }

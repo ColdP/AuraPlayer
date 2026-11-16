@@ -126,6 +126,7 @@ data class NowPlayingConfig(
     val spatialCoverPowerNoticeDismissed: Boolean = false,
     val spatialCoverDepthModel: String = "depth_anything_v2_small",
     val spatialCoverMattingModel: String = "matting_u2netp",
+    val spatialCoverHardwareAcceleration: Boolean = true,
     val spatialCoverViewActive: Boolean = true,
     val mainLyricScalePercent: Float = LYRIC_SCALE_DEFAULT_PERCENT,
     val bgLyricScalePercent: Float = LYRIC_SCALE_DEFAULT_PERCENT,
@@ -190,6 +191,7 @@ internal object NowPlayingCodec {
         put("spatialCoverPowerNoticeDismissed", c.spatialCoverPowerNoticeDismissed)
         put("spatialCoverDepthModel", c.spatialCoverDepthModel)
         put("spatialCoverMattingModel", c.spatialCoverMattingModel)
+        put("spatialCoverHardwareAcceleration", c.spatialCoverHardwareAcceleration)
         put("spatialCoverViewActive", c.spatialCoverViewActive)
         put("appleMusicAnimatedCover", c.appleMusicAnimatedCover)
         put("albumAnimatedCover", c.albumAnimatedCover)
@@ -243,6 +245,7 @@ internal object NowPlayingCodec {
             spatialCoverPowerNoticeDismissed = j.optBoolean("spatialCoverPowerNoticeDismissed", defaults.spatialCoverPowerNoticeDismissed),
             spatialCoverDepthModel = j.optString("spatialCoverDepthModel", defaults.spatialCoverDepthModel).ifBlank { defaults.spatialCoverDepthModel },
             spatialCoverMattingModel = j.optString("spatialCoverMattingModel", defaults.spatialCoverMattingModel).ifBlank { defaults.spatialCoverMattingModel },
+            spatialCoverHardwareAcceleration = j.optBoolean("spatialCoverHardwareAcceleration", defaults.spatialCoverHardwareAcceleration),
             spatialCoverViewActive = j.optBoolean("spatialCoverViewActive", defaults.spatialCoverViewActive),
             appleMusicAnimatedCover = j.optBoolean("appleMusicAnimatedCover", defaults.appleMusicAnimatedCover),
             albumAnimatedCover = j.optBoolean("albumAnimatedCover", defaults.albumAnimatedCover),

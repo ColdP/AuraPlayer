@@ -58,16 +58,18 @@ Aura Player（包名 `btm.m.auraplayer`）是一款面向 Android 13（API 33）
 - **12 款风格化歌词主题与 3D 东京漫步**：内置多款 AGSL 着色器动态背景与“3D 东京”三渲二卡通渲染东京街景，支持“城市漫步”模式自动无缝切换与涩谷十字路口、东京塔、新宿不夜街、浅草仲见世、台场彩虹湾等场景及跟随系统/手动 6 种时段选择。
 - **实验性功能**：
   - **空间歌词效果**：基于陀螺仪驱动的多层歌词 3D 景深视差，支持倾斜灵敏度调节。
-  - **空间封面效果**：端侧运行深度估计与前景抠图，将平面专辑封面渲染为随陀螺仪倾斜的多层 3D 空间封面，支持倾斜灵敏度调节并**以专辑标题和专辑艺术家为单位自动复用空间缓存**；提供缓存管理、全屏陀螺仪预览，以及按需下载的 `arm64-v8a` ONNX Runtime 运行库与深度/抠图模型管理页（不内置于 APK 以控制安装包体积）。
+  - **空间封面效果**：端侧运行深度估计与前景抠图，将平面专辑封面渲染为随陀螺仪倾斜的多层 3D 空间封面，支持倾斜灵敏度调节、**硬件加速开关**（骁龙 8 Elite 及以上支持 QNN NPU / GPU 加速）并**以专辑标题和专辑艺术家为单位自动复用空间缓存**；提供缓存管理、全屏陀螺仪预览，以及按需下载的 `arm64-v8a` ONNX Runtime / QNN 运行库与深度/抠图模型管理页（不内置于 APK 以控制安装包体积）。
+  - **Aura Sing 端侧伴唱**：基于共享 `ONNX Runtime 1.31.0` 实现本地流式人声/伴奏分离，内置极速轻量的 `KUIELab B Vocals`、`UVR Inst HQ 4`、`Kim Vocal 2`（MDX-Net）与高精 `HTDemucs INT8 / FP16` 模型按需下载，支持播放页实时伴唱比例调节与双轨频谱显示、**硬件加速开关**（支持骁龙 8 Elite 及以上 QNN NPU / GPU 自动测速选优）以及多选自由组合导出分离后的无损 WAV / ZIP 音轨文件。
   - **背屏控制与歌词**：支持配合 Root 或 Shizuku 在副屏/背屏启动独立播放与歌词界面（支持 AMOLED 纯黑、歌词间距与背屏常亮开关）。
-- **多源歌词**：集成网易云、QQ 音乐、酷我、酷狗、LrcLib、AMLL 与 TTML Hub 歌词；支持逐字、翻译、发音、对唱、边缘渐隐模糊、点击跳转与浏览焦点 3 秒自动回位。
-- **歌词分享工作室**：内置 12 款模板（Aura Mesh、Cinema、Paper、Polaroid、Vinyl、Swiss 等），可自定义明暗模式、字体、背景、滤镜、行距、圆角与导出画质并保存或分享图片。
+- **多源与 LLM AI 歌词翻译**：集成网易云、QQ 音乐、酷我、酷狗、LrcLib、AMLL 与 TTML Hub 歌词；支持逐字、翻译、发音、对唱、边缘渐隐模糊、点击跳转与浏览焦点 3 秒自动回位、主歌词与翻译/音译独立字号缩放，并内置 **OpenAI 兼容 LLM AI 歌词翻译**（支持自动语言识别规则、缓存管理与原始返回记录排查）。
+- **歌词分享工作室**：内置经典版式（Aura Mesh、Cinema、Paper、Polaroid、Vinyl、Swiss 等 12 款）与全量 **12 款歌词主题模板**（共 24 款；歌词主题采用通透无框无胶囊排版），支持明暗模式切换、字体、自定义背景、胶片滤镜、行距、圆角、导出画质选择以及选中 **3D 东京** 时以模糊动画展开时段、东京场景与雪/雨天气下拉调节并导出图片。
 
-### 音效引擎与标签编辑
+### 音效引擎、标签编辑与更新
 
 - **内置 DSP 音效**：提供 15 个内置音效预设（原音忠实、温暖、通透、低音等）及自定义参数调节（多段均衡器、前级增益、自动增益保护、立体声宽度、低域交叉馈送、谐波染色与动态压缩），支持音频淡入淡出、“始终保持播放”以及 Android 原生“上一首”行为（超过 3 秒返回开头）。
 - **预设分享**：支持通过 JSON 文件、JSON 文本或 ZXing 二维码导入、导出与分享音效预设。
 - **本地标签与音频详情**：基于 `jaudiotagger`，支持查看本地音频详情（编码、格式、采样率、位深、码率）与编辑歌曲标题、艺术家、专辑、专辑艺术家、发行日期、年份、音轨号、作曲、作词、注释与内嵌封面（写入前需通过系统文件写入授权）。
+- **应用内更新检查**：支持从设置页面检查 GitHub Releases 最新版本与更新日志。
 
 ### 外观定制与多语言
 
@@ -81,7 +83,7 @@ Aura Player（包名 `btm.m.auraplayer`）是一款面向 Android 13（API 33）
 | --- | --- |
 | 最低版本 | Android 13（API 33） |
 | 编译 / 目标 SDK | API 37 |
-| 支持架构 | `arm64-v8a`（空间封面所需的 ONNX Runtime 与模型按需下载） |
+| 支持架构 | `arm64-v8a`（空间封面与 Aura Sing 所需的 ONNX Runtime、QNN NPU 运行包及模型按需下载） |
 | 权限用途 | `READ_MEDIA_AUDIO`（本地库与标签）、`INTERNET`（在线播放、歌词与可选动态/空间资源下载）、`MODIFY_AUDIO_SETTINGS`（音效）、`POST_NOTIFICATIONS` 与前台媒体服务（通知与后台播放） |
 
 ## 从源码构建
@@ -152,7 +154,7 @@ Aura-Player/
 - 首页结构与 MediaStore 排序逻辑适配自 [Retro Music](https://github.com/RetroMusicPlayer/RetroMusicPlayer)（GPL-3.0-or-later）。
 - 控件与风格组件基于 [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）、[Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0），歌单标题栏搜索组件使用 [COUI-Kit](https://github.com/ItosEO/COUI-Kit)（MPL-2.0），`One` 界面风格与交互控件（`MonetTones`、`OneUiPalette`、`BoSwitchView`、`DragOnlySeekBar`）移植自 [OneUI_Kit](https://github.com/TGP258/OneUI_Kit)（MIT，源自 [OneUIProject/oneui-design](https://github.com/OneUIProject/oneui-design) 与 [OneUIProject/oneui-core](https://github.com/OneUIProject/oneui-core)）。
 - 歌词与 Apple Music 动态封面来源：[HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（AGPL-3.0）、[HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced)（GPL-3.0 / Apache-2.0）与 [Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics)（Apache-2.0）。
-- 空间封面可选运行库与模型来源：[ONNX Runtime](https://github.com/microsoft/onnxruntime)（MIT，按需下载）、[Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) / [Depth Anything 3](https://github.com/ByteDance-Seed/depth-anything-3)（Apache-2.0）、[MiDaS](https://github.com/isl-org/MiDaS)（MIT）、[U2Net / DIS (rembg)](https://github.com/danielgatis/rembg)（MIT / Apache-2.0）与 [BiRefNet](https://github.com/ZhengPeng7/BiRefNet)（MIT）。
+- 端侧 AI 可选运行库与模型来源：[ONNX Runtime](https://github.com/microsoft/onnxruntime)（MIT，按需下载）、Qualcomm AI Engine Direct (QNN) 2.51.0 加速运行库（可选按需下载，仅限高通许可）、[Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) / [Depth Anything 3](https://github.com/ByteDance-Seed/depth-anything-3)（Apache-2.0）、[MiDaS](https://github.com/isl-org/MiDaS)（MIT）、[U2Net / DIS (rembg)](https://github.com/danielgatis/rembg)（MIT / Apache-2.0）、[BiRefNet](https://github.com/ZhengPeng7/BiRefNet)（MIT）、[Demucs v4 (HTDemucs)](https://github.com/facebookresearch/demucs)（MIT）及 [UVR / MDX-Net](https://github.com/Anjok07/ultimatevocalremovergui) / [KUIELab](https://github.com/kuielab/sdx23)（MIT）。
 - 其他核心依赖：[Media3](https://developer.android.com/media/media3)、[Coil](https://github.com/coil-kt/coil)、[OkHttp](https://github.com/square/okhttp)、[jaudiotagger](https://github.com/Adonai/jaudiotagger-android)（LGPL-2.1）、[MaterialKolor](https://github.com/jordond/MaterialKolor)（MIT）、[ZXing](https://github.com/zxing/zxing)（Apache-2.0）、[Shizuku](https://github.com/RikkaApps/Shizuku)（Apache-2.0）及 [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT）。
 
 ## Star History

@@ -58,16 +58,18 @@ Aura Player（パッケージ名 `btm.m.auraplayer`）は、Android 13（API 33�
 - **12 種の歌詞テーマと 3D 東京シティウォーク**：再構築された AGSL シェーダー背景に加え、セルシェーディング（三渲二）表現の **3D 東京** テーマを搭載。「シティウォーク」による自動シームレス遷移および渋谷スクランブル交差点・東京タワー・新宿ネオン街・浅草仲見世・お台場レインボーベイなどのシーン選択と 6 種の時間帯（またはシステム時刻連動）に対応しています。
 - **実験的機能**：
   - **空間歌詞**：ジャイロスコープ連動の多層 3D 奥行き視差歌詞表示（傾き感度スライダー対応）。
-  - **空間カバー**：端末上での深度推定と人物切り抜きにより、ジャイロ連動の多層 3D 空間カバー（傾き感度調整対応）を生成します。**アルバム名とアルバムアーティスト単位で空間キャッシュを共有・再利用**し、キャッシュ管理と全画面プレビューを備え、`arm64-v8a` 版 ONNX Runtime および各モデルはオンデマンドダウンロードに対応しています（APK 容量削減のため同梱しません）。
+  - **空間カバー**：端末上での深度推定と人物切り抜きにより、ジャイロ連動の多層 3D 空間カバー（傾き感度調整および**ハードウェアアクセラレーション切り替え**、Snapdragon 8 Elite 以降の QNN NPU / GPU 加速対応）を生成します。**アルバム名とアルバムアーティスト単位で空間キャッシュを共有・再利用**し、キャッシュ管理と全画面プレビューを備え、`arm64-v8a` 版 ONNX Runtime／QNN パックおよび各モデルはオンデマンドダウンロードに対応しています（APK 容量削減のため同梱しません）。
+  - **Aura Sing（端末内ボーカル・伴奏分離）**：共有 `ONNX Runtime 1.31.0` を用いたストリーミング音声分離に対応し、高速軽量な MDX-Net（`KUIELab B Vocals`、`UVR Inst HQ 4`、`Kim Vocal 2`）および `HTDemucs INT8 / FP16` モデルをオンデマンド取得できます。再生画面でのボーカル音量調整、2 チャンネルリアルタイムスペクトラム表示、**ハードウェアアクセラレーション切り替え**（Snapdragon 8 Elite 以降の QNN NPU / GPU 自動ベンチマーク対応）、複数選択でのロスレス WAV / ZIP 一括エクスポートに対応しています。
   - **背面ディスプレイ表示**：Root または Shizuku を利用し、対応端末の背面ディスプレイでの歌詞・再生操作に対応しています（AMOLED ピュアブラック、歌詞行間隔、画面常時点灯に対応）。
-- **マルチソース歌詞**：NetEase、QQ Music、Kuwo、Kugou、LrcLib、AMLL、TTML Hub から歌詞を取得し、字単位同期、翻訳、発音、デュエット配置、端のぼかしフェードシェーダー、タップシーク、3 秒後の自動フォーカス復帰に対応しています。
-- **歌詞共有スタジオ**：12 種のカードテンプレート（Aura Mesh、Cinema、Paper、Polaroid、Vinyl、Swiss など）を備え、ライト／ダーク切替、フォント、背景、フィルター、行間、角丸、出力画質を調整して画像保存・共有できます。
+- **マルチソース歌詞と LLM AI 翻訳**：NetEase、QQ Music、Kuwo、Kugou、LrcLib、AMLL、TTML Hub から歌詞を取得し、字単位同期、翻訳、発音、デュエット配置、端のぼかしフェードシェーダー、タップシーク、3 秒後の自動フォーカス復帰、メイン／翻訳・発音それぞれの独立倍率設定に加え、**OpenAI 互換 LLM による AI 歌詞翻訳**（自動言語スキップルール、キャッシュ編集、生レスポンス履歴ビューア）に対応しています。
+- **歌詞共有スタジオ**：従来の 12 種テンプレート（Aura Mesh、Cinema、Paper、Polaroid、Vinyl、Swiss など）に加え、全 **12 種の歌詞テーマ**（計 24 種；歌詞テーマは枠線やカプセル背景のない透過レイアウト）を備え、ライト／ダーク切替、フォント、背景、フィルター、行間、角丸、出力画質を調整できるほか、**3D 東京** 選択時にはぼかしアニメーション付きで時間帯・ランドマーク・雪／雨エフェクトのドロップダウンを展開できます。
 
-### 音響効果とタグエディター
+### 音響効果、タグエディター、アップデート
 
 - **内蔵 DSP エンジン**：15 種類の内蔵プリセット（原音忠実、ぬくもり、透明感、深い低音など）とリアルタイムのカスタム調整（マルチバンド EQ、プリアンプ、自動ゲイン保護、ステレオ幅、低域クロスフィード、倍音の色付け、ダイナミクスコンプレッサー）を搭載し、フェードイン／アウト、「常に再生」、Android 標準の前曲動作（3 秒超で頭出し）に対応しています。
 - **プリセット共有**：Aura JSON ファイル、JSON テキスト、ZXing QR コードによるプリセットのインポート・エクスポート・共有が可能です。
 - **ローカルタグエディターと音声情報**：`jaudiotagger` により曲名、アーティスト、アルバム、アルバムアーティスト、発売日、年、トラック番号、作曲者、作詞者、コメント、埋め込みカバーアートを編集でき、コーデック・形式・サンプルレート・ビット深度・ビットレートも確認できます（書き込み承認後に保存）。
+- **アプリ内アップデート確認**：設定画面から GitHub Releases の最新バージョンとリリースノートを確認できます。
 
 ### 外観カスタマイズと多言語
 
@@ -81,7 +83,7 @@ Aura Player（パッケージ名 `btm.m.auraplayer`）は、Android 13（API 33�
 | --- | --- |
 | 最小 Android バージョン | Android 13（API 33） |
 | コンパイル / ターゲット SDK | API 37 |
-| 対応 ABI | `arm64-v8a`（空間カバー用の ONNX Runtime とモデルは必要に応じて個別ダウンロード） |
+| 対応 ABI | `arm64-v8a`（空間カバー・Aura Sing 用の ONNX Runtime / QNN NPU パックとモデルは必要に応じて個別ダウンロード） |
 | 主な権限 | `READ_MEDIA_AUDIO`（ローカルライブラリとタグ編集）、`INTERNET`（オンライン再生・歌詞・動的／空間アートワーク取得）、`MODIFY_AUDIO_SETTINGS`（音響効果）、`POST_NOTIFICATIONS` およびフォアグラウンドメディア再生サービス（再生操作とダウンロード通知） |
 
 ## ソースコードからのビルド
@@ -152,7 +154,7 @@ Issue や Pull Request を歓迎します。参加前に [日本語コントリ�
 - ホーム構成と MediaStore ソート処理の参考・移植：[Retro Music](https://github.com/RetroMusicPlayer/RetroMusicPlayer)（GPL-3.0-or-later）。
 - UI コンポーネントと各種スタイル表現：[MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）、[Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0）；プレイリストタイトルバーの検索コンポーネントは [COUI-Kit](https://github.com/ItosEO/COUI-Kit)（MPL-2.0）、`One` スタイルおよびスイッチ・シークバー（`MonetTones`、`OneUiPalette`、`BoSwitchView`、`DragOnlySeekBar`）は [OneUI_Kit](https://github.com/TGP258/OneUI_Kit)（MIT、[OneUIProject/oneui-design](https://github.com/OneUIProject/oneui-design) および [OneUIProject/oneui-core](https://github.com/OneUIProject/oneui-core) 由来）を使用しています。
 - 歌詞の取得・照合・描画および Apple Music モーションカバー取得：[HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（AGPL-3.0）、[HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced)（GPL-3.0 / Apache-2.0）、[Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics)（Apache-2.0）。
-- 空間カバーの任意ランタイムおよび推論モデル：[ONNX Runtime](https://github.com/microsoft/onnxruntime)（MIT・オンデマンド取得）、[Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) / [Depth Anything 3](https://github.com/ByteDance-Seed/depth-anything-3)（Apache-2.0）、[MiDaS](https://github.com/isl-org/MiDaS)（MIT）、[U2Net / DIS (rembg)](https://github.com/danielgatis/rembg)（MIT / Apache-2.0）、[BiRefNet](https://github.com/ZhengPeng7/BiRefNet)（MIT）。
+- 端末内 AI の任意ランタイムおよび推論モデル：[ONNX Runtime](https://github.com/microsoft/onnxruntime)（MIT・オンデマンド取得）、Qualcomm AI Engine Direct (QNN) 2.51.0 加速パッケージ（任意・オンデマンド取得・Qualcomm SDK 利用許諾に準拠）、[Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) / [Depth Anything 3](https://github.com/ByteDance-Seed/depth-anything-3)（Apache-2.0）、[MiDaS](https://github.com/isl-org/MiDaS)（MIT）、[U2Net / DIS (rembg)](https://github.com/danielgatis/rembg)（MIT / Apache-2.0）、[BiRefNet](https://github.com/ZhengPeng7/BiRefNet)（MIT）、[Demucs v4 (HTDemucs)](https://github.com/facebookresearch/demucs)（MIT）、[UVR / MDX-Net](https://github.com/Anjok07/ultimatevocalremovergui) / [KUIELab](https://github.com/kuielab/sdx23)（MIT）。
 - その他の主な依存ライブラリ：[Media3](https://developer.android.com/media/media3)、[Coil](https://github.com/coil-kt/coil)、[OkHttp](https://github.com/square/okhttp)、[jaudiotagger](https://github.com/Adonai/jaudiotagger-android)（LGPL-2.1）、[MaterialKolor](https://github.com/jordond/MaterialKolor)（MIT）、[ZXing](https://github.com/zxing/zxing)（Apache-2.0）、[Shizuku](https://github.com/RikkaApps/Shizuku)（Apache-2.0）、[NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT）。
 
 ## Star History

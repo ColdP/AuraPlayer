@@ -57,7 +57,7 @@ class PlaybackService : MediaSessionService() {
             .setUpstreamDataSourceFactory(resolving)
             .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         val mediaSourceFactory = DefaultMediaSourceFactory(source)
-        val player = ExoPlayer.Builder(this, btm.m.auraplayer.audio.EffectsRenderersFactory(this, app.effects)).setMediaSourceFactory(mediaSourceFactory).build().apply {
+        val player = ExoPlayer.Builder(this, btm.m.auraplayer.audio.EffectsRenderersFactory(this, app.effects, app.auraSing)).setMediaSourceFactory(mediaSourceFactory).build().apply {
             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), !app.effects.state.value.alwaysPlay)
             setHandleAudioBecomingNoisy(true)
             repeatMode = androidx.media3.common.Player.REPEAT_MODE_ALL
@@ -65,6 +65,7 @@ class PlaybackService : MediaSessionService() {
         }
         restoreState(player)
         app.effects.notifyTrackChanged(trackKey(player.currentMediaItem))
+        notifyAuraSingTrack(app, player)
         player.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
             override fun onAudioSessionIdChanged(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, audioSessionId: Int) {
                 app.effects.audioSessionId = audioSessionId
@@ -75,9 +76,20 @@ class PlaybackService : MediaSessionService() {
         player.shuffleModeEnabled = state.getBoolean("shuffle", false)
         auraMix = AuraMixManager(this, player, mediaSourceFactory, app.effects, app.auraMix, serviceScope)
         player.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onPositionDiscontinuity(
+                oldPosition: androidx.media3.common.Player.PositionInfo,
+                newPosition: androidx.media3.common.Player.PositionInfo,
+                reason: Int,
+            ) {
+                if (reason != androidx.media3.common.Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+                    app.auraSing.notifyPositionDiscontinuity(newPosition.positionMs.coerceAtLeast(0L))
+                }
+            }
+
             override fun onEvents(player: androidx.media3.common.Player, events: androidx.media3.common.Player.Events) {
                 if (events.contains(androidx.media3.common.Player.EVENT_MEDIA_ITEM_TRANSITION)) {
                     app.effects.notifyTrackChanged(trackKey(player.currentMediaItem))
+                    notifyAuraSingTrack(app, player)
                 }
                 // Volume ramps must not serialize the entire queue on every animation frame.
                 if (events.containsAny(
@@ -150,6 +162,21 @@ class PlaybackService : MediaSessionService() {
 
     private fun trackKey(item: MediaItem?): String =
         item?.let { it.mediaId.ifBlank { it.localConfiguration?.uri?.toString().orEmpty() } }.orEmpty()
+
+    private fun notifyAuraSingTrack(app: AuraApplication, player: androidx.media3.common.Player) {
+        val item = player.currentMediaItem
+        val key = trackKey(item)
+        val uri = item?.localConfiguration?.uri?.toString().orEmpty()
+        val md = item?.mediaMetadata
+        app.auraSing.notifyTrackChanged(
+            songKey = key,
+            uriString = uri,
+            title = md?.title?.toString().orEmpty(),
+            artist = md?.artist?.toString().orEmpty(),
+            album = md?.albumTitle?.toString().orEmpty(),
+            positionMs = player.currentPosition.coerceAtLeast(0L),
+        )
+    }
 
     private fun restoreState(player: androidx.media3.exoplayer.ExoPlayer) {
         val count = state.getInt("count", 0)

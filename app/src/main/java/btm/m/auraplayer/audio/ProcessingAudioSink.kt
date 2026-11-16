@@ -5,12 +5,14 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.audio.*
+import btm.m.auraplayer.sing.AuraSingEngine
 import java.nio.ByteBuffer
 
 @UnstableApi
 internal class ProcessingAudioSink(
     sink: AudioSink,
     private val waveform: OutputWaveform? = null,
+    private val auraSing: AuraSingEngine? = null,
     smartStyle: () -> SoundStyle? = { null },
     trackGeneration: () -> Long = { 0L },
     onSmartConfig: (DspConfig) -> Unit = {},
@@ -21,6 +23,7 @@ internal class ProcessingAudioSink(
     private val processor = AuraAudioProcessor(config, smartStyle, trackGeneration, onSmartConfig)
     private var pendingInput: ByteBuffer? = null
     private var pendingOutput: ByteBuffer? = null
+    private var singScratch: ByteBuffer? = null
     private var readPosition = 0
     private var startPosition = 0
     private var frameSize = 1
@@ -49,6 +52,10 @@ internal class ProcessingAudioSink(
         pendingInput = null; pendingOutput = null
         super.configure(inputFormat, specifiedBufferSize, outputChannels)
     }
+    override fun handleDiscontinuity() {
+        auraSing?.onAudioSinkDiscontinuity()
+        super.handleDiscontinuity()
+    }
     override fun handleBuffer(buffer: ByteBuffer, presentationTimeUs: Long, encodedAccessUnitCount: Int): Boolean {
         if (pendingInput == null) {
             if (!buffer.hasRemaining()) return true
@@ -65,7 +72,23 @@ internal class ProcessingAudioSink(
                 val end = readPosition + minOf(chunkBytes, buffer.limit() - readPosition)
                 val chunk = buffer.duplicate().apply { position(readPosition); limit(end) }
                 chunkTimeUs = presentationTimeUs + (readPosition - startPosition).toLong() / frameSize * 1_000_000 / sampleRate
-                processor.queueInput(chunk)
+                val inputForProcessor = if (auraSing != null && auraSing.isAudioMixingActive) {
+                    val len = chunk.remaining()
+                    var scratch = singScratch
+                    if (scratch == null || scratch.capacity() < len) {
+                        scratch = ByteBuffer.allocateDirect(len)
+                        singScratch = scratch
+                    }
+                    scratch.clear()
+                    scratch.put(chunk)
+                    scratch.flip()
+                    auraSing.processAudioChunk(scratch, chunkTimeUs, encoding, channels, sampleRate)
+                    scratch
+                } else {
+                    auraSing?.processAudioChunk(chunk, chunkTimeUs, encoding, channels, sampleRate)
+                    chunk
+                }
+                processor.queueInput(inputForProcessor)
                 pendingOutput = processor.output
                 waveform?.offer(pendingOutput!!, encoding, channels, sampleRate)
                 readPosition = end
@@ -80,12 +103,14 @@ internal class ProcessingAudioSink(
     }
     override fun flush() {
         waveform?.reset()
+        auraSing?.onAudioSinkFlush()
         pendingInput = null; pendingOutput = null
         if (configured) processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
         super.flush()
     }
     override fun reset() {
         waveform?.reset()
+        auraSing?.onAudioSinkFlush()
         pendingInput = null; pendingOutput = null; configured = false
         processor.reset(); super.reset()
     }

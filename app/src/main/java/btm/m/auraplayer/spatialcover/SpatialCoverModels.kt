@@ -29,6 +29,10 @@ data class SpatialModelResource(
     val sha256: String,
     val subDir: String,
     val isArchive: Boolean = false,
+    val archiveEntryName: String? = null,
+    val extractedSizeBytes: Long = 0L,
+    val extractedSha256: String? = null,
+    val archiveRequiredFiles: Set<String> = emptySet(),
 )
 
 /**
@@ -251,16 +255,19 @@ object SpatialModelStore {
     fun isReady(context: Context, resource: SpatialModelResource): Boolean {
         val marker = markerFile(context, resource)
         if (!marker.isFile) return false
-        if (resource.isArchive) {
+        val markerSha = runCatching { marker.readText().trim() }.getOrNull()
+        if (!markerSha.equals(resource.sha256, ignoreCase = true)) return false
+        if (resource.isArchive && resource.archiveEntryName == null) {
             val dir = directory(context, resource.subDir)
-            val core = File(dir, RUNTIME_CORE_SO)
-            val jni = File(dir, RUNTIME_JNI_SO)
-            if (!core.isFile || core.length() <= 0L || !jni.isFile || jni.length() <= 0L) return false
-            val markerSha = runCatching { marker.readText().trim() }.getOrNull()
-            return markerSha.equals(resource.sha256, ignoreCase = true)
+            val required = resource.archiveRequiredFiles.ifEmpty { RUNTIME_REQUIRED_LIBS }
+            return required.all { name ->
+                val f = File(dir, name)
+                f.isFile && f.length() > 0L
+            }
         }
         val target = file(context, resource)
-        return target.isFile && target.length() == resource.sizeBytes
+        val expectedBytes = if (resource.extractedSizeBytes > 0L) resource.extractedSizeBytes else resource.sizeBytes
+        return target.isFile && target.length() == expectedBytes
     }
 
     fun downloadedBytes(context: Context, resource: SpatialModelResource): Long {
@@ -273,9 +280,10 @@ object SpatialModelStore {
         file(context, resource).delete()
         partialFile(context, resource).delete()
         markerFile(context, resource).delete()
-        if (resource.isArchive) {
+        if (resource.isArchive && resource.archiveEntryName == null) {
             val dir = directory(context, resource.subDir)
-            for (name in RUNTIME_REQUIRED_LIBS) {
+            val required = resource.archiveRequiredFiles.ifEmpty { RUNTIME_REQUIRED_LIBS }
+            for (name in required) {
                 File(dir, name).delete()
             }
         }
@@ -290,8 +298,10 @@ object SpatialModelStore {
 
     fun allDownloadableResources(): List<SpatialModelResource> =
         listOfNotNull(runtimeResource()) +
+            listOfNotNull(btm.m.auraplayer.sing.AuraSingQualcommNpu.runtimeResource()) +
             SpatialDepthModel.entries.map { it.resource } +
-            SpatialMattingModel.downloadableEntries.mapNotNull { it.resource }
+            SpatialMattingModel.downloadableEntries.mapNotNull { it.resource } +
+            btm.m.auraplayer.sing.AuraSingModel.entries.map { it.resource }
 
     suspend fun download(
         context: Context,
@@ -351,9 +361,22 @@ object SpatialModelStore {
                 partial.delete()
                 error("文件校验失败")
             }
-            if (resource.isArchive) {
+            if (resource.isArchive && resource.archiveEntryName != null) {
+                extractSingleFileArchive(
+                    zipFile = partial,
+                    entryName = resource.archiveEntryName,
+                    targetFile = target,
+                    expectedSize = resource.extractedSizeBytes,
+                    expectedSha256 = resource.extractedSha256,
+                )
+                partial.delete()
+                markerFile(context, resource).writeText(resource.sha256)
+                onProgress(resource.sizeBytes, resource.sizeBytes, 0L)
+                target
+            } else if (resource.isArchive) {
                 val dir = directory(context, resource.subDir)
-                extractRuntimeArchive(partial, dir)
+                val required = resource.archiveRequiredFiles.ifEmpty { RUNTIME_REQUIRED_LIBS }
+                extractRuntimeArchive(partial, dir, required)
                 partial.delete()
                 markerFile(context, resource).writeText(resource.sha256)
                 onProgress(resource.sizeBytes, resource.sizeBytes, 0L)
@@ -370,7 +393,11 @@ object SpatialModelStore {
         }
     }
 
-    internal fun extractRuntimeArchive(zipFile: File, targetDir: File) {
+    internal fun extractRuntimeArchive(
+        zipFile: File,
+        targetDir: File,
+        requiredFiles: Set<String> = RUNTIME_REQUIRED_LIBS,
+    ) {
         if (!targetDir.isDirectory) targetDir.mkdirs()
         val extracted = mutableSetOf<String>()
         ZipInputStream(zipFile.inputStream().buffered()).use { zis ->
@@ -379,7 +406,7 @@ object SpatialModelStore {
                 try {
                     if (entry.isDirectory) continue
                     val rawName = entry.name.replace('\\', '/').substringAfterLast('/')
-                    if (rawName !in RUNTIME_REQUIRED_LIBS || entry.name.contains("..")) continue
+                    if (rawName !in requiredFiles || entry.name.contains("..")) continue
                     val outFile = File(targetDir, rawName)
                     val tmpFile = File(targetDir, "$rawName.tmp")
                     tmpFile.delete()
@@ -402,8 +429,59 @@ object SpatialModelStore {
                 }
             }
         }
-        check(extracted.containsAll(RUNTIME_REQUIRED_LIBS)) {
+        check(extracted.containsAll(requiredFiles)) {
             "运行库压缩包内容不完整"
+        }
+    }
+
+    internal fun extractSingleFileArchive(
+        zipFile: File,
+        entryName: String,
+        targetFile: File,
+        expectedSize: Long,
+        expectedSha256: String?,
+    ) {
+        targetFile.parentFile?.let { if (!it.isDirectory) it.mkdirs() }
+        val tmpFile = File(targetFile.parentFile, "${targetFile.name}.extracting")
+        tmpFile.delete()
+        var found = false
+        ZipInputStream(zipFile.inputStream().buffered()).use { zis ->
+            while (true) {
+                val entry = zis.nextEntry ?: break
+                try {
+                    if (entry.isDirectory) continue
+                    val rawName = entry.name.replace('\\', '/').substringAfterLast('/')
+                    if (rawName != entryName || entry.name.contains("..")) continue
+                    FileOutputStream(tmpFile).use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val read = zis.read(buffer)
+                            if (read < 0) break
+                            output.write(buffer, 0, read)
+                        }
+                        output.flush()
+                        output.fd.sync()
+                    }
+                    found = true
+                    break
+                } finally {
+                    zis.closeEntry()
+                }
+            }
+        }
+        check(found) { "压缩包内缺少模型文件: $entryName" }
+        if (expectedSize > 0L && tmpFile.length() != expectedSize) {
+            tmpFile.delete()
+            error("解压后模型文件大小不匹配")
+        }
+        if (!expectedSha256.isNullOrBlank() && !sha256(tmpFile).equals(expectedSha256, ignoreCase = true)) {
+            tmpFile.delete()
+            error("解压后模型校验失败")
+        }
+        targetFile.delete()
+        if (!tmpFile.renameTo(targetFile)) {
+            tmpFile.delete()
+            error("无法保存解压后的模型文件")
         }
     }
 

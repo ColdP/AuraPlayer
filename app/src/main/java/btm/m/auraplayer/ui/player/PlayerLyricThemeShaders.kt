@@ -474,7 +474,8 @@ half4 main(float2 fragCoord) {
     float nightness = clamp(uTintB.a, 0.0, 1.0);
     float twilight = clamp(1.0 - abs(daylight - 0.32) * 2.1, 0.0, 1.0) * (1.0 - nightness * 0.55);
 
-    float horizonY = 0.49 + uTilt.y * 0.04;
+    float landscapeMix = clamp((aspect - 0.85) / 0.85, 0.0, 1.0);
+    float horizonY = mix(0.47, 0.495, landscapeMix) + uTilt.y * 0.042;
     float skyT = clamp(1.0 - uv.y / max(horizonY, 0.08), 0.0, 1.0);
 
     float3 zenith = uTintA.rgb;
@@ -545,9 +546,9 @@ half4 main(float2 fragCoord) {
     float3 celCloud = mix(cloudShadowCol, cloudLitCol, cloudLit);
     sky = mix(sky, celCloud, cloudAlpha * mix(0.45, 0.74, max(daylight, twilight)));
 
-    // Crisp Kanto mountain ridge & snow-capped Mt. Fuji silhouette
-    float fujiX = (uv.x - (0.24 - uTilt.x * 0.02)) * aspect;
-    float ridge = 0.018 * sin(uv.x * 9.5 + 1.2) + 0.010 * cos(uv.x * 20.0);
+    // Crisp Kanto mountain ridge & snow-capped Mt. Fuji silhouette, responsive across portrait and landscape
+    float fujiX = (uv.x - (mix(0.26, 0.22, landscapeMix) - uTilt.x * 0.02)) * min(aspect, 1.45);
+    float ridge = 0.016 * sin(uv.x * mix(8.0, 13.0, landscapeMix) + 1.2) + 0.009 * cos(uv.x * 20.0);
     float fujiCone = max(0.0, 0.056 - abs(fujiX) * 0.46);
     float mtnHeight = horizonY - max(ridge * smoothstep(0.15, 0.55, uv.y), fujiCone) * 0.70;
     float inMountain = smoothstep(mtnHeight + 0.0025, mtnHeight - 0.0025, uv.y) * step(uv.y, horizonY + 0.012);

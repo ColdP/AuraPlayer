@@ -111,7 +111,7 @@ fun NowPlayingSettingsPage(padding: PaddingValues, open: (String) -> Unit = {}) 
                     store.update { it.copy(glowProgress = GlowProgressStyle.entries[index]) }
                 }
                 GlassDropdownPreference(tr("player_special_effect", "特殊效果"),
-                    listOf(tr("player_effect_none", "不显示"), tr("player_effect_snow", "降雪"), tr("player_effect_rain", "降雨")),
+                    playerWeatherLabels(),
                     state.weather.ordinal, backdrop = LocalToolbarBackdrop.current) { index -> store.update { it.copy(weather = PlayerWeather.entries[index]) } }
                 GlassDropdownPreference(tr("player_cover_animation", "切歌时的封面动画"),
                     listOf(tr("default", "默认"), tr("player_cover_card", "卡片"), tr("player_theme_blur", "模糊"), tr("player_cover_cover", "覆盖"),
@@ -324,6 +324,16 @@ fun NowPlayingSettingsPage(padding: PaddingValues, open: (String) -> Unit = {}) 
                         ) { index ->
                             store.update { it.copy(spatialCoverMattingModel = SpatialMattingModel.entries[index].id) }
                         }
+                        SwitchPreference(
+                            title = tr("hardware_acceleration", "硬件加速"),
+                            summary = tr(
+                                "spatial_hw_accel_summary",
+                                "优先调用高通骁龙 NPU / GPU 与 XNNPACK 多核加速空间计算（关闭则使用兼容 CPU 推理）",
+                            ),
+                            checked = state.spatialCoverHardwareAcceleration,
+                        ) { enabled ->
+                            store.update { it.copy(spatialCoverHardwareAcceleration = enabled) }
+                        }
                         Preference(
                             title = tr("spatial_model_downloads", "模型下载"),
                             summary = if (spatialModelsReady) {
@@ -413,6 +423,12 @@ internal fun tokyoSceneLandmarkLabels(): List<String> = listOf(
     tr("tokyo_landmark_shinjuku", "新宿不夜街"),
     tr("tokyo_landmark_asakusa", "浅草仲见世"),
     tr("tokyo_landmark_odaiba", "台场彩虹湾"),
+)
+
+internal fun playerWeatherLabels(): List<String> = listOf(
+    tr("player_effect_none", "不显示"),
+    tr("player_effect_snow", "降雪"),
+    tr("player_effect_rain", "降雨"),
 )
 
 @Composable

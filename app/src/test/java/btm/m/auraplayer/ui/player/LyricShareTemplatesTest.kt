@@ -1,15 +1,37 @@
 package btm.m.auraplayer.ui.player
 
+import btm.m.auraplayer.playback.LyricTheme
+import btm.m.auraplayer.playback.PlayerWeather
+import btm.m.auraplayer.playback.TokyoSceneLandmark
+import btm.m.auraplayer.playback.TokyoSceneTime
+import btm.m.auraplayer.ui.lyricThemeLabels
+import btm.m.auraplayer.ui.playerWeatherLabels
+import btm.m.auraplayer.ui.tokyoSceneLandmarkLabels
+import btm.m.auraplayer.ui.tokyoSceneTimeLabels
 import org.junit.Assert.*
 import org.junit.Test
 
 class LyricShareTemplatesTest {
-    @Test fun definesTwelveDistinctTemplates() {
+    @Test fun definesAllClassicAndLyricThemeTemplates() {
         val templates = lyricShareTemplates()
-        assertEquals(12, LyricShareTemplateId.entries.size)
-        assertEquals(12, templates.size)
-        assertEquals(12, templates.map { it.id }.distinct().size)
+        val expectedCount = 12 + LyricTheme.entries.size
+        assertEquals(expectedCount, LyricShareTemplateId.entries.size)
+        assertEquals(expectedCount, templates.size)
+        assertEquals(expectedCount, templates.map { it.id }.distinct().size)
         assertTrue(templates.all { it.title.isNotBlank() })
+        for (theme in LyricTheme.entries) {
+            val tplId = shareTemplateForLyricTheme(theme)
+            assertEquals(theme, lyricThemeForShareTemplate(tplId))
+            assertTrue(templates.any { it.id == tplId })
+        }
+        assertNull(lyricThemeForShareTemplate(LyricShareTemplateId.AURA_MESH))
+    }
+
+    @Test fun tokyoShareDropdownOptionsMatchThemeEnums() {
+        assertEquals(LyricTheme.entries.size, lyricThemeLabels().size)
+        assertEquals(TokyoSceneTime.entries.size, tokyoSceneTimeLabels().size)
+        assertEquals(TokyoSceneLandmark.entries.size, tokyoSceneLandmarkLabels().size)
+        assertEquals(PlayerWeather.entries.size, playerWeatherLabels().size)
     }
 
     @Test fun selectionToggleRespectsSixteenLineLimit() {

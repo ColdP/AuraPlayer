@@ -37,6 +37,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import btm.m.auraplayer.lyrics.LyricLine
 import btm.m.auraplayer.lyrics.LyricSize
+import btm.m.auraplayer.playback.LyricTheme
+import btm.m.auraplayer.playback.PlayerWeather
+import btm.m.auraplayer.playback.TokyoSceneLandmark
+import btm.m.auraplayer.playback.TokyoSceneTime
+import btm.m.auraplayer.ui.lyricThemeLabels
 import btm.m.auraplayer.ui.tr
 import com.materialkolor.palettes.CorePalette
 import top.yukonga.miuix.kmp.basic.Text
@@ -62,6 +67,49 @@ internal enum class LyricShareTemplateId {
     FOREST_MIST,
     ABYSSAL_TIDE,
     NEON_PULSE,
+    THEME_BLUR,
+    THEME_DEEP_STAR_SEA,
+    THEME_AFTERGLOW_SHORE,
+    THEME_STREAMING_SHADOWS,
+    THEME_LIGHT_YEAR_DRIFT,
+    THEME_NEON_CITY,
+    THEME_WIND_LETTER,
+    THEME_STAR_MOON,
+    THEME_LIME_SODA,
+    THEME_MONET_GARDEN,
+    THEME_FADED_FILM,
+    THEME_TOKYO_CITYSCAPE,
+}
+
+internal fun shareTemplateForLyricTheme(theme: LyricTheme): LyricShareTemplateId = when (theme) {
+    LyricTheme.BLUR -> LyricShareTemplateId.THEME_BLUR
+    LyricTheme.DEEP_STAR_SEA -> LyricShareTemplateId.THEME_DEEP_STAR_SEA
+    LyricTheme.AFTERGLOW_SHORE -> LyricShareTemplateId.THEME_AFTERGLOW_SHORE
+    LyricTheme.STREAMING_SHADOWS -> LyricShareTemplateId.THEME_STREAMING_SHADOWS
+    LyricTheme.LIGHT_YEAR_DRIFT -> LyricShareTemplateId.THEME_LIGHT_YEAR_DRIFT
+    LyricTheme.NEON_CITY -> LyricShareTemplateId.THEME_NEON_CITY
+    LyricTheme.WIND_LETTER -> LyricShareTemplateId.THEME_WIND_LETTER
+    LyricTheme.STAR_MOON -> LyricShareTemplateId.THEME_STAR_MOON
+    LyricTheme.LIME_SODA -> LyricShareTemplateId.THEME_LIME_SODA
+    LyricTheme.MONET_GARDEN -> LyricShareTemplateId.THEME_MONET_GARDEN
+    LyricTheme.FADED_FILM -> LyricShareTemplateId.THEME_FADED_FILM
+    LyricTheme.TOKYO_CITYSCAPE -> LyricShareTemplateId.THEME_TOKYO_CITYSCAPE
+}
+
+internal fun lyricThemeForShareTemplate(id: LyricShareTemplateId): LyricTheme? = when (id) {
+    LyricShareTemplateId.THEME_BLUR -> LyricTheme.BLUR
+    LyricShareTemplateId.THEME_DEEP_STAR_SEA -> LyricTheme.DEEP_STAR_SEA
+    LyricShareTemplateId.THEME_AFTERGLOW_SHORE -> LyricTheme.AFTERGLOW_SHORE
+    LyricShareTemplateId.THEME_STREAMING_SHADOWS -> LyricTheme.STREAMING_SHADOWS
+    LyricShareTemplateId.THEME_LIGHT_YEAR_DRIFT -> LyricTheme.LIGHT_YEAR_DRIFT
+    LyricShareTemplateId.THEME_NEON_CITY -> LyricTheme.NEON_CITY
+    LyricShareTemplateId.THEME_WIND_LETTER -> LyricTheme.WIND_LETTER
+    LyricShareTemplateId.THEME_STAR_MOON -> LyricTheme.STAR_MOON
+    LyricShareTemplateId.THEME_LIME_SODA -> LyricTheme.LIME_SODA
+    LyricShareTemplateId.THEME_MONET_GARDEN -> LyricTheme.MONET_GARDEN
+    LyricShareTemplateId.THEME_FADED_FILM -> LyricTheme.FADED_FILM
+    LyricShareTemplateId.THEME_TOKYO_CITYSCAPE -> LyricTheme.TOKYO_CITYSCAPE
+    else -> null
 }
 
 internal data class LyricShareTemplate(
@@ -70,20 +118,29 @@ internal data class LyricShareTemplate(
     val lightPaper: Boolean = false,
 )
 
-internal fun lyricShareTemplates(): List<LyricShareTemplate> = listOf(
-    LyricShareTemplate(LyricShareTemplateId.AURA_MESH, tr("share_tpl_aura_mesh", "极光流光")),
-    LyricShareTemplate(LyricShareTemplateId.MIST_COVER, tr("share_tpl_mist_cover", "封面弥散")),
-    LyricShareTemplate(LyricShareTemplateId.VINYL_SLEEVE, tr("share_tpl_vinyl", "黑胶唱片")),
-    LyricShareTemplate(LyricShareTemplateId.EDITORIAL_PAPER, tr("share_tpl_paper", "素雅纸笺"), lightPaper = true),
-    LyricShareTemplate(LyricShareTemplateId.SWISS_GRID, tr("share_tpl_swiss", "瑞士网格"), lightPaper = true),
-    LyricShareTemplate(LyricShareTemplateId.POLAROID, tr("share_tpl_polaroid", "拍立得"), lightPaper = true),
-    LyricShareTemplate(LyricShareTemplateId.STAGE_SPOTLIGHT, tr("share_tpl_spotlight", "沉浸舞台")),
-    LyricShareTemplate(LyricShareTemplateId.MIDNIGHT_INK, tr("share_tpl_midnight", "深夜墨韵")),
-    LyricShareTemplate(LyricShareTemplateId.SUNSET_CINEMA, tr("share_tpl_cinema", "落日胶片")),
-    LyricShareTemplate(LyricShareTemplateId.FOREST_MIST, tr("share_tpl_forest", "森屿晨雾")),
-    LyricShareTemplate(LyricShareTemplateId.ABYSSAL_TIDE, tr("share_tpl_ocean", "深海潮汐")),
-    LyricShareTemplate(LyricShareTemplateId.NEON_PULSE, tr("share_tpl_neon", "霓虹声波")),
-)
+internal fun lyricShareTemplates(): List<LyricShareTemplate> {
+    val themeLabels = lyricThemeLabels()
+    val themeTemplates = LyricTheme.entries.mapIndexed { index, theme ->
+        LyricShareTemplate(
+            id = shareTemplateForLyricTheme(theme),
+            title = themeLabels.getOrElse(index) { theme.name },
+        )
+    }
+    return listOf(
+        LyricShareTemplate(LyricShareTemplateId.AURA_MESH, tr("share_tpl_aura_mesh", "极光流光")),
+        LyricShareTemplate(LyricShareTemplateId.MIST_COVER, tr("share_tpl_mist_cover", "封面弥散")),
+        LyricShareTemplate(LyricShareTemplateId.VINYL_SLEEVE, tr("share_tpl_vinyl", "黑胶唱片")),
+        LyricShareTemplate(LyricShareTemplateId.EDITORIAL_PAPER, tr("share_tpl_paper", "素雅纸笺"), lightPaper = true),
+        LyricShareTemplate(LyricShareTemplateId.SWISS_GRID, tr("share_tpl_swiss", "瑞士网格"), lightPaper = true),
+        LyricShareTemplate(LyricShareTemplateId.POLAROID, tr("share_tpl_polaroid", "拍立得"), lightPaper = true),
+        LyricShareTemplate(LyricShareTemplateId.STAGE_SPOTLIGHT, tr("share_tpl_spotlight", "沉浸舞台")),
+        LyricShareTemplate(LyricShareTemplateId.MIDNIGHT_INK, tr("share_tpl_midnight", "深夜墨韵")),
+        LyricShareTemplate(LyricShareTemplateId.SUNSET_CINEMA, tr("share_tpl_cinema", "落日胶片")),
+        LyricShareTemplate(LyricShareTemplateId.FOREST_MIST, tr("share_tpl_forest", "森屿晨雾")),
+        LyricShareTemplate(LyricShareTemplateId.ABYSSAL_TIDE, tr("share_tpl_ocean", "深海潮汐")),
+        LyricShareTemplate(LyricShareTemplateId.NEON_PULSE, tr("share_tpl_neon", "霓虹声波")),
+    ) + themeTemplates
+}
 
 internal fun toggleLyricShareIndex(selected: Set<Int>, index: Int, limit: Int = MAX_LYRIC_SHARE_LINES): Set<Int> =
     if (index in selected) selected - index
@@ -283,24 +340,37 @@ private data class PosterRenderProps(
     val colors: PosterPalette,
 )
 
+private const val SHARE_THEME_STATIC_PHASE = 2.4f
+
 @Composable
-private fun posterPalette(id: LyricShareTemplateId, palette: CorePalette, paperDarkMode: Boolean): PosterPalette = when (id) {
-    LyricShareTemplateId.EDITORIAL_PAPER ->
-        if (paperDarkMode) PosterPalette(Color(0xFFF2EDE3), Color(0xFFA79F93), Color(0xFFE37C62))
-        else PosterPalette(Color(0xFF1F1B18), Color(0xFF6B6257), Color(0xFFC2593F))
-    LyricShareTemplateId.SWISS_GRID ->
-        if (paperDarkMode) PosterPalette(Color(0xFFF4F4F1), Color(0xFF9B9BA3), Color(palette.a1.tone(72)))
-        else PosterPalette(Color(0xFF121214), Color(0xFF5A5A60), Color(palette.a1.tone(44)))
-    LyricShareTemplateId.POLAROID -> PosterPalette(Color(0xFFF9FAFB), Color(0xFFD0D5DD), Color(palette.a1.tone(75)))
-    LyricShareTemplateId.AURA_MESH -> PosterPalette(Color.White, Color.White.copy(alpha = .74f), Color(palette.a1.tone(82)))
-    LyricShareTemplateId.MIST_COVER -> PosterPalette(Color.White, Color.White.copy(alpha = .78f), Color.White.copy(alpha = .90f))
-    LyricShareTemplateId.VINYL_SLEEVE -> PosterPalette(Color(0xFFF6F4EE), Color(0xFFB5B1A8), Color(0xFFDDBA73))
-    LyricShareTemplateId.STAGE_SPOTLIGHT -> PosterPalette(Color.White, Color.White.copy(alpha = .74f), Color(palette.a1.tone(82)))
-    LyricShareTemplateId.MIDNIGHT_INK -> PosterPalette(Color(0xFFF2F5FA), Color(0xFF99A4B8), Color(0xFFE07368))
-    LyricShareTemplateId.SUNSET_CINEMA -> PosterPalette(Color(0xFFFFF5EC), Color(0xFFF3C6B4), Color(0xFFFFA56B))
-    LyricShareTemplateId.FOREST_MIST -> PosterPalette(Color(0xFFF2F8F4), Color(0xFFB4CFC0), Color(0xFF8BE0B5))
-    LyricShareTemplateId.ABYSSAL_TIDE -> PosterPalette(Color(0xFFECF7FF), Color(0xFF9EC9E2), Color(0xFF5CD6EE))
-    LyricShareTemplateId.NEON_PULSE -> PosterPalette(Color(0xFFF7F4FF), Color(0xFFC4B6E8), Color(0xFF3BF0E8))
+private fun posterPalette(id: LyricShareTemplateId, palette: CorePalette, paperDarkMode: Boolean): PosterPalette {
+    lyricThemeForShareTemplate(id)?.let { theme ->
+        val spec = lyricThemeSpec(theme)
+        return PosterPalette(
+            ink = spec.inkColor,
+            secondaryInk = spec.secondaryInkColor,
+            accent = if (theme == LyricTheme.BLUR) Color(palette.a1.tone(82)) else Color(spec.accentArgb),
+        )
+    }
+    return when (id) {
+        LyricShareTemplateId.EDITORIAL_PAPER ->
+            if (paperDarkMode) PosterPalette(Color(0xFFF2EDE3), Color(0xFFA79F93), Color(0xFFE37C62))
+            else PosterPalette(Color(0xFF1F1B18), Color(0xFF6B6257), Color(0xFFC2593F))
+        LyricShareTemplateId.SWISS_GRID ->
+            if (paperDarkMode) PosterPalette(Color(0xFFF4F4F1), Color(0xFF9B9BA3), Color(palette.a1.tone(72)))
+            else PosterPalette(Color(0xFF121214), Color(0xFF5A5A60), Color(palette.a1.tone(44)))
+        LyricShareTemplateId.POLAROID -> PosterPalette(Color(0xFFF9FAFB), Color(0xFFD0D5DD), Color(palette.a1.tone(75)))
+        LyricShareTemplateId.AURA_MESH -> PosterPalette(Color.White, Color.White.copy(alpha = .74f), Color(palette.a1.tone(82)))
+        LyricShareTemplateId.MIST_COVER -> PosterPalette(Color.White, Color.White.copy(alpha = .78f), Color.White.copy(alpha = .90f))
+        LyricShareTemplateId.VINYL_SLEEVE -> PosterPalette(Color(0xFFF6F4EE), Color(0xFFB5B1A8), Color(0xFFDDBA73))
+        LyricShareTemplateId.STAGE_SPOTLIGHT -> PosterPalette(Color.White, Color.White.copy(alpha = .74f), Color(palette.a1.tone(82)))
+        LyricShareTemplateId.MIDNIGHT_INK -> PosterPalette(Color(0xFFF2F5FA), Color(0xFF99A4B8), Color(0xFFE07368))
+        LyricShareTemplateId.SUNSET_CINEMA -> PosterPalette(Color(0xFFFFF5EC), Color(0xFFF3C6B4), Color(0xFFFFA56B))
+        LyricShareTemplateId.FOREST_MIST -> PosterPalette(Color(0xFFF2F8F4), Color(0xFFB4CFC0), Color(0xFF8BE0B5))
+        LyricShareTemplateId.ABYSSAL_TIDE -> PosterPalette(Color(0xFFECF7FF), Color(0xFF9EC9E2), Color(0xFF5CD6EE))
+        LyricShareTemplateId.NEON_PULSE -> PosterPalette(Color(0xFFF7F4FF), Color(0xFFC4B6E8), Color(0xFF3BF0E8))
+        else -> PosterPalette(Color.White, Color.White.copy(alpha = .74f), Color(palette.a1.tone(82)))
+    }
 }
 
 @Composable
@@ -325,6 +395,9 @@ internal fun SharePosterCard(
     filter: LyricShareFilter = LyricShareFilter.DEFAULT,
     customBackground: ImageBitmap? = null,
     customBackgroundBlur: Float = 0f,
+    tokyoSceneTime: TokyoSceneTime = TokyoSceneTime.FOLLOW_SYSTEM,
+    tokyoSceneLandmark: TokyoSceneLandmark = TokyoSceneLandmark.CITY_WALK,
+    tokyoWeather: PlayerWeather = PlayerWeather.NONE,
     modifier: Modifier = Modifier,
 ) {
     val targetColors = posterPalette(template.id, coverPalette, paperDarkMode)
@@ -363,6 +436,9 @@ internal fun SharePosterCard(
             customBackgroundBlur = customBackgroundBlur,
             roundedCorners = roundedCorners,
             paperDarkMode = paperDarkMode,
+            tokyoSceneTime = tokyoSceneTime,
+            tokyoSceneLandmark = tokyoSceneLandmark,
+            tokyoWeather = tokyoWeather,
             modifier = Modifier.matchParentSize(),
         )
         when (template.id) {
@@ -378,6 +454,80 @@ internal fun SharePosterCard(
             LyricShareTemplateId.FOREST_MIST -> ForestMistPosterLayout(props)
             LyricShareTemplateId.ABYSSAL_TIDE -> AbyssalTidePosterLayout(props)
             LyricShareTemplateId.NEON_PULSE -> NeonPulsePosterLayout(props)
+            else -> {
+                val theme = lyricThemeForShareTemplate(template.id) ?: LyricTheme.BLUR
+                LyricThemePosterLayout(props, theme)
+            }
+        }
+    }
+}
+
+@Composable
+private fun LyricThemePosterLayout(props: PosterRenderProps, theme: LyricTheme) {
+    val isTokyo = theme == LyricTheme.TOKYO_CITYSCAPE
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .then(
+                if (isTokyo) {
+                    Modifier.background(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            0.42f to Color.Black.copy(alpha = .10f),
+                            1f to Color.Black.copy(alpha = .28f),
+                        ),
+                    )
+                } else {
+                    Modifier
+                },
+            ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    start = 24.dp,
+                    end = 24.dp,
+                    top = if (isTokyo) 76.dp else 28.dp,
+                    bottom = 26.dp,
+                ),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
+        ) {
+            LyricsColumn(props, align = TextAlign.Start)
+            if (props.showSongInfo) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(Modifier.width(26.dp).height(1.5.dp).background(props.colors.accent.copy(alpha = .75f)))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CoverThumb(props.coverBitmap, props.coverPalette, Modifier.size(38.dp), 8.dp, Color.White.copy(alpha = .16f))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                props.title,
+                                color = props.colors.ink,
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFamily = props.fontFamily,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (props.artist.isNotBlank()) {
+                                Text(
+                                    props.artist,
+                                    color = props.colors.secondaryInk,
+                                    fontSize = 11.5.sp,
+                                    fontFamily = props.fontFamily,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            if (props.showBrand) BrandRow(props.colors, props.fontFamily)
         }
     }
 }
@@ -1008,6 +1158,9 @@ private fun PosterBackgroundLayer(
     customBackgroundBlur: Float,
     roundedCorners: Boolean,
     paperDarkMode: Boolean = false,
+    tokyoSceneTime: TokyoSceneTime = TokyoSceneTime.FOLLOW_SYSTEM,
+    tokyoSceneLandmark: TokyoSceneLandmark = TokyoSceneLandmark.CITY_WALK,
+    tokyoWeather: PlayerWeather = PlayerWeather.NONE,
     modifier: Modifier = Modifier,
 ) {
     val colorAnimSpec = tween<Color>(durationMillis = 380, easing = FastOutSlowInEasing)
@@ -1158,6 +1311,56 @@ private fun PosterBackgroundLayer(
                 x += step
             }
         }
+
+        else -> {
+            val lyricTheme = lyricThemeForShareTemplate(id) ?: LyricTheme.BLUR
+            if (lyricTheme == LyricTheme.BLUR) {
+                Box(modifier) {
+                    if (coverBitmap != null) {
+                        Image(coverBitmap, null, Modifier.fillMaxSize().blur(46.dp), contentScale = ContentScale.Crop)
+                        Box(
+                            Modifier.fillMaxSize().background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        Color(coverPalette.a1.tone(24)).copy(alpha = .40f),
+                                        Color.Black.copy(alpha = .60f),
+                                    ),
+                                ),
+                            ),
+                        )
+                    } else {
+                        Box(
+                            Modifier.fillMaxSize().background(
+                                Brush.verticalGradient(listOf(Color(coverPalette.a2.tone(24)), Color(coverPalette.n1.tone(10)))),
+                            ),
+                        )
+                    }
+                }
+            } else {
+                Box(
+                    modifier.background(
+                        Brush.verticalGradient(listOf(Color(coverPalette.a2.tone(18)), Color(coverPalette.n1.tone(8)))),
+                    ),
+                ) {
+                    PlayerLyricThemeBackdrop(
+                        theme = lyricTheme,
+                        blend = 1f,
+                        phase = SHARE_THEME_STATIC_PHASE,
+                        palette = coverPalette,
+                        tokyoSceneTime = tokyoSceneTime,
+                        tokyoSceneLandmark = tokyoSceneLandmark,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    if (lyricTheme == LyricTheme.TOKYO_CITYSCAPE && tokyoWeather != PlayerWeather.NONE) {
+                        PlayerWeatherOverlay(
+                            weather = tokyoWeather,
+                            time = SHARE_THEME_STATIC_PHASE,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1166,6 +1369,9 @@ internal fun ShareTemplateThumbnail(
     template: LyricShareTemplate,
     coverBitmap: ImageBitmap?,
     coverPalette: CorePalette,
+    tokyoSceneTime: TokyoSceneTime = TokyoSceneTime.FOLLOW_SYSTEM,
+    tokyoSceneLandmark: TokyoSceneLandmark = TokyoSceneLandmark.CITY_WALK,
+    tokyoWeather: PlayerWeather = PlayerWeather.NONE,
     modifier: Modifier = Modifier,
 ) {
     val colors = posterPalette(template.id, coverPalette, paperDarkMode = false)
@@ -1177,6 +1383,9 @@ internal fun ShareTemplateThumbnail(
             customBackground = null,
             customBackgroundBlur = 0f,
             roundedCorners = true,
+            tokyoSceneTime = tokyoSceneTime,
+            tokyoSceneLandmark = tokyoSceneLandmark,
+            tokyoWeather = tokyoWeather,
             modifier = Modifier.matchParentSize(),
         )
         when (template.id) {
@@ -1230,17 +1439,27 @@ internal fun ShareTemplateThumbnail(
                 Box(Modifier.align(Alignment.End).width(22.dp).height(3.dp).clip(CircleShape).background(colors.secondaryInk.copy(alpha = .6f)))
             }
 
-            else -> Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Box(Modifier.size(14.dp).clip(RoundedCornerShape(4.dp)).background(colors.accent.copy(alpha = .75f)))
-                    Box(Modifier.width(24.dp).height(4.dp).clip(CircleShape).background(colors.secondaryInk.copy(alpha = .6f)))
+            else -> if (lyricThemeForShareTemplate(template.id) != null) {
+                Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.Bottom) {
+                    Box(Modifier.fillMaxWidth(.72f).height(3.5.dp).clip(CircleShape).background(colors.ink.copy(alpha = .85f)))
+                    Spacer(Modifier.height(4.dp))
+                    Box(Modifier.fillMaxWidth(.48f).height(3.dp).clip(CircleShape).background(colors.secondaryInk.copy(alpha = .65f)))
+                    Spacer(Modifier.height(6.dp))
+                    Box(Modifier.width(12.dp).height(1.5.dp).background(colors.accent.copy(alpha = .85f)))
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Box(Modifier.fillMaxWidth(.88f).height(5.dp).clip(CircleShape).background(colors.ink.copy(alpha = .9f)))
-                    Box(Modifier.fillMaxWidth(.64f).height(5.dp).clip(CircleShape).background(colors.ink.copy(alpha = .72f)))
-                    Box(Modifier.fillMaxWidth(.45f).height(3.5.dp).clip(CircleShape).background(colors.secondaryInk.copy(alpha = .5f)))
+            } else {
+                Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Box(Modifier.size(14.dp).clip(RoundedCornerShape(4.dp)).background(colors.accent.copy(alpha = .75f)))
+                        Box(Modifier.width(24.dp).height(4.dp).clip(CircleShape).background(colors.secondaryInk.copy(alpha = .6f)))
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(Modifier.fillMaxWidth(.88f).height(5.dp).clip(CircleShape).background(colors.ink.copy(alpha = .9f)))
+                        Box(Modifier.fillMaxWidth(.64f).height(5.dp).clip(CircleShape).background(colors.ink.copy(alpha = .72f)))
+                        Box(Modifier.fillMaxWidth(.45f).height(3.5.dp).clip(CircleShape).background(colors.secondaryInk.copy(alpha = .5f)))
+                    }
+                    Box(Modifier.width(18.dp).height(3.dp).clip(CircleShape).background(colors.accent.copy(alpha = .85f)))
                 }
-                Box(Modifier.width(18.dp).height(3.dp).clip(CircleShape).background(colors.accent.copy(alpha = .85f)))
             }
         }
     }

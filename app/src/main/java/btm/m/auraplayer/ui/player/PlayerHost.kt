@@ -2267,6 +2267,22 @@ private fun FullPlayerMetadataAndActionsLayer(
                 .blur(((1f - m.p + 1f - m.controlsVisibility) * 14f).dp + m.shareChromeBlur),
             onLyricMenuExpanded,
         )
+        val singAnchorX = if (landscapeGeom != null) {
+            landscapeGeom.rightPaneX + landscapeGeom.rightPaneWidth - 44.dp
+        } else {
+            m.w - m.margin - 44.dp
+        }
+        AuraSingControl(
+            backdrop = miuixBackdrop,
+            monetTint = menuTint,
+            anchorX = singAnchorX,
+            anchorY = menuAnchorY,
+            topInset = menuMaxTop,
+            paneLeftX = menuAnchorX,
+            modifier = Modifier
+                .graphicsLayer { this.alpha = m.alpha * m.p * m.controlsVisibility * m.shareChromeAlpha }
+                .blur(((1f - m.p + 1f - m.controlsVisibility) * 14f).dp + m.shareChromeBlur),
+        )
     }
 }
 

@@ -312,9 +312,13 @@ private fun OneUiSurfaceWash(colors: PlayerOneUiColors, modifier: Modifier = Mod
 private data class WeatherParticle(val x: Float, val y: Float, val speed: Float, val size: Float)
 
 @Composable
-private fun PlayerWeatherOverlay(weather: PlayerWeather, time: Float) {
+internal fun PlayerWeatherOverlay(
+    weather: PlayerWeather,
+    time: Float,
+    modifier: Modifier = Modifier,
+) {
     val particles = remember { Random(317).let { r -> List(64) { WeatherParticle(r.nextFloat(), r.nextFloat(), .08f + r.nextFloat() * .14f, .5f + r.nextFloat()) } } }
-    Canvas(Modifier.fillMaxSize()) {
+    Canvas(modifier.fillMaxSize()) {
         val rain = weather == PlayerWeather.RAIN
         for ((index, p) in particles.withIndex()) {
             val y = ((p.y + time * p.speed * if (rain) 3f else 1f) % 1f) * size.height

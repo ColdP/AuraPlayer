@@ -16,6 +16,7 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
     lateinit var llmTranslation: btm.m.auraplayer.lyrics.LlmTranslationSettings; private set
     lateinit var rearPrivilege: btm.m.auraplayer.rear.RearScreenPrivilegeManager; private set
     lateinit var effects: btm.m.auraplayer.audio.EffectsStore; private set
+    lateinit var auraSing: btm.m.auraplayer.sing.AuraSingEngine; private set
     lateinit var auraMix: btm.m.auraplayer.auramix.AuraMixSettings; private set
     lateinit var settings: AuraSettings; private set
     internal lateinit var navigationMaterial: btm.m.auraplayer.ui.navigation.NavigationMaterialStore; private set
@@ -34,6 +35,7 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         llmTranslation = btm.m.auraplayer.lyrics.LlmTranslationSettings(this)
         rearPrivilege = btm.m.auraplayer.rear.RearScreenPrivilegeManager(this)
         effects = btm.m.auraplayer.audio.EffectsStore(this)
+        auraSing = btm.m.auraplayer.sing.AuraSingEngine(this)
         auraMix = btm.m.auraplayer.auramix.AuraMixSettings(this)
         history = LibraryHistory(this)
         session = SecureSession(this)

@@ -79,40 +79,39 @@ private class DepthRaw(val width: Int, val height: Int, val values: FloatArray)
 
 private class SpatialDepthEstimator {
     private val lock = Any()
-    private var session: OrtSession? = null
+    private var handle: btm.m.auraplayer.sing.AuraSingQualcommNpu.AcceleratedSessionHandle? = null
     private var loadedId: String? = null
     private var loadedModel: SpatialDepthModel? = null
+    private var loadedHwAccel: Boolean? = null
 
     fun ensureLoaded(context: Context, model: SpatialDepthModel) {
         synchronized(lock) {
-            if (loadedId == model.id && session != null) return
+            val hwAccel = (context.applicationContext as? btm.m.auraplayer.AuraApplication)
+                ?.nowPlaying?.state?.value?.spatialCoverHardwareAcceleration ?: true
+            if (loadedId == model.id && loadedHwAccel == hwAccel && handle != null) return
             val resource = model.resource
             if (!SpatialModelStore.isReady(context, resource)) error("Model is not downloaded")
-            SpatialRuntimeLoader.ensureLoaded(context)
-            val env = OrtEnvironment.getEnvironment()
-            val options = OrtSession.SessionOptions().apply {
-                setIntraOpNumThreads(Runtime.getRuntime().availableProcessors().coerceIn(1, 2))
-                setInterOpNumThreads(1)
-                setCPUArenaAllocator(false)
-                setMemoryPatternOptimization(false)
-                addConfigEntry("session.intra_op.allow_spinning", "0")
-                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-            }
-            val created = try {
-                env.createSession(SpatialModelStore.file(context, resource).absolutePath, options)
-            } finally {
-                options.close()
-            }
-            session?.close()
-            session = created
+            val created = btm.m.auraplayer.sing.AuraSingQualcommNpu.createAcceleratedSession(
+                context = context,
+                modelPath = SpatialModelStore.file(context, resource).absolutePath,
+                cacheTag = model.id,
+                isInt8Quantized = model == SpatialDepthModel.DEPTH_ANYTHING_V3_BASE,
+                preferQnn = hwAccel,
+                useXnnpack = hwAccel,
+                qnnCacheSubdir = "spatial_cover_qnn_cache",
+            )
+            handle?.close()
+            handle = created
             loadedId = model.id
             loadedModel = model
+            loadedHwAccel = hwAccel
         }
     }
 
     fun run(bitmap: Bitmap): DepthRaw {
         synchronized(lock) {
-            val currentSession = session ?: error("Model is not loaded")
+            val activeHandle = handle ?: error("Model is not loaded")
+            val currentSession = activeHandle.session
             val model = loadedModel ?: error("Model is not loaded")
             val size = model.inputSize
             val scaled = if (bitmap.width == size && bitmap.height == size) {
@@ -164,7 +163,10 @@ private class SpatialDepthEstimator {
                 )
             }
             try {
-                currentSession.run(mapOf(inputName to tensor)).use { outputs ->
+                val results = activeHandle.runOptions?.let {
+                    currentSession.run(mapOf(inputName to tensor), it)
+                } ?: currentSession.run(mapOf(inputName to tensor))
+                results.use { outputs ->
                     val output = outputs.get(0) as OnnxTensor
                     val shape = output.info.shape
                     val height = shape[shape.size - 2].toInt()
@@ -186,8 +188,8 @@ private class SpatialDepthEstimator {
     }
 
     fun close() = synchronized(lock) {
-        session?.close()
-        session = null
+        handle?.close()
+        handle = null
         loadedId = null
         loadedModel = null
     }
@@ -195,32 +197,29 @@ private class SpatialDepthEstimator {
 
 private class SpatialMattingEstimator {
     private val lock = Any()
-    private var session: OrtSession? = null
+    private var handle: btm.m.auraplayer.sing.AuraSingQualcommNpu.AcceleratedSessionHandle? = null
     private var loadedModel: SpatialMattingModel? = null
+    private var loadedHwAccel: Boolean? = null
 
     private fun ensureLoaded(context: Context, model: SpatialMattingModel) {
         synchronized(lock) {
             val resource = model.resource ?: error("No matting model selected")
             check(SpatialModelStore.isReady(context, resource)) { "请先下载所选抠图模型" }
-            if (session != null && loadedModel == model) return
+            val hwAccel = (context.applicationContext as? btm.m.auraplayer.AuraApplication)
+                ?.nowPlaying?.state?.value?.spatialCoverHardwareAcceleration ?: true
+            if (handle != null && loadedModel == model && loadedHwAccel == hwAccel) return
             close()
-            SpatialRuntimeLoader.ensureLoaded(context)
-            val env = OrtEnvironment.getEnvironment()
-            val options = OrtSession.SessionOptions().apply {
-                setIntraOpNumThreads(Runtime.getRuntime().availableProcessors().coerceIn(1, 2))
-                setInterOpNumThreads(1)
-                setCPUArenaAllocator(false)
-                setMemoryPatternOptimization(false)
-                addConfigEntry("session.intra_op.allow_spinning", "0")
-                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-            }
-            val created = try {
-                env.createSession(SpatialModelStore.file(context, resource).absolutePath, options)
-            } finally {
-                options.close()
-            }
-            session = created
+            handle = btm.m.auraplayer.sing.AuraSingQualcommNpu.createAcceleratedSession(
+                context = context,
+                modelPath = SpatialModelStore.file(context, resource).absolutePath,
+                cacheTag = model.id,
+                isInt8Quantized = model != SpatialMattingModel.U2NETP,
+                preferQnn = hwAccel,
+                useXnnpack = hwAccel,
+                qnnCacheSubdir = "spatial_cover_qnn_cache",
+            )
             loadedModel = model
+            loadedHwAccel = hwAccel
         }
     }
 
@@ -228,7 +227,8 @@ private class SpatialMattingEstimator {
         if (model == SpatialMattingModel.NONE || model.resource == null) return null
         synchronized(lock) {
             ensureLoaded(context, model)
-            val currentSession = session ?: return null
+            val activeHandle = handle ?: return null
+            val currentSession = activeHandle.session
             val size = model.inputSize
             val scaled = if (source.width == size && source.height == size) {
                 source
@@ -262,7 +262,10 @@ private class SpatialMattingEstimator {
                 longArrayOf(1L, 3L, size.toLong(), size.toLong()),
             )
             try {
-                currentSession.run(mapOf(inputName to tensor)).use { outputs ->
+                val results = activeHandle.runOptions?.let {
+                    currentSession.run(mapOf(inputName to tensor), it)
+                } ?: currentSession.run(mapOf(inputName to tensor))
+                results.use { outputs ->
                     val output = outputs.get(0) as OnnxTensor
                     val values = FloatArray(plane)
                     val buffer = output.floatBuffer
@@ -289,8 +292,8 @@ private class SpatialMattingEstimator {
     }
 
     fun close() = synchronized(lock) {
-        session?.close()
-        session = null
+        handle?.close()
+        handle = null
         loadedModel = null
     }
 }
