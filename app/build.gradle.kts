@@ -29,6 +29,13 @@ val buildDate = LocalDate.now().toString().replace('-', '.')
 android {
     namespace = "btm.m.auraplayer"
     compileSdk = 37
+    localProps.getProperty("ndk.dir")?.takeIf { it.isNotBlank() }?.let { dir ->
+        val srcProps = file("$dir/source.properties")
+        if (srcProps.isFile) {
+            val props = Properties().apply { srcProps.inputStream().use(::load) }
+            props.getProperty("Pkg.Revision")?.takeIf { it.isNotBlank() }?.let { ndkVersion = it }
+        }
+    }
     defaultConfig {
         applicationId = "btm.m.auraplayer"
         minSdk = 33
@@ -38,6 +45,16 @@ android {
         buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")
         ndk {
             abiFilters += listOf("arm64-v8a")
+        }
+        externalNativeBuild {
+            cmake {
+                cppFlags += ""
+            }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
         }
     }
     buildFeatures { compose = true; buildConfig = true }

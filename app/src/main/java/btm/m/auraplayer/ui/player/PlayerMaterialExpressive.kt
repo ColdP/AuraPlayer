@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -460,6 +461,10 @@ internal fun MaterialExpressiveVolumeSlider(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val effects = remember(context) { (context.applicationContext as btm.m.auraplayer.AuraApplication).effects }
+    val usbStatus by effects.usbStatus.collectAsState()
+    val effectsState by effects.state.collectAsState()
+    val usbActive = usbStatus is btm.m.auraplayer.audio.usb.UsbExclusiveStatus.Active
     val manager = remember(context) { context.getSystemService(AudioManager::class.java) }
     val max = remember(manager) { manager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1) }
     var value by remember {
@@ -467,12 +472,14 @@ internal fun MaterialExpressiveVolumeSlider(
     }
     var dragging by remember { mutableStateOf(false) }
 
-    LaunchedEffect(manager) {
+    LaunchedEffect(manager, usbActive) {
         while (true) {
-            if (!dragging) value = manager.getStreamVolume(AudioManager.STREAM_MUSIC) / max.toFloat()
+            if (!dragging && !usbActive) value = manager.getStreamVolume(AudioManager.STREAM_MUSIC) / max.toFloat()
             delay(300)
         }
     }
+    val displayedValue = if (usbActive) (if (dragging) value else effectsState.usbVolume) else value
+    val sliderEnabled = usbActive || !manager.isVolumeFixed
 
     val badgeBg = colors.surfaceContainerHigh.copy(alpha = if (colors.dark) .80f else .92f)
     val trackBg = colors.surfaceContainerHighest.copy(alpha = if (colors.dark) .55f else .85f)
@@ -483,8 +490,9 @@ internal fun MaterialExpressiveVolumeSlider(
                 .size(30.dp)
                 .clip(CircleShape)
                 .background(badgeBg)
-                .clickable(enabled = !manager.isVolumeFixed, role = Role.Button) {
-                    value = stepMediaVolume(manager, max, increase = false)
+                .clickable(enabled = sliderEnabled, role = Role.Button) {
+                    value = if (usbActive) effects.stepUsbVolume(increase = false, showHud = false)
+                    else stepMediaVolume(manager, max, increase = false)
                 },
             contentAlignment = Alignment.Center
         ) {
@@ -497,7 +505,7 @@ internal fun MaterialExpressiveVolumeSlider(
         }
         Spacer(Modifier.width(8.dp))
         MaterialWavyProgressSlider(
-            value = value,
+            value = displayedValue,
             playing = false,
             label = tr("media_volume", "媒体音量"),
             activeColor = colors.secondary,
@@ -506,10 +514,14 @@ internal fun MaterialExpressiveVolumeSlider(
             onChange = { next ->
                 dragging = true
                 value = next
-                manager.setStreamVolume(AudioManager.STREAM_MUSIC, (next * max).roundToInt(), 0)
+                if (usbActive) {
+                    effects.setUsbVolume(next, showHud = false)
+                } else {
+                    manager.setStreamVolume(AudioManager.STREAM_MUSIC, (next * max).roundToInt(), 0)
+                }
             },
             onFinished = { dragging = false },
-            enabled = !manager.isVolumeFixed
+            enabled = sliderEnabled
         )
         Spacer(Modifier.width(8.dp))
         Box(
@@ -517,8 +529,9 @@ internal fun MaterialExpressiveVolumeSlider(
                 .size(30.dp)
                 .clip(CircleShape)
                 .background(badgeBg)
-                .clickable(enabled = !manager.isVolumeFixed, role = Role.Button) {
-                    value = stepMediaVolume(manager, max, increase = true)
+                .clickable(enabled = sliderEnabled, role = Role.Button) {
+                    value = if (usbActive) effects.stepUsbVolume(increase = true, showHud = false)
+                    else stepMediaVolume(manager, max, increase = true)
                 },
             contentAlignment = Alignment.Center
         ) {

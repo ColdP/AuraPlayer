@@ -11,6 +11,7 @@ import kotlinx.coroutines.*
 class FadingPlayer(private val delegate: Player, private val store: EffectsStore, private val scope: CoroutineScope) : ForwardingPlayer(delegate) {
     private var ramp: Job? = null
     private var requested = delegate.playWhenReady
+    val isPlayRequested: Boolean get() = requested
     private var userVolume = delegate.volume
     private var fadingOut = false
     init {

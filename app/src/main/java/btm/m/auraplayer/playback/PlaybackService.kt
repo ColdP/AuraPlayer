@@ -1,8 +1,20 @@
 package btm.m.auraplayer.playback
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.net.Uri
+import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -19,8 +31,13 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import btm.m.auraplayer.AuraApplication
 import btm.m.auraplayer.MainActivity
+import btm.m.auraplayer.R
 import btm.m.auraplayer.auramix.AuraMixManager
 import btm.m.auraplayer.data.LocalAudioArtwork
+import btm.m.auraplayer.widget.WidgetActionReceiver
+import btm.m.auraplayer.widget.WidgetPlaybackSnapshot
+import btm.m.auraplayer.widget.WidgetPlaybackState
+import btm.m.auraplayer.widget.WidgetUpdateCoordinator
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
@@ -37,12 +54,26 @@ import kotlinx.coroutines.cancel
 
 @UnstableApi
 class PlaybackService : MediaSessionService() {
+    companion object {
+        @Volatile
+        internal var activeInstance: PlaybackService? = null
+            private set
+        private const val WIDGET_FALLBACK_CHANNEL_ID = "aura.widget.fallback"
+        private const val WIDGET_FALLBACK_NOTIFICATION_ID = 9001
+    }
+
     private var session: MediaSession? = null
+    private var playerInstance: ExoPlayer? = null
+    private var transportInstance: btm.m.auraplayer.audio.FadingPlayer? = null
+    private var usbAudioSink: btm.m.auraplayer.audio.usb.UsbExclusiveAudioSink? = null
+    private var usbReceiver: BroadcastReceiver? = null
+    private var audioDeviceCallback: AudioDeviceCallback? = null
     private val serviceScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
     private val state by lazy { getSharedPreferences("aura.playback.queue", MODE_PRIVATE) }
     private var auraMix: AuraMixManager? = null
     override fun onCreate() {
         super.onCreate()
+        activeInstance = this
         val app = application as AuraApplication
         val http = OkHttpDataSource.Factory(OkHttpClient()).setDefaultRequestProperties(mapOf("Referer" to "https://music.163.com/"))
         val resolving = ResolvingDataSource.Factory(DefaultDataSource.Factory(this, http)) { spec ->
@@ -57,7 +88,13 @@ class PlaybackService : MediaSessionService() {
             .setUpstreamDataSourceFactory(resolving)
             .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         val mediaSourceFactory = DefaultMediaSourceFactory(source)
-        val player = ExoPlayer.Builder(this, btm.m.auraplayer.audio.EffectsRenderersFactory(this, app.effects, app.auraSing)).setMediaSourceFactory(mediaSourceFactory).build().apply {
+        val renderersFactory = btm.m.auraplayer.audio.EffectsRenderersFactory(
+            context = this,
+            store = app.effects,
+            auraSing = app.auraSing,
+            onUsbSinkCreated = { usbAudioSink = it },
+        )
+        val player = ExoPlayer.Builder(this, renderersFactory).setMediaSourceFactory(mediaSourceFactory).build().apply {
             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), !app.effects.state.value.alwaysPlay)
             setHandleAudioBecomingNoisy(true)
             repeatMode = androidx.media3.common.Player.REPEAT_MODE_ALL
@@ -101,7 +138,10 @@ class PlaybackService : MediaSessionService() {
                         androidx.media3.common.Player.EVENT_MEDIA_METADATA_CHANGED,
                         androidx.media3.common.Player.EVENT_REPEAT_MODE_CHANGED,
                         androidx.media3.common.Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED,
-                    )) saveState(player)
+                    )) {
+                    saveState(player)
+                    WidgetUpdateCoordinator.requestUpdate(this@PlaybackService)
+                }
             }
         })
         val activity = PendingIntent.getActivity(this, 1, Intent(this, MainActivity::class.java)
@@ -109,17 +149,100 @@ class PlaybackService : MediaSessionService() {
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val transport = btm.m.auraplayer.audio.FadingPlayer(player, app.effects, serviceScope)
+        playerInstance = player
+        transportInstance = transport
         val bitmapLoader = CacheBitmapLoader(AuraMediaBitmapLoader(this, DataSourceBitmapLoader(this)))
         session = MediaSession.Builder(this, transport)
             .setSessionActivity(activity)
             .setBitmapLoader(bitmapLoader)
             .build()
+        WidgetUpdateCoordinator.requestUpdate(this)
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                when (intent.action) {
+                    UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
+                        if (app.effects.usbExclusiveEnabled) {
+                            val usbDev = btm.m.auraplayer.audio.usb.UsbAudioDevice.getInstance(this@PlaybackService)
+                            val audioDev = usbDev.findUsbAudioDevice()
+                            if (audioDev != null && !usbDev.hasPermission(audioDev)) {
+                                usbDev.requestPermission(audioDev) {
+                                    usbAudioSink?.onUsbAttached() ?: app.effects.refreshUsbStatus()
+                                }
+                            } else {
+                                usbAudioSink?.onUsbAttached() ?: app.effects.refreshUsbStatus()
+                            }
+                        }
+                    }
+                    UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                        val detached = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                        usbAudioSink?.onUsbDetached(detached) ?: app.effects.refreshUsbStatus()
+                    }
+                }
+            }
+        }
+        usbReceiver = receiver
+        registerReceiver(
+            receiver,
+            IntentFilter().apply {
+                addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+                addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+            },
+            Context.RECEIVER_EXPORTED,
+        )
+        val audioManager = getSystemService(AudioManager::class.java)
+        val deviceCb = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
+                val hasUsb = addedDevices.any {
+                    it.type == AudioDeviceInfo.TYPE_USB_DEVICE || it.type == AudioDeviceInfo.TYPE_USB_HEADSET
+                }
+                if (hasUsb && app.effects.usbExclusiveEnabled) {
+                    val usbDev = btm.m.auraplayer.audio.usb.UsbAudioDevice.getInstance(this@PlaybackService)
+                    val audioDev = usbDev.findUsbAudioDevice()
+                    if (audioDev != null && !usbDev.hasPermission(audioDev)) {
+                        usbDev.requestPermission(audioDev) {
+                            usbAudioSink?.onUsbAttached() ?: app.effects.refreshUsbStatus()
+                        }
+                    } else {
+                        usbAudioSink?.onUsbAttached() ?: app.effects.refreshUsbStatus()
+                    }
+                }
+            }
+
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+                val hasUsb = removedDevices.any {
+                    it.type == AudioDeviceInfo.TYPE_USB_DEVICE || it.type == AudioDeviceInfo.TYPE_USB_HEADSET
+                }
+                if (hasUsb && btm.m.auraplayer.audio.usb.UsbAudioDevice.getInstance(this@PlaybackService).findUsbAudioDevice() == null) {
+                    // Only treat as physical removal when UsbManager also reports no USB audio device.
+                    usbAudioSink?.onUsbDetached(null) ?: app.effects.refreshUsbStatus()
+                }
+            }
+        }
+        audioDeviceCallback = deviceCb
+        audioManager?.registerAudioDeviceCallback(deviceCb, android.os.Handler(android.os.Looper.getMainLooper()))
         serviceScope.launch {
             var previousAlways = app.effects.state.value.alwaysPlay
+            var previousUsbExclusive = app.effects.state.value.usbExclusive
+            var previousUsbBufferMs = app.effects.state.value.usbBufferMs
+            var previousUsbLockFixed = app.effects.state.value.usbLockFixedFormat
+            var previousUsbVolume = app.effects.state.value.usbVolume
             app.effects.state.collect { settings ->
                 if (settings.alwaysPlay != previousAlways) {
                     previousAlways = settings.alwaysPlay
                     player.setAudioAttributes(player.audioAttributes, !settings.alwaysPlay)
+                }
+                if (settings.usbExclusive != previousUsbExclusive) {
+                    previousUsbExclusive = settings.usbExclusive
+                    usbAudioSink?.onExclusiveToggled(settings.usbExclusive)
+                }
+                if (settings.usbBufferMs != previousUsbBufferMs || settings.usbLockFixedFormat != previousUsbLockFixed) {
+                    previousUsbBufferMs = settings.usbBufferMs
+                    previousUsbLockFixed = settings.usbLockFixedFormat
+                    usbAudioSink?.onUsbTuningChanged()
+                }
+                if (settings.usbVolume != previousUsbVolume) {
+                    previousUsbVolume = settings.usbVolume
+                    usbAudioSink?.onUsbVolumeChanged(settings.usbVolume)
                 }
             }
         }
@@ -146,17 +269,107 @@ class PlaybackService : MediaSessionService() {
             }
         }
     }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val result = super.onStartCommand(intent, flags, startId)
+        val action = intent?.action
+        if (action in WidgetActionReceiver.SUPPORTED_ACTIONS) {
+            if ((playerInstance?.mediaItemCount ?: 0) <= 0) {
+                ensureFallbackForegroundAndStop()
+            } else {
+                handleWidgetAction(intent, forcePlayOnColdStart = true)
+            }
+        }
+        return result
+    }
+
+    internal fun currentWidgetSnapshot(): WidgetPlaybackSnapshot? {
+        val player = playerInstance ?: return null
+        val playRequested = transportInstance?.isPlayRequested ?: player.playWhenReady
+        return WidgetPlaybackState.fromLivePlayer(player, playRequested)
+    }
+
+    internal fun handleWidgetAction(intent: Intent?, forcePlayOnColdStart: Boolean = false) {
+        val player = playerInstance ?: return
+        val transport = transportInstance ?: return
+        when (intent?.action) {
+            WidgetActionReceiver.ACTION_PLAY_PAUSE -> {
+                if (!forcePlayOnColdStart && transport.isPlayRequested) {
+                    transport.pause()
+                } else {
+                    if (player.playbackState == androidx.media3.common.Player.STATE_IDLE) {
+                        player.prepare()
+                    }
+                    transport.play()
+                }
+            }
+            WidgetActionReceiver.ACTION_NEXT -> {
+                if (player.playbackState == androidx.media3.common.Player.STATE_IDLE) {
+                    player.prepare()
+                }
+                transport.seekToNextMediaItem()
+                if (forcePlayOnColdStart) transport.play()
+            }
+            WidgetActionReceiver.ACTION_PREV -> {
+                if (player.playbackState == androidx.media3.common.Player.STATE_IDLE) {
+                    player.prepare()
+                }
+                transport.seekToPrevious()
+                if (forcePlayOnColdStart) transport.play()
+            }
+            WidgetActionReceiver.ACTION_PLAY_QUEUE_INDEX -> {
+                val index = intent.getIntExtra(WidgetActionReceiver.EXTRA_QUEUE_INDEX, -1)
+                if (index in 0 until player.mediaItemCount) {
+                    player.seekToDefaultPosition(index)
+                    player.prepare()
+                    transport.play()
+                }
+            }
+        }
+        WidgetUpdateCoordinator.requestUpdate(this)
+    }
+
+    private fun ensureFallbackForegroundAndStop() {
+        val nm = getSystemService(NotificationManager::class.java)
+        if (nm != null && nm.getNotificationChannel(WIDGET_FALLBACK_CHANNEL_ID) == null) {
+            nm.createNotificationChannel(
+                NotificationChannel(
+                    WIDGET_FALLBACK_CHANNEL_ID,
+                    "Aura Player Playback",
+                    NotificationManager.IMPORTANCE_LOW,
+                ),
+            )
+        }
+        val notification: Notification = NotificationCompat.Builder(this, WIDGET_FALLBACK_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_aura)
+            .setContentTitle("Aura Player")
+            .setSilent(true)
+            .build()
+        startForeground(WIDGET_FALLBACK_NOTIFICATION_ID, notification)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
     override fun onTaskRemoved(rootIntent: Intent?) {
         session?.player?.let(::saveState)
         if (session?.player?.playWhenReady != true) stopSelf()
     }
     override fun onDestroy() {
+        if (activeInstance === this) activeInstance = null
+        usbReceiver?.let { runCatching { unregisterReceiver(it) } }
+        usbReceiver = null
+        audioDeviceCallback?.let { cb ->
+            runCatching { getSystemService(AudioManager::class.java)?.unregisterAudioDeviceCallback(cb) }
+        }
+        audioDeviceCallback = null
         serviceScope.cancel()
         auraMix?.close(); auraMix = null
         (application as AuraApplication).effects.audioSessionId = 0
+        playerInstance = null
+        transportInstance = null
         session?.run { saveState(player); player.release(); release() }
         session = null
+        WidgetUpdateCoordinator.requestUpdate(this)
         super.onDestroy()
     }
 

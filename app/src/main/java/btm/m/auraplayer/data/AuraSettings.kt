@@ -29,6 +29,7 @@ data class Appearance(
 )
 
 class AuraSettings(context: Context) {
+    private val appContext = context.applicationContext
     var previewColor by mutableStateOf<Int?>(null)
     private val prefs = context.getSharedPreferences("aura.settings", Context.MODE_PRIVATE)
     var value by mutableStateOf(read()); private set
@@ -62,6 +63,7 @@ class AuraSettings(context: Context) {
             .putStringSet("blacklist", v.blacklist)
             .putBoolean("disableAdvancedMaterial", v.disableAdvancedMaterial).apply()
         value = v
+        btm.m.auraplayer.widget.WidgetUpdateCoordinator.requestUpdate(appContext)
     }
 
     companion object {

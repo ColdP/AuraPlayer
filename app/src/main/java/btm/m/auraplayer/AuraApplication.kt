@@ -1,9 +1,10 @@
 package btm.m.auraplayer
 
 import android.app.Application
+import android.content.Context
+import android.content.res.Configuration
 import btm.m.auraplayer.data.*
 import btm.m.auraplayer.ui.I18n
-import android.content.Context
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
@@ -35,6 +36,7 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         llmTranslation = btm.m.auraplayer.lyrics.LlmTranslationSettings(this)
         rearPrivilege = btm.m.auraplayer.rear.RearScreenPrivilegeManager(this)
         effects = btm.m.auraplayer.audio.EffectsStore(this)
+        effects.registerProcessUsbMonitor()
         auraSing = btm.m.auraplayer.sing.AuraSingEngine(this)
         auraMix = btm.m.auraplayer.auramix.AuraMixSettings(this)
         history = LibraryHistory(this)
@@ -45,6 +47,15 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         api = NeteaseApi({ endpoint }, { cookie }, metadataCache = CloudMetadataCache(cacheDir.resolve("cloud-metadata")))
         I18n.initialize(this, settings.value.language)
         btm.m.auraplayer.download.MusicDownloads.resume(this)
+        if (btm.m.auraplayer.widget.WidgetUpdateCoordinator.hasActiveWidgets(this)) {
+            btm.m.auraplayer.widget.WidgetUpdateCoordinator.requestUpdate(this)
+        }
+    }
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (btm.m.auraplayer.widget.WidgetUpdateCoordinator.hasActiveWidgets(this)) {
+            btm.m.auraplayer.widget.WidgetUpdateCoordinator.requestUpdate(this)
+        }
     }
     override fun newImageLoader(context: Context): ImageLoader = ImageLoader.Builder(context)
         .components {

@@ -342,7 +342,10 @@ private fun AuraShell(model: AuraViewModel) {
         Scaffold(containerColor = Color.Transparent) {
             val activeShellBlur = searchProgress > .001f || playerExpansion > .001f
             val bypassShellBackdropLayer = chromeHidden && !activeShellBlur
+            val usbHudBackdrop = rememberLayerBackdrop { drawRect(surface); drawContent() }
+            var usbHudMounted by remember { mutableStateOf(false) }
             Box(Modifier.fillMaxSize().background(surface)) {
+                Box(Modifier.fillMaxSize().then(if (usbHudMounted) Modifier.layerBackdrop(usbHudBackdrop) else Modifier)) {
                 // Record page content only; floating controls sample the currently visible page
                 // without recording themselves back into their own glass backgrounds.
                 // Pages that hide bottom chrome without active search/player blur bypass the extra
@@ -475,6 +478,13 @@ private fun AuraShell(model: AuraViewModel) {
                             openPage = open)
                     }
                 } }
+                }
+                IosUsbVolumeHud(
+                    effects = model.app.effects,
+                    backdrop = usbHudBackdrop,
+                    navigationStylePreference = settings.navigation,
+                    onMountedChange = { usbHudMounted = it },
+                )
             }
         }
     }

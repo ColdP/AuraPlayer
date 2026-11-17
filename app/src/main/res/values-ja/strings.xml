@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_player_label">プレーヤー</string>
+    <string name="widget_player_description">再生画面テーマ連動の多サイズ操作</string>
+    <string name="widget_cover_label">カバー再生</string>
+    <string name="widget_cover_description">大画面カバーアートと再生コントロール</string>
+    <string name="widget_default_title">再生中の曲はありません</string>
+    <string name="widget_default_artist">タップして Aura Player を開く</string>
+    <string name="widget_up_next">次に再生</string>
+    <string name="widget_no_upcoming">次の曲はありません</string>
+    <string name="widget_prev_track">前の曲</string>
+    <string name="widget_next_track">次の曲</string>
+    <string name="widget_play">再生</string>
+    <string name="widget_pause">一時停止</string>
+</resources>

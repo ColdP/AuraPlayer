@@ -2,6 +2,7 @@
 -keep class org.jaudiotagger.** { *; }
 -keep class ai.onnxruntime.** { *; }
 -keep class btm.m.auraplayer.rear.RearScreenShellService { *; }
+-keep class btm.m.auraplayer.audio.usb.UsbAudioStream { *; }
 
 # Desktop AWT/ImageIO/Swing references inside jaudiotagger unused on Android
 -dontwarn java.awt.Graphics2D

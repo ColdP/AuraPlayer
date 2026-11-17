@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="widget_bg_fallback">#FF181822</color>
+    <color name="widget_cover_placeholder_bg">#FF2B2A38</color>
+    <color name="widget_title_color">#FFFFFFFF</color>
+    <color name="widget_artist_color">#CCFFFFFF</color>
+    <color name="widget_muted_color">#99FFFFFF</color>
+    <color name="widget_play_bg_fallback">#33FFFFFF</color>
+    <color name="widget_play_icon_fallback">#FFFFFFFF</color>
+    <color name="widget_secondary_bg_fallback">#1FFFFFFF</color>
+    <color name="widget_secondary_icon_fallback">#FFFFFFFF</color>
+    <color name="widget_queue_card_bg_fallback">#22FFFFFF</color>
+</resources>

@@ -1,11 +1,14 @@
 package btm.m.auraplayer.ui
 
+import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
+import android.hardware.usb.UsbManager
 import android.media.audiofx.AudioEffect
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -40,6 +43,8 @@ import androidx.compose.ui.unit.sp
 import btm.m.auraplayer.AuraApplication
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.audio.*
+import btm.m.auraplayer.audio.usb.UsbAudioDevice
+import btm.m.auraplayer.audio.usb.UsbExclusiveStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -521,16 +526,51 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
 }
 
 @Composable fun AudioPreferencesPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Unit = {}) {
-    val app = LocalContext.current.applicationContext as AuraApplication
+    val context = LocalContext.current
+    val app = context.applicationContext as AuraApplication
     val store = app.effects
     val auraMix by app.auraMix.state.collectAsState()
     val state by store.state.collectAsState()
+    val usbStatus by store.usbStatus.collectAsState()
     val auraSingState by app.auraSing.uiState.collectAsState()
+    DisposableEffect(context, state.usbExclusive) {
+        store.refreshUsbStatus()
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                store.refreshUsbStatus()
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+        }
+        context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        onDispose { runCatching { context.unregisterReceiver(receiver) } }
+    }
     LaunchedEffect(state.fade) {
         app.auraMix.update { current -> current.copy(enabled = state.fade, mode = if (current.autoCalculate) btm.m.auraplayer.auramix.AuraMixMode.SMART else btm.m.auraplayer.auramix.AuraMixMode.TRADITIONAL) }
     }
     val transition = updateTransition(state.fade, label = "audio-fade-setting")
     val blur by transition.animateFloat(transitionSpec = { tween(220) }, label = "blur") { if (it) 0f else 8f }
+    val usbTransition = updateTransition(state.usbExclusive, label = "audio-usb-exclusive-setting")
+    val usbBlur by usbTransition.animateFloat(transitionSpec = { tween(220) }, label = "usb-blur") { if (it) 0f else 8f }
+    val usbBufferOptions = listOf(40, 100, 200)
+    val usbBufferLabels = listOf(
+        tr("audio_usb_buffer_low", "低延迟 (40 ms)"),
+        tr("audio_usb_buffer_balanced", "均衡 (100 ms)"),
+        tr("audio_usb_buffer_stable", "高稳定 (200 ms)"),
+    )
+    val usbExclusiveSummary = when (val status = usbStatus) {
+        UsbExclusiveStatus.Disabled -> tr("audio_usb_exclusive_summary", "绕过系统混音器与重采样，将 PCM 音频直通输出至外接 USB DAC")
+        UsbExclusiveStatus.NoDevice -> tr("audio_usb_exclusive_waiting", "已开启 · 未检测到外接 USB DAC 时自动回退至系统输出")
+        is UsbExclusiveStatus.NeedsPermission -> tr("audio_usb_exclusive_need_permission", "检测到 %s · 需要授予 USB 访问权限").format(status.deviceName)
+        is UsbExclusiveStatus.Ready -> tr("audio_usb_exclusive_ready", "已就绪 · %s（播放时自动独占输出）").format(status.deviceName)
+        is UsbExclusiveStatus.Active -> {
+            val rateLabel = if (status.sampleRate % 1000 == 0) "${status.sampleRate / 1000} kHz" else "${status.sampleRate / 1000.0} kHz"
+            tr("audio_usb_exclusive_active", "独占输出中 · %s（%s · %d bit）").format(status.deviceName, rateLabel, status.bitDepth)
+        }
+        is UsbExclusiveStatus.Fallback -> tr("audio_usb_exclusive_fallback", "%s 当前采样率或接口暂不兼容，已回退系统输出").format(status.deviceName)
+    }
     LazyColumn(
         pageContentModifier(),
         contentPadding = padding,
@@ -562,6 +602,118 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
                 summary = tr("audio_native_previous_summary", "播放超过 3 秒时点击上一首回到歌曲开头，否则切换至上一首"),
                 checked = state.nativePreviousBehavior,
             ) { store.audio(nativePrevious = it) }
+            SwitchPreference(
+                title = tr("audio_usb_exclusive", "USB 独占输出"),
+                summary = usbExclusiveSummary,
+                checked = state.usbExclusive,
+            ) { enabled ->
+                store.audio(usbExclusive = enabled)
+                if (enabled) {
+                    val usbDevice = UsbAudioDevice.getInstance(context)
+                    val dac = usbDevice.findUsbAudioDevice()
+                    if (dac != null && !usbDevice.hasPermission(dac)) {
+                        usbDevice.requestPermission(dac) {
+                            store.refreshUsbStatus()
+                        }
+                    } else {
+                        store.refreshUsbStatus()
+                    }
+                }
+            }
+            usbTransition.AnimatedVisibility(
+                visible = { it },
+                enter = fadeIn(tween(220)) + expandVertically(tween(220)),
+                exit = fadeOut(tween(220)) + shrinkVertically(tween(220)),
+            ) {
+                Box(Modifier.blur(usbBlur.dp)) {
+                    Column {
+                        GlassDropdownPreference(
+                            title = tr("audio_usb_buffer_size", "USB 缓冲区大小"),
+                            items = usbBufferLabels,
+                            selectedIndex = usbBufferOptions.indexOf(state.usbBufferMs).coerceAtLeast(1),
+                            backdrop = LocalToolbarBackdrop.current,
+                        ) { index ->
+                            store.audio(usbBufferMs = usbBufferOptions[index])
+                        }
+                        SwitchPreference(
+                            title = tr("audio_usb_lock_format", "锁定固定采样率/位深"),
+                            summary = tr("audio_usb_lock_format_summary", "兼容模式：固定以 48 kHz / 16 bit 输出，改善部分 DAC 切歌爆音或无声问题"),
+                            checked = state.usbLockFixedFormat,
+                        ) { locked ->
+                            store.audio(usbLockFixedFormat = locked)
+                        }
+                        SwitchPreference(
+                            title = tr("audio_usb_volume_collapse", "连续按压收起为细音量条"),
+                            summary = tr("audio_usb_volume_collapse_summary", "连续按下音量键时，音量条自动收起为侧边细条"),
+                            checked = state.usbVolumeCollapseOnRepeat,
+                        ) { collapse ->
+                            store.audio(usbVolumeCollapseOnRepeat = collapse)
+                        }
+                        val usbPositionValues = listOf("left", "right")
+                        val usbPositionLabels = listOf(
+                            tr("audio_usb_volume_pos_left", "左侧"),
+                            tr("audio_usb_volume_pos_right", "右侧"),
+                        )
+                        GlassDropdownPreference(
+                            title = tr("audio_usb_volume_position", "音量条显示位置"),
+                            items = usbPositionLabels,
+                            selectedIndex = usbPositionValues.indexOf(state.usbVolumePosition).coerceAtLeast(1),
+                            backdrop = LocalToolbarBackdrop.current,
+                        ) { index ->
+                            store.audio(usbVolumePosition = usbPositionValues[index])
+                            store.previewUsbVolumeHud()
+                        }
+                        SliderPreference(
+                            title = tr("audio_usb_volume_offset_y", "音量条垂直偏移"),
+                            value = state.usbVolumeOffsetY.toFloat(),
+                            range = -64f..96f,
+                            valueText = "${state.usbVolumeOffsetY} dp",
+                            steps = 159,
+                            defaultValue = 0f,
+                            centerValue = 0f,
+                        ) { value ->
+                            store.audio(usbVolumeOffsetY = value.roundToInt())
+                            store.previewUsbVolumeHud()
+                        }
+                        SliderPreference(
+                            title = tr("audio_usb_volume_offset_x", "音量条水平偏移"),
+                            value = state.usbVolumeOffsetX.toFloat(),
+                            range = -32f..64f,
+                            valueText = "${state.usbVolumeOffsetX} dp",
+                            steps = 95,
+                            defaultValue = 0f,
+                            centerValue = 0f,
+                        ) { value ->
+                            store.audio(usbVolumeOffsetX = value.roundToInt())
+                            store.previewUsbVolumeHud()
+                        }
+                        SliderPreference(
+                            title = tr("audio_usb_volume_height_scale", "音量条高度缩放"),
+                            value = state.usbVolumeHeightScale.toFloat(),
+                            range = -100f..100f,
+                            valueText = "${state.usbVolumeHeightScale}%",
+                            steps = 199,
+                            defaultValue = 0f,
+                            centerValue = 0f,
+                        ) { value ->
+                            store.audio(usbVolumeHeightScale = value.roundToInt())
+                            store.previewUsbVolumeHud()
+                        }
+                        SliderPreference(
+                            title = tr("audio_usb_volume_width_scale", "音量条宽度缩放"),
+                            value = state.usbVolumeWidthScale.toFloat(),
+                            range = -100f..100f,
+                            valueText = "${state.usbVolumeWidthScale}%",
+                            steps = 199,
+                            defaultValue = 0f,
+                            centerValue = 0f,
+                        ) { value ->
+                            store.audio(usbVolumeWidthScale = value.roundToInt())
+                            store.previewUsbVolumeHud()
+                        }
+                    }
+                }
+            }
         } }
         item { AudioScanGroup(model) }
         item {

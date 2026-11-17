@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <application android:name=".AuraApplication" android:allowBackup="false"
         android:label="Aura Player" android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -42,6 +43,88 @@
         </service>
         <receiver android:name=".download.DownloadCompletedReceiver" android:exported="true">
             <intent-filter><action android:name="android.intent.action.DOWNLOAD_COMPLETE" /></intent-filter>
+        </receiver>
+        <receiver
+            android:name=".widget.AuraPlayerWidget2x2Provider"
+            android:exported="true"
+            android:label="@string/widget_player_label">
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/aura_player_widget_2x2_info" />
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="miui.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".widget.AuraPlayerWidget4x1Provider"
+            android:exported="true"
+            android:label="@string/widget_player_label">
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/aura_player_widget_4x1_info" />
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="miui.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".widget.AuraPlayerWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_player_label">
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/aura_player_widget_info" />
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="miui.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".widget.AuraPlayerWidget4x3Provider"
+            android:exported="true"
+            android:label="@string/widget_player_label">
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/aura_player_widget_4x3_info" />
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="miui.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".widget.AuraPlayerWidget4x4Provider"
+            android:exported="true"
+            android:label="@string/widget_player_label">
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/aura_player_widget_4x4_info" />
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="miui.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".widget.AuraCoverWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_cover_label">
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/aura_cover_widget_info" />
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="miui.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".widget.WidgetActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="btm.m.auraplayer.widget.ACTION_PLAY_PAUSE" />
+                <action android:name="btm.m.auraplayer.widget.ACTION_PREV" />
+                <action android:name="btm.m.auraplayer.widget.ACTION_NEXT" />
+                <action android:name="btm.m.auraplayer.widget.ACTION_PLAY_QUEUE_INDEX" />
+            </intent-filter>
         </receiver>
         <provider android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.preset-files" android:exported="false" android:grantUriPermissions="true">

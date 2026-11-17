@@ -147,6 +147,7 @@ data class NowPlayingConfig(
 
 /** Dedicated appearance/interaction storage, shared by settings, activity and player. */
 class NowPlayingSettings(context: Context) {
+    private val appContext = context.applicationContext
     private val prefs = context.getSharedPreferences("aura.now-playing.v1", Context.MODE_PRIVATE)
     private val mutable = MutableStateFlow(NowPlayingCodec.decode(prefs.getString("config", "{}")!!))
     val state = mutable.asStateFlow()
@@ -167,6 +168,7 @@ class NowPlayingSettings(context: Context) {
         }
         mutable.value = next
         prefs.edit().putString("config", NowPlayingCodec.encode(next)).apply()
+        btm.m.auraplayer.widget.WidgetUpdateCoordinator.requestUpdate(appContext)
     }
 }
 

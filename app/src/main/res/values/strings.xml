@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_player_label">播放控制</string>
+    <string name="widget_player_description">多尺寸音乐控制，同步正在播放主题</string>
+    <string name="widget_cover_label">大封面播放</string>
+    <string name="widget_cover_description">大封面播放器，同步正在播放主题</string>
+    <string name="widget_default_title">暂无播放歌曲</string>
+    <string name="widget_default_artist">轻触打开 Aura Player</string>
+    <string name="widget_up_next">接下来播放</string>
+    <string name="widget_no_upcoming">队列中暂无下一首</string>
+    <string name="widget_prev_track">上一首</string>
+    <string name="widget_next_track">下一首</string>
+    <string name="widget_play">播放</string>
+    <string name="widget_pause">暂停</string>
+</resources>

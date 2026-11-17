@@ -37,6 +37,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import btm.m.auraplayer.AuraApplication
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.R
+import btm.m.auraplayer.audio.usb.UsbExclusiveStatus
 import btm.m.auraplayer.data.AppleMusicMotionCoverManager
 import btm.m.auraplayer.lyrics.PlayerLyricView
 import btm.m.auraplayer.lyrics.rememberSpatialGyroTilt
@@ -2397,6 +2398,8 @@ internal fun PlayerProgressSection(
                 modifier = Modifier.align(Alignment.CenterEnd),
             )
             val actualQuality = model.streamInfo?.level?.let { level -> StreamQuality.entries.firstOrNull { it.level == level } }
+            val usbStatus by model.app.effects.usbStatus.collectAsState()
+            val usbExclusivePrefix = if (usbStatus is UsbExclusiveStatus.Active) "${tr("player_usb_exclusive_badge", "USB 独占")} · " else ""
             if (appearance.showAudioInfo && song.cloud) {
                 val qualityItems = buildList {
                     if (model.qualityLoading) add(DropdownItem(tr("loading", "加载中…"), enabled = false))
@@ -2436,7 +2439,7 @@ internal fun PlayerProgressSection(
                                 .padding(horizontal = if (badgeBg != null) 11.dp else 7.dp, vertical = 2.dp),
                         ) {
                             Text(
-                                qualityName(actualQuality ?: model.quality),
+                                usbExclusivePrefix + qualityName(actualQuality ?: model.quality),
                                 color = badgeFg,
                                 fontSize = 11.sp,
                                 lineHeight = 13.sp,
@@ -2450,7 +2453,7 @@ internal fun PlayerProgressSection(
                 )
             } else if (appearance.showAudioInfo) {
                 Text(
-                    localAudioText(model),
+                    usbExclusivePrefix + localAudioText(model),
                     color = timeColor,
                     fontSize = 11.sp,
                     lineHeight = 13.sp,
@@ -3191,31 +3194,56 @@ internal fun stepMediaVolume(manager: AudioManager, max: Int, increase: Boolean)
 @Composable
 private fun VolumeControl(modifier: Modifier) {
     val context = LocalContext.current
+    val effects = remember(context) { (context.applicationContext as AuraApplication).effects }
+    val usbStatus by effects.usbStatus.collectAsState()
+    val effectsState by effects.state.collectAsState()
+    val usbActive = usbStatus is UsbExclusiveStatus.Active
     val manager = remember(context) { context.getSystemService(AudioManager::class.java) }
     val max = remember(manager) { manager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1) }
     var volume by remember { mutableFloatStateOf(manager.getStreamVolume(AudioManager.STREAM_MUSIC) / max.toFloat()) }
     var adjusting by remember { mutableStateOf(false) }
-    LaunchedEffect(manager) { while (true) { if (!adjusting) volume = manager.getStreamVolume(AudioManager.STREAM_MUSIC) / max.toFloat(); delay(300) } }
+    LaunchedEffect(manager, usbActive) {
+        while (true) {
+            if (!adjusting && !usbActive) volume = manager.getStreamVolume(AudioManager.STREAM_MUSIC) / max.toFloat()
+            delay(300)
+        }
+    }
+    val displayedVolume = if (usbActive) (if (adjusting) volume else effectsState.usbVolume) else volume
+    val sliderEnabled = usbActive || !manager.isVolumeFixed
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         Speaker(
             loud = false,
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .clickable(enabled = !manager.isVolumeFixed, role = Role.Button) {
-                    volume = stepMediaVolume(manager, max, increase = false)
+                .clickable(enabled = sliderEnabled, role = Role.Button) {
+                    if (usbActive) {
+                        volume = effects.stepUsbVolume(increase = false, showHud = false)
+                    } else {
+                        volume = stepMediaVolume(manager, max, increase = false)
+                    }
                 },
         )
-        PillSlider(volume, tr("media_volume", "媒体音量"), Modifier.weight(1f).height(44.dp), onChange = {
-            adjusting = true; volume = it; manager.setStreamVolume(AudioManager.STREAM_MUSIC, (it * max).roundToInt(), 0)
-        }, onFinished = { adjusting = false }, enabled = !manager.isVolumeFixed)
+        PillSlider(displayedVolume, tr("media_volume", "媒体音量"), Modifier.weight(1f).height(44.dp), onChange = {
+            adjusting = true
+            volume = it
+            if (usbActive) {
+                effects.setUsbVolume(it, showHud = false)
+            } else {
+                manager.setStreamVolume(AudioManager.STREAM_MUSIC, (it * max).roundToInt(), 0)
+            }
+        }, onFinished = { adjusting = false }, enabled = sliderEnabled)
         Speaker(
             loud = true,
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .clickable(enabled = !manager.isVolumeFixed, role = Role.Button) {
-                    volume = stepMediaVolume(manager, max, increase = true)
+                .clickable(enabled = sliderEnabled, role = Role.Button) {
+                    if (usbActive) {
+                        volume = effects.stepUsbVolume(increase = true, showHud = false)
+                    } else {
+                        volume = stepMediaVolume(manager, max, increase = true)
+                    }
                 },
         )
     }
