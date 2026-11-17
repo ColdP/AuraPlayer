@@ -74,7 +74,14 @@ class QqMusicApiTest {
         assertEquals("https://q.qlogo.cn/avatar.jpg", account.avatar)
         val profileReq = server.takeRequest()
         assertTrue(profileReq.path!!.startsWith("/rsc/fcgi-bin/fcg_get_profile_homepage.fcg"))
-        assertTrue(profileReq.path!!.contains("userid=10086"))
+        assertEquals("0", profileReq.requestUrl!!.queryParameter("userid"))
+        assertEquals("10086", profileReq.requestUrl!!.queryParameter("uin"))
+        assertEquals("10086", profileReq.requestUrl!!.queryParameter("loginUin"))
+        assertEquals("1", profileReq.requestUrl!!.queryParameter("reqfrom"))
+        assertEquals("0", profileReq.requestUrl!!.queryParameter("reqtype"))
+        assertEquals("yqq.json", profileReq.requestUrl!!.queryParameter("platform"))
+        assertEquals(QqSession("qqmusic_key=secret").gtk().toString(), profileReq.requestUrl!!.queryParameter("g_tk"))
+        assertEquals(QqSession("qqmusic_key=secret").gtk(modern = true).toString(), profileReq.requestUrl!!.queryParameter("g_tk_new_20200303"))
 
         reply("""{"code":0,"req_1":{"code":0,"data":{"meta":{"sum":1},"body":{"song":{"list":[{"id":88,"mid":"003Song","name":"晴天","singer":[{"name":"周杰伦"}],"album":{"mid":"004Alb","name":"叶惠美"},"interval":269}]}}}}}""")
         val searchPage = official.search("晴天", 0, 30, customApi::parseSongs)
@@ -90,5 +97,52 @@ class QqMusicApiTest {
         assertEquals("https://isure.stream.qqmusic.qq.com/C400003Song.m4a?vkey=xyz", url)
         val vkeyBody = JSONObject(server.takeRequest().body.readUtf8())
         assertEquals("987654", vkeyBody.getJSONObject("req_0").getJSONObject("param").getString("guid"))
+    }
+
+    @Test
+    fun officialWechatLoginUsesMusicIdentityAndBothCsrfTokens() {
+        val cookie = "uin=o10086; wxuin=1152921504606846976; wxopenid=wechat; login_type=2; qqmusic_key=music; skey=legacy"
+        val base = "http://127.0.0.1:${server.port}"
+        val wechat = OfficialQqClient({ cookie }, { "10086" }, OkHttpClient(), base, base)
+        reply("""{"code":0,"data":{"creator":{"uin":"1152921504606846976","nick":"WeChat"}}}""")
+        assertEquals(1152921504606846976L, wechat.account().userId)
+        val request = server.takeRequest()
+        assertEquals(cookie, request.getHeader("Cookie"))
+        assertEquals("1152921504606846976", request.requestUrl!!.queryParameter("uin"))
+        assertEquals("1152921504606846976", request.requestUrl!!.queryParameter("loginUin"))
+        val session = QqSession(cookie)
+        assertEquals(session.gtk().toString(), request.requestUrl!!.queryParameter("g_tk"))
+        assertEquals(session.gtk(modern = true).toString(), request.requestUrl!!.queryParameter("g_tk_new_20200303"))
+
+        reply("""{"code":0,"req_1":{"data":{}}}""")
+        wechat.search("test", 0, 30, customApi::parseSongs)
+        val comm = JSONObject(server.takeRequest().body.readUtf8()).getJSONObject("comm")
+        assertEquals("1152921504606846976", comm.getString("uin"))
+        assertEquals(session.gtk(), comm.getLong("g_tk"))
+        assertEquals(session.gtk(modern = true), comm.getLong("g_tk_new_20200303"))
+    }
+
+    @Test
+    fun officialLoginStillRejectsExpiredSessions() {
+        for (code in listOf(1000, 200003)) {
+            reply("""{"code":$code}""")
+            try {
+                official.account()
+                fail("Expected expired session")
+            } catch (expected: CloudApiException) {
+                assertEquals(301, expected.status)
+            }
+        }
+    }
+
+    @Test
+    fun officialLoginRejectsMissingProfileInsteadOfSavingAnAccount() {
+        reply("""{"code":0}""")
+        try {
+            official.account()
+            fail("Expected invalid profile")
+        } catch (expected: IOException) {
+            assertEquals("INVALID_RESPONSE", expected.message)
+        }
     }
 }

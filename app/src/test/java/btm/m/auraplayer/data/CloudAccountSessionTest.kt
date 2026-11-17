@@ -90,4 +90,50 @@ class CloudAccountSessionTest {
         val lines = MultiAccountStateCodec.splitCookieLines(" MUSIC_U=abc ; ; __csrf=123; NMTID=xyz ; ")
         assertEquals(listOf("MUSIC_U=abc", "__csrf=123", "NMTID=xyz"), lines)
     }
+
+    @Test
+    fun legacyQqSessionMigratesAndKeepsItsProfileAcrossRestart() {
+        val cookie = "uin=o10086; qqmusic_key=existing"
+        val legacy = MultiAccountStateCodec.decode(cookie)
+        val migrated = MultiAccountStateCodec.migrateLegacyAccount(legacy, CloudAccount(10086L, "QQ User", "avatar"))
+        val restored = MultiAccountStateCodec.decode(MultiAccountStateCodec.encode(migrated))
+        assertEquals(10086L, restored.activeUserId)
+        assertEquals("QQ User", restored.activeAccount?.nickname)
+        assertEquals(cookie, restored.activeCookie)
+        assertEquals(migrated, MultiAccountStateCodec.migrateLegacyAccount(migrated, CloudAccount(999L, "Stale profile", "")))
+    }
+
+    @Test
+    fun qqAndWechatAccountsSwitchWithExactCredentialsAndSurviveLogout() {
+        val qqCookie = "uin=o10086; qqmusic_key=qq"
+        val wxCookie = "wxuin=1152921504606846976; qm_keyst=wx; login_type=2"
+        val qq = CloudAccount(10086L, "QQ", "")
+        val wx = CloudAccount(1152921504606846976L, "WeChat", "")
+        val accounts = MultiAccountStateCodec.upsertAndActivate(
+            MultiAccountStateCodec.upsertAndActivate(MultiAccountState(), qq, qqCookie), wx, wxCookie)
+        val restored = MultiAccountStateCodec.decode(MultiAccountStateCodec.encode(accounts))
+        assertEquals(wx.userId, restored.activeUserId)
+        assertEquals(wxCookie, restored.activeCookie)
+        val switched = MultiAccountStateCodec.switchActive(restored, qq.userId)
+        assertEquals(qqCookie, switched.activeCookie)
+        val loggedOut = MultiAccountStateCodec.decode(MultiAccountStateCodec.encode(MultiAccountStateCodec.deactivateActive(switched)))
+        assertEquals(2, loggedOut.accounts.size)
+        assertEquals("", loggedOut.activeCookie)
+        val signedBackIn = MultiAccountStateCodec.switchActive(loggedOut, wx.userId)
+        assertEquals(wxCookie, signedBackIn.activeCookie)
+        val removed = MultiAccountStateCodec.removeAccount(signedBackIn, wx.userId)
+        assertEquals(qq.userId, removed.activeUserId)
+        assertEquals(qqCookie, removed.activeCookie)
+    }
+
+    @Test
+    fun importingAnUnverifiedCookiePreservesOtherSavedAccounts() {
+        val saved = MultiAccountStateCodec.upsertAndActivate(MultiAccountState(), CloudAccount(10086L, "Saved", ""), "uin=10086; qqmusic_key=saved")
+        val pending = saved.copy(activeUserId = 0L, legacyCookie = "uin=20000; qqmusic_key=imported")
+        val restored = MultiAccountStateCodec.decode(MultiAccountStateCodec.encode(pending))
+        assertEquals(1, restored.accounts.size)
+        assertEquals(pending.legacyCookie, restored.activeCookie)
+        assertEquals(pending.legacyCookie, MultiAccountStateCodec.removeAccount(restored, 10086L).activeCookie)
+        assertEquals("uin=10086; qqmusic_key=saved", MultiAccountStateCodec.switchActive(restored, 10086L).activeCookie)
+    }
 }

@@ -1,6 +1,7 @@
 package btm.m.auraplayer.data
 
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -19,30 +20,26 @@ internal class OfficialQqClient(
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
     private val ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
-    private fun cookies(): Map<String, String> = cookie().split(';').map { it.trim() }
-        .filter { '=' in it }
-        .associate { it.substringBefore('=') to it.substringAfter('=') }
+    private fun cookies(): Map<String, String> = QqSession(cookie()).cookies
 
-    private fun effectiveUin(map: Map<String, String> = cookies()): String {
-        val explicit = uin().trim().filter(Char::isDigit)
-        if (explicit.isNotEmpty()) return explicit
-        val raw = map["uin"] ?: map["p_uin"] ?: map["wxuin"] ?: ""
-        val digits = raw.trim().removePrefix("o").trimStart('0').ifEmpty { raw.filter(Char::isDigit) }
-        return digits.ifEmpty { "0" }
+    private fun effectiveUin(session: QqSession = QqSession(cookie())): String {
+        return session.uin()
+            .ifEmpty { QqSession.normalizeUin(uin()) }.ifEmpty { "0" }
     }
 
-    private fun gtk(map: Map<String, String> = cookies()): Long {
-        val key = map["qqmusic_key"] ?: map["qm_keyst"] ?: map["p_skey"] ?: map["skey"] ?: ""
-        var hash = 5381L
-        for (ch in key) hash += (hash shl 5) + ch.code
-        return hash and 0x7fffffffL
-    }
+    private fun gtk(): Long = QqSession(cookie()).gtk()
 
     private fun guid(map: Map<String, String> = cookies()): String =
         map["pgv_pvid"]?.takeIf { it.isNotBlank() } ?: "1234567890"
 
     private fun getJson(url: String): JSONObject {
-        val request = Request.Builder().url(url).get()
+        val session = QqSession(cookie())
+        val authenticatedUrl = url.toHttpUrl().newBuilder()
+            .setQueryParameter("uin", effectiveUin(session))
+            .setQueryParameter("g_tk", session.gtk().toString())
+            .setQueryParameter("g_tk_new_20200303", session.gtk(modern = true).toString())
+            .build()
+        val request = Request.Builder().url(authenticatedUrl).get()
             .header("Referer", "https://y.qq.com/")
             .header("User-Agent", ua)
             .header("Accept", "application/json")
@@ -57,13 +54,14 @@ internal class OfficialQqClient(
     }
 
     private fun musicu(blocks: Map<String, JSONObject>): JSONObject {
-        val map = cookies()
+        val session = QqSession(cookie())
         val payload = JSONObject().put("comm", JSONObject().apply {
             put("ct", 24)
             put("cv", 0)
             put("format", "json")
-            put("uin", effectiveUin(map))
-            put("g_tk", gtk(map))
+            put("uin", effectiveUin(session))
+            put("g_tk", session.gtk())
+            put("g_tk_new_20200303", session.gtk(modern = true))
         })
         blocks.forEach { (k, v) -> payload.put(k, v) }
         val request = Request.Builder().url("$uOrigin/cgi-bin/musicu.fcg").post(payload.toString().toRequestBody(jsonMedia))
@@ -81,10 +79,10 @@ internal class OfficialQqClient(
         }
     }
 
-    private fun profileHomepage(): JSONObject {
-        val map = cookies()
-        val effUin = effectiveUin(map)
-        val url = "$cOrigin/rsc/fcgi-bin/fcg_get_profile_homepage.fcg?cid=205360838&ct=24&cv=4747474&format=json&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq&needNewCode=1&g_tk=${gtk(map)}&userid=$effUin"
+    private fun profileHomepage(self: Boolean = false): JSONObject {
+        val effUin = effectiveUin()
+        val userId = if (self) "0" else effUin
+        val url = "$cOrigin/rsc/fcgi-bin/fcg_get_profile_homepage.fcg?cid=205360838&ct=24&cv=4747474&format=json&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq.json&needNewCode=0&userid=$userId&reqfrom=1&reqtype=0&hostUin=0&loginUin=$effUin"
         val json = getJson(url)
         val code = json.optInt("code", 0)
         if (code == 1000 || code == 200003) throw CloudApiException(301, "SESSION_EXPIRED")
@@ -93,11 +91,12 @@ internal class OfficialQqClient(
     }
 
     fun account(): CloudAccount {
-        val map = cookies()
-        val effUin = effectiveUin(map)
-        if (cookie().isBlank() || effUin == "0") throw CloudApiException(301, "LOGIN_REQUIRED")
-        val data = profileHomepage().optJSONObject("data") ?: JSONObject()
-        val creator = data.optJSONObject("creator") ?: JSONObject()
+        val session = QqSession(cookie())
+        val effUin = effectiveUin(session)
+        if (!session.hasCredentials) throw CloudApiException(301, "LOGIN_REQUIRED")
+        // userid=0 asks for the authenticated user rather than a possibly public profile.
+        val creator = profileHomepage(self = true).optJSONObject("data")?.optJSONObject("creator")
+            ?: throw IOException("INVALID_RESPONSE")
         val id = creator.optLong("uin", effUin.toLongOrNull() ?: 0L).takeIf { it > 0L } ?: (effUin.toLongOrNull() ?: 0L)
         val nick = creator.optString("nick").ifBlank { "QQ $effUin" }
         val avatar = creator.optString("headpic").https()
@@ -105,10 +104,9 @@ internal class OfficialQqClient(
     }
 
     fun playlists(): CloudPage<CloudPlaylist> {
-        val map = cookies()
-        val effUin = effectiveUin(map)
+        val effUin = effectiveUin()
         if (effUin == "0") return CloudPage(emptyList(), 0, false, 0)
-        val gTk = gtk(map)
+        val gTk = gtk()
         val result = mutableListOf<CloudPlaylist>()
         // 1. "我喜欢" playlist from profile homepage (often has tid == 0 in created_diss).
         runCatching {
@@ -233,7 +231,7 @@ internal class OfficialQqClient(
 
     fun resolveBlocking(songmid: String): String {
         val map = cookies()
-        val effUin = effectiveUin(map)
+        val effUin = effectiveUin()
         val resp = musicu(mapOf("req_0" to JSONObject().apply {
             put("module", "vkey.GetVkeyServer")
             put("method", "CgiGetVkey")

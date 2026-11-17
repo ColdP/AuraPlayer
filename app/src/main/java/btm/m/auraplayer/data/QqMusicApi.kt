@@ -51,12 +51,9 @@ class QqMusicApi(
         withContext(Dispatchers.IO) { requestBlocking(path, values) }
 
     fun userUin(): String {
-        val explicit = uin().trim().filter(Char::isDigit)
+        val explicit = QqSession.normalizeUin(uin())
         if (explicit.isNotEmpty()) return explicit
-        val map = cookie().split(';').map { it.trim() }.filter { '=' in it }
-            .associate { it.substringBefore('=') to it.substringAfter('=') }
-        val raw = map["uin"] ?: map["p_uin"] ?: map["wxuin"] ?: ""
-        return raw.trim().removePrefix("o").trimStart('0').ifEmpty { raw.filter(Char::isDigit) }
+        return QqSession(cookie()).uin()
     }
 
     suspend fun account(): CloudAccount = withContext(Dispatchers.IO) {

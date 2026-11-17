@@ -38,16 +38,18 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun SwitchUserPage(model: AuraViewModel, padding: PaddingValues) {
+fun SwitchUserPage(model: AuraViewModel, padding: PaddingValues, isQq: Boolean = false) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
-    val currentUserId = model.account?.userId ?: model.app.activeStoredAccount()?.userId
-    val accounts = remember(model.savedAccounts, model.account, model.app.cookie) {
-        if (model.savedAccounts.isNotEmpty()) {
-            model.savedAccounts
+    val active = if (isQq) model.qqAccount else model.account
+    val saved = if (isQq) model.savedQqAccounts else model.savedAccounts
+    val activeCookie = if (isQq) model.app.qqCookie else model.app.cookie
+    val currentUserId = active?.userId ?: if (isQq) model.app.activeStoredQqAccount()?.userId else model.app.activeStoredAccount()?.userId
+    val accounts = remember(saved, active, activeCookie) {
+        if (saved.isNotEmpty()) {
+            saved
         } else {
-            val active = model.account
-            val cookie = model.app.cookie
+            val cookie = activeCookie
             if (active != null && cookie.isNotBlank()) {
                 listOf(StoredCloudAccount(active.userId, active.nickname, active.avatar, cookie))
             } else {
@@ -64,7 +66,7 @@ fun SwitchUserPage(model: AuraViewModel, padding: PaddingValues) {
         if (result.resultCode == Activity.RESULT_OK) {
             val sessionCookie = result.data?.getStringExtra(OfficialLoginActivity.EXTRA_COOKIE).orEmpty()
             if (sessionCookie.isNotBlank()) {
-                model.completeOfficialLogin(sessionCookie)
+                if (isQq) model.completeQqOfficialLogin(sessionCookie) else model.completeOfficialLogin(sessionCookie)
             }
         }
     }
@@ -96,7 +98,7 @@ fun SwitchUserPage(model: AuraViewModel, padding: PaddingValues) {
                             Artwork(item.avatar, Modifier.size(60.dp), circular = true)
                             Column(Modifier.weight(1f).padding(start = 16.dp)) {
                                 Text(item.nickname)
-                                Text("UID ${item.userId}", style = MiuixTheme.textStyles.body2)
+                                Text("${if (isQq) "QQ" else "UID"} ${item.userId}", style = MiuixTheme.textStyles.body2)
                             }
                             if (item.userId == currentUserId) {
                                 Text(
@@ -113,13 +115,19 @@ fun SwitchUserPage(model: AuraViewModel, padding: PaddingValues) {
         item {
             SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
                 Preference(tr("add_account", "添加账号")) {
-                    if (model.app.endpoint.isBlank()) {
+                    if (isQq) {
+                        officialLoginLauncher.launch(OfficialLoginActivity.createIntent(context, clearCookies = true, provider = "qq"))
+                    } else if (model.app.endpoint.isBlank()) {
                         officialLoginLauncher.launch(OfficialLoginActivity.createIntent(context, clearCookies = true))
                     } else {
                         showingAddPhone = true
                     }
                 }
             }
+        }
+        val message = if (isQq) model.qqMessage else model.loginMessage
+        if (message.isNotBlank()) item {
+            Text(message, color = MiuixTheme.colorScheme.primary, modifier = Modifier.padding(16.dp))
         }
     }
 
@@ -145,11 +153,11 @@ fun SwitchUserPage(model: AuraViewModel, padding: PaddingValues) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 GlassDialogButton(
                     onClick = {
-                        model.switchCloudAccount(target.userId)
+                        if (isQq) model.switchQqCloudAccount(target.userId) else model.switchCloudAccount(target.userId)
                         selectedAccount = null
                     },
                     modifier = Modifier.weight(1f),
-                    enabled = !isCurrent,
+                    enabled = !isCurrent && !(if (isQq) model.qqBusy else model.cloudBusy),
                     colors = ButtonDefaults.buttonColorsPrimary(),
                 ) {
                     Text(tr("switch_action", "切换"))
@@ -196,7 +204,7 @@ fun SwitchUserPage(model: AuraViewModel, padding: PaddingValues) {
             }
             GlassDialogButton(
                 onClick = {
-                    deleteDialogAccount?.let { model.deleteCloudAccount(it.userId) }
+                    deleteDialogAccount?.let { if (isQq) model.deleteQqCloudAccount(it.userId) else model.deleteCloudAccount(it.userId) }
                     confirmDeleteAccount = null
                 },
                 modifier = Modifier.weight(1f),

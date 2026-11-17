@@ -192,6 +192,7 @@
     "cloud_playlist": "クラウドプレイリスト",
     "cloud_request_failed": "NetEase リクエストに失敗しました",
     "cloud_search_failed": "クラウド検索に失敗しました。再試行してください",
+    "cloud_search_source": "クラウド検索内容",
     "cloud_source": "クラウド表示内容",
     "cloud_source_all": "すべて表示",
     "collapse_player": "プレーヤーを閉じる",

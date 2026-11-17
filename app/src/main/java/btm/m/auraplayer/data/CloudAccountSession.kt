@@ -42,6 +42,7 @@ object MultiAccountStateCodec {
         return JSONObject()
             .put("version", VERSION)
             .put("activeUserId", state.activeUserId)
+            .put("legacyCookie", state.legacyCookie.trim())
             .put("accounts", array)
             .toString()
     }
@@ -70,8 +71,13 @@ object MultiAccountStateCodec {
         }
         val activeId = json.optLong("activeUserId", 0L)
         val resolvedActive = if (parsed.any { it.userId == activeId }) activeId else 0L
-        return MultiAccountState(activeUserId = resolvedActive, accounts = parsed)
+        return MultiAccountState(activeUserId = resolvedActive, accounts = parsed, legacyCookie = json.optString("legacyCookie", "").trim())
     }
+
+    /** Upgrades a previously stored single-account session without losing its profile. */
+    fun migrateLegacyAccount(state: MultiAccountState, account: CloudAccount?): MultiAccountState =
+        if (state.legacyCookie.isNotBlank() && account != null && account.userId > 0L)
+            upsertAndActivate(state, account, state.legacyCookie) else state
 
     fun upsertAndActivate(state: MultiAccountState, account: CloudAccount, cookie: String): MultiAccountState {
         val cleanedCookie = cookie.trim()
@@ -102,7 +108,8 @@ object MultiAccountStateCodec {
             remaining.any { it.userId == state.activeUserId } -> state.activeUserId
             else -> 0L
         }
-        return MultiAccountState(activeUserId = nextActive, accounts = remaining)
+        return MultiAccountState(activeUserId = nextActive, accounts = remaining,
+            legacyCookie = if (state.activeAccount == null) state.legacyCookie else "")
     }
 
     fun deactivateActive(state: MultiAccountState): MultiAccountState =

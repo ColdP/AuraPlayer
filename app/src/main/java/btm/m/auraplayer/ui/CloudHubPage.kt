@@ -20,16 +20,6 @@ internal fun CloudHubPage(model: AuraViewModel, padding: PaddingValues, login: (
     val showQq = source != "netease"
     LaunchedEffect(showQq, model.app.qqEndpoint) { if (showQq && model.qqPlaylists.isEmpty() && model.qqRecommended.isEmpty()) model.refreshQq() }
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item("source") {
-            SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
-                val values = listOf("netease", "qq", "all")
-                GlassDropdownPreference(tr("cloud_source", "云端内容显示"),
-                    listOf(tr("netease", "网易云音乐"), tr("qq_music", "QQ音乐"), tr("cloud_source_all", "全部显示")),
-                    values.indexOf(source).coerceAtLeast(0), backdrop = LocalToolbarBackdrop.current) { index ->
-                    model.updateSettings { it.copy(cloudSource = values[index]) }
-                }
-            }
-        }
         if (showNetease) {
             item("account") {
                 SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
@@ -77,7 +67,7 @@ internal fun CloudHubPage(model: AuraViewModel, padding: PaddingValues, login: (
     }
 }
 
-/** QQ Music section of the Cloud tab: account/service entry, recommended playlists and the user's playlists. */
+/** QQ Music section of the Cloud tab: account/service entry, the user's playlists, then recommendations. */
 private fun androidx.compose.foundation.lazy.LazyListScope.qqSection(model: AuraViewModel, loginQq: () -> Unit) {
     val qqUser = model.qqAccount
     val hasUser = qqUser != null || model.app.qqUin.isNotBlank() || model.app.qqCookie.isNotBlank()
@@ -91,15 +81,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.qqSection(model: Aura
             )
         }
     }
-    if (model.qqRecommended.isNotEmpty()) item("qq_recommended") {
-        Group(tr("recommended_playlists", "推荐歌单")) {
-            model.qqRecommended.take(12).forEach { playlist ->
-                ArrowPreference(title = playlist.name, summary = if (playlist.count > 0) "${playlist.count} ${tr("song_count", "首歌曲")}" else null,
-                    onClick = { model.openCloudPlaylist(playlist) },
-                    startAction = { Artwork(playlist.artwork, Modifier.padding(end = 12.dp).size(48.dp), cornerRadius = ListArtworkCornerRadius) })
-            }
-        }
-    }
     item("qq_playlists") {
         Group(tr("qq_my_playlists", "QQ音乐歌单")) {
             model.qqPlaylists.forEach { playlist ->
@@ -110,6 +91,15 @@ private fun androidx.compose.foundation.lazy.LazyListScope.qqSection(model: Aura
             if (!hasUser) Preference(tr("qq_login_required", "请先登录 QQ音乐"), onClick = loginQq)
             else if (model.qqPlaylists.isEmpty() && !model.qqLoading) Text(
                 if (model.qqFailed) model.qqMessage else tr("no_qq_playlists", "暂无 QQ音乐 歌单"), Modifier.padding(20.dp))
+        }
+    }
+    if (model.qqRecommended.isNotEmpty()) item("qq_recommended") {
+        Group(tr("recommended_playlists", "推荐歌单")) {
+            model.qqRecommended.take(12).forEach { playlist ->
+                ArrowPreference(title = playlist.name, summary = if (playlist.count > 0) "${playlist.count} ${tr("song_count", "首歌曲")}" else null,
+                    onClick = { model.openCloudPlaylist(playlist) },
+                    startAction = { Artwork(playlist.artwork, Modifier.padding(end = 12.dp).size(48.dp), cornerRadius = ListArtworkCornerRadius) })
+            }
         }
     }
 }
@@ -127,7 +117,11 @@ internal fun searchCategoryLabel(category: SearchCategory): String = when (categ
 
 @Composable
 internal fun SearchFilters(model: AuraViewModel) {
-    val types = if (model.searchCloud) SearchCategory.entries else SearchCategory.entries.take(4)
+    val types = when {
+        !model.searchCloud -> SearchCategory.entries.take(4)
+        model.settings.value.cloudSearchSource == "qq" -> listOf(SearchCategory.ALL, SearchCategory.SONG)
+        else -> SearchCategory.entries
+    }
     val navigationStyle = model.settings.value.navigation
     val material = rememberModuleNavigationMaterial(navigationStyle)
     Column {

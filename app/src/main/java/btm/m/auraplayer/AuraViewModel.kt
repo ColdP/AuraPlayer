@@ -137,6 +137,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var searchCategory by mutableStateOf(SearchCategory.ALL); private set
     var searchHits by mutableStateOf<List<MusicSearchHit>>(emptyList()); private set
     private val queries = MutableStateFlow(MusicSearchRequest())
+    private var searchRevision = 0
     var cloudLikedIds by mutableStateOf<Set<Long>>(emptySet()); private set
     var cloudLikesReady by mutableStateOf(false); private set
     private var likesJob: Job? = null
@@ -150,6 +151,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private var cloudGeneration = 0
     val cloudEnabled get() = !settings.value.cloudDisabled
     var qqAccount by mutableStateOf<CloudAccount?>(null); private set
+    var savedQqAccounts by mutableStateOf<List<StoredCloudAccount>>(emptyList()); private set
     var qqPlaylists by mutableStateOf<List<CloudPlaylist>>(emptyList()); private set
     var qqRecommended by mutableStateOf<List<CloudPlaylist>>(emptyList()); private set
     var qqLoading by mutableStateOf(false); private set
@@ -157,76 +159,171 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var qqFailed by mutableStateOf(false); private set
     var qqMessage by mutableStateOf(""); private set
     private var qqJob: Job? = null
+    private var qqAccountJob: Job? = null
+    private var qqGeneration = 0
     fun refreshQq() {
         if (!cloudEnabled || qqLoading) return
+        val generation = qqGeneration
+        val api = qqApiSnapshot()
         qqLoading = true; qqFailed = false
         qqJob = viewModelScope.launch {
             try {
                 val hasUser = qqAccount != null || app.qq.userUin().isNotBlank() || app.qqCookie.isNotBlank()
-                val mine = async { if (hasUser) runCatching { app.qq.playlists().items }.getOrNull() else emptyList() }
-                val rec = async { runCatching { app.qq.recommendedPlaylists() }.getOrNull() }
+                val mine = async { if (hasUser) runCatching { api.playlists().items }.getOrNull() else emptyList() }
+                val rec = async { runCatching { api.recommendedPlaylists() }.getOrNull() }
                 val mineList = mine.await(); val recList = rec.await()
                 ensureActive()
+                if (generation != qqGeneration) return@launch
                 if (mineList == null && recList == null) { qqFailed = true; qqMessage = tr("qq_request_failed", "QQ音乐请求失败，请检查网络或服务地址") }
                 else { qqPlaylists = mineList.orEmpty(); qqRecommended = recList.orEmpty() }
             } catch (e: CancellationException) { throw e }
-            catch (_: Exception) { qqFailed = true }
-            finally { qqLoading = false }
+            catch (_: Exception) { if (generation == qqGeneration) qqFailed = true }
+            finally { if (generation == qqGeneration) qqLoading = false }
         }
     }
     fun completeQqOfficialLogin(sessionCookie: String, onSuccess: () -> Unit = {}) {
         if (!cloudEnabled || qqBusy) return
-        viewModelScope.launch {
-            qqBusy = true
+        qqAccountJob?.cancel(); qqJob?.cancel(); qqLoading = false
+        val generation = ++qqGeneration
+        qqBusy = true
+        qqAccountJob = viewModelScope.launch {
             try {
-                if (app.qqEndpoint.isNotBlank()) app.useQqOfficialService()
                 val user = QqMusicApi({ "" }, { "" }, { sessionCookie }).account()
+                ensureActive()
+                if (generation != qqGeneration) return@launch
+                clearQqAccountContent()
+                if (app.qqEndpoint.isNotBlank()) app.useQqOfficialService()
                 app.saveQqAccount(user, sessionCookie)
+                syncSavedQqAccounts()
                 qqAccount = user
                 qqMessage = tr("login_success", "登录成功")
                 refreshQq()
                 onSuccess()
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
+                if (generation != qqGeneration) return@launch
                 qqMessage = if (e is CloudApiException && e.status == 301) tr("session_expired", "登录已过期，请重新登录")
                 else tr("qq_login_failed", "QQ音乐登录验证失败，请重试")
-            } finally { qqBusy = false }
+            } finally { if (generation == qqGeneration) qqBusy = false }
         }
     }
     fun logoutQq() {
-        qqJob?.cancel(); qqLoading = false
+        resetQqAccountWork()
         app.clearQqSession()
+        syncSavedQqAccounts()
         android.webkit.CookieManager.getInstance().removeAllCookies(null)
         qqAccount = null; qqPlaylists = emptyList()
         qqMessage = ""
     }
     fun useQqOfficialService() {
-        qqJob?.cancel(); qqLoading = false
         val changed = app.qqEndpoint.isNotBlank()
+        if (changed) resetQqAccountWork()
         app.useQqOfficialService()
+        syncSavedQqAccounts()
         if (changed) { qqAccount = null; qqPlaylists = emptyList() }
         qqMessage = tr("qq_official_mode", "已切换为QQ音乐官方连接")
         refreshQq()
     }
     fun configureQq(endpoint: String, uin: String, cookie: String): Boolean = runCatching {
-        qqJob?.cancel(); qqLoading = false
         val normalized = endpoint.trim().takeIf { it.isNotEmpty() }?.let { NeteaseApi.normalizeEndpoint(it) }.orEmpty()
-        val changed = app.qqEndpoint != normalized
-        app.saveQq(endpoint, uin, cookie)
-        if (changed) qqAccount = null
-        qqPlaylists = emptyList(); qqRecommended = emptyList()
+        resetQqAccountWork()
+        app.saveQq(normalized, uin, cookie)
+        syncSavedQqAccounts()
+        qqAccount = null
         qqMessage = tr("api_saved", "服务地址已保存")
-        if (cookie.isNotBlank() || uin.isNotBlank()) {
-            viewModelScope.launch {
-                runCatching { app.qq.account() }.onSuccess { qqAccount = it }
-            }
-        }
+        if (cookie.isNotBlank() || uin.isNotBlank()) validateQqAccount()
         refreshQq()
     }.onFailure { qqMessage = tr("invalid_api", "请输入 HTTPS 地址；自建局域网服务可使用 HTTP") }.isSuccess
+
+    private fun syncSavedQqAccounts() { savedQqAccounts = app.savedQqAccounts() }
+
+    private fun qqApiSnapshot(): QqMusicApi {
+        val endpoint = app.qqEndpoint; val uin = app.qqUin; val cookie = app.qqCookie
+        return QqMusicApi({ endpoint }, { uin }, { cookie })
+    }
+
+    private fun validateQqAccount() {
+        if (!cloudEnabled) return
+        qqAccountJob?.cancel()
+        val generation = qqGeneration
+        val cookie = app.qqCookie
+        val api = qqApiSnapshot()
+        qqAccountJob = viewModelScope.launch {
+            try {
+                val user = api.account()
+                ensureActive()
+                if (generation != qqGeneration) return@launch
+                if (cookie.isNotBlank()) app.saveQqAccount(user, cookie)
+                syncSavedQqAccounts()
+                qqAccount = user
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (generation == qqGeneration && e is CloudApiException && e.status == 301) {
+                    resetQqAccountWork()
+                    app.clearQqSession()
+                    syncSavedQqAccounts()
+                    qqAccount = null
+                    qqMessage = tr("session_expired", "登录已过期，请重新登录")
+                }
+            }
+        }
+    }
+
+    fun switchQqCloudAccount(userId: Long) {
+        if (!cloudEnabled || savedQqAccounts.none { it.userId == userId } ||
+            qqAccount?.userId == userId && app.qqCookie.isNotBlank()) return
+        resetQqAccountWork()
+        qqAccount = app.switchQqAccount(userId)?.toAccount()
+        syncSavedQqAccounts()
+        qqMessage = ""
+        android.webkit.CookieManager.getInstance().removeAllCookies(null)
+        refreshQq()
+        validateQqAccount()
+    }
+
+    fun deleteQqCloudAccount(userId: Long) {
+        val wasActive = app.activeStoredQqAccount()?.userId == userId
+        if (wasActive) resetQqAccountWork()
+        val next = app.removeQqAccount(userId)
+        syncSavedQqAccounts()
+        if (wasActive) {
+            qqAccount = next?.toAccount()
+            android.webkit.CookieManager.getInstance().removeAllCookies(null)
+            qqMessage = if (next == null) tr("logged_out", "已退出登录") else ""
+            refreshQq()
+            if (next != null) validateQqAccount()
+        }
+    }
+
+    private fun resetQqAccountWork() {
+        qqGeneration++
+        qqAccountJob?.cancel(); qqJob?.cancel()
+        qqBusy = false; qqLoading = false; qqFailed = false
+        clearQqAccountContent()
+    }
+
+    private fun clearQqAccountContent() {
+        qqPlaylists = emptyList(); qqRecommended = emptyList()
+        val ids = collectionDestinations.filterValues { it.cloud?.playlist?.provider == PROVIDER_QQ }.keys.toSet()
+        ids.forEach { collectionDestinations.remove(it)?.cloud?.job?.cancel() }
+        cloudContents.filterValues { it.playlist.provider == PROVIDER_QQ }.keys.toList().forEach { cloudContents.remove(it)?.job?.cancel() }
+        if (cloudQueue?.playlist?.provider == PROVIDER_QQ) { cloudQueue?.job?.cancel(); cloudQueue = null }
+        if (activeCollectionId in ids) {
+            val previous = collectionDestinations.maxByOrNull { it.key }?.value
+            collection = previous?.collection; cloudCollection = previous?.cloud; activeCollectionId = previous?.id ?: 0L
+        }
+        controller?.let { player ->
+            if (player.currentMediaItem?.mediaId?.startsWith("cloud:qq:") == true) player.pause()
+            for (index in player.mediaItemCount - 1 downTo 0) {
+                if (player.getMediaItemAt(index).mediaId.startsWith("cloud:qq:")) player.removeMediaItem(index)
+            }
+        }
+        if (searchCloud && settings.value.cloudSearchSource == "qq") submitSearch()
+    }
     /** Pure local mode: stop every cloud job, drop cloud queue entries and forget in-memory cloud state. */
     private fun shutdownCloud() {
         cloudGeneration++
-        cloudJob?.cancel(); qqJob?.cancel(); qqLoading = false; qqBusy = false
+        cloudJob?.cancel(); qqGeneration++; qqAccountJob?.cancel(); qqJob?.cancel(); qqLoading = false; qqBusy = false
         queries.value.takeIf { it.cloud }?.let { searchCloud = false; submitSearch() }
         controller?.let { player ->
             val keep = (0 until player.mediaItemCount).filter { !songFor(player.getMediaItemAt(it)).cloud }
@@ -319,7 +416,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     if (request.query.isBlank()) { searchHits = emptyList(); searchResults = emptyList(); searchHasMore = false }
                     else {
-                        val page = if (request.cloud) cloudSearch(request.query, request.category, 0) else localSearch(request)
+                        val page = if (request.cloud) cloudSearch(request.query, request.category, 0, request.source) else localSearch(request)
                         ensureActive()
                         if (request != queries.value) return@collectLatest
                         searchHits = page.items; searchHasMore = page.hasMore; cloudSearchOffset = page.nextOffset
@@ -386,7 +483,10 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         val after = settings.value
         if (!before.cloudDisabled && after.cloudDisabled) shutdownCloud()
         else if (before.cloudDisabled && !after.cloudDisabled) { restoreAccount(); refreshQq() }
-        if (before.cloudSource != after.cloudSource && searchCloud) submitSearch()
+        if (before.cloudSearchSource != after.cloudSearchSource && searchCloud) {
+            if (after.cloudSearchSource == "qq" && searchCategory !in listOf(SearchCategory.ALL, SearchCategory.SONG)) searchCategory = SearchCategory.ALL
+            submitSearch()
+        }
         if (before.whitelist != after.whitelist || before.blacklist != after.blacklist ||
             before.durationFilter != after.durationFilter || before.minimumSeconds != after.minimumSeconds) refreshLibrary(debounce = true)
     }
@@ -834,22 +934,14 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             if (index >= tracks.size - 5) loadCloudSongs(content)
         }
     }
-    /** Cloud search honouring the provider selected for the Cloud tab (NetEase, QQ Music or both). */
-    private suspend fun cloudSearch(query: String, category: SearchCategory, offset: Int): CloudPage<MusicSearchHit> {
+    /** Cloud search uses its own provider preference, independent of the Cloud tab's display. */
+    private suspend fun cloudSearch(query: String, category: SearchCategory, offset: Int, source: String): CloudPage<MusicSearchHit> {
         if (!cloudEnabled) return CloudPage(emptyList(), 0, false)
-        val source = settings.value.cloudSource
-        val useQq = source != "netease" && app.qq.configured
-        val qqHits: suspend () -> CloudPage<MusicSearchHit> = {
-            if (category != SearchCategory.ALL && category != SearchCategory.SONG) CloudPage(emptyList(), 0, false)
-            else app.qq.search(query, offset).let { page ->
-                CloudPage(page.items.map { MusicSearchHit(it.id, SearchCategory.SONG, it.title, it.artist, it.artwork, it) }, page.nextOffset, page.hasMore, page.total)
-            }
+        if (source != "qq") return app.api.searchCategory(query, category, offset)
+        if (category != SearchCategory.ALL && category != SearchCategory.SONG) return CloudPage(emptyList(), 0, false)
+        return qqApiSnapshot().search(query, offset).let { page ->
+            CloudPage(page.items.map { MusicSearchHit(it.id, SearchCategory.SONG, it.title, it.artist, it.artwork, it) }, page.nextOffset, page.hasMore, page.total)
         }
-        if (source == "qq") return if (useQq) qqHits() else CloudPage(emptyList(), 0, false)
-        val netease = app.api.searchCategory(query, category, offset)
-        if (!useQq || offset != 0) return netease
-        val extra = runCatching { qqHits() }.getOrNull()?.items?.take(10).orEmpty()
-        return netease.copy(items = netease.items + extra)
     }
     private suspend fun localSearch(request: MusicSearchRequest): CloudPage<MusicSearchHit> = withContext(Dispatchers.Default) {
         localMusicSearch(songs, request)
@@ -858,6 +950,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     fun search(query: String) { if (query != searchQuery) { searchQuery = query; submitSearch() } }
     fun changeSearchScope(cloud: Boolean) {
         searchCloud = cloud
+        if (cloud && settings.value.cloudSearchSource == "qq" && searchCategory !in listOf(SearchCategory.ALL, SearchCategory.SONG)) searchCategory = SearchCategory.ALL
         if (!cloud && searchCategory.apiType > 100) searchCategory = SearchCategory.ALL
         submitSearch()
     }
@@ -865,7 +958,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private fun submitSearch() {
         searchJob?.cancel(); searchHits = emptyList(); searchResults = emptyList(); searchHasMore = false
         searching = searchQuery.isNotBlank()
-        queries.value = MusicSearchRequest(searchQuery, searchCloud, searchCategory)
+        queries.value = MusicSearchRequest(searchQuery, searchCloud, searchCategory, settings.value.cloudSearchSource, ++searchRevision)
     }
     fun loadMoreSearch() {
         if (searching || !searchHasMore || !searchCloud) return
@@ -873,7 +966,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         searchJob = viewModelScope.launch {
             searching = true
             try {
-                val page = cloudSearch(request.query, request.category, cloudSearchOffset)
+                val page = cloudSearch(request.query, request.category, cloudSearchOffset, request.source)
                 if (request == queries.value) {
                     cloudSearchOffset = page.nextOffset; searchHasMore = page.hasMore
                     searchHits = (searchHits + page.items).distinctBy { it.key }
@@ -1056,6 +1149,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     private fun restoreAccount() {
         syncSavedAccounts()
+        syncSavedQqAccounts()
         if (!cloudEnabled) return
         app.activeStoredAccount()?.let { account = it.toAccount() }
         if (app.cookie.isNotBlank()) cloudAction {
@@ -1070,19 +1164,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         }
         qqAccount = app.savedQqAccount()
         if (app.qqCookie.isNotBlank() || (app.qqEndpoint.isNotBlank() && app.qqUin.isNotBlank())) {
-            viewModelScope.launch {
-                runCatching { app.qq.account() }
-                    .onSuccess { user ->
-                        if (app.qqCookie.isNotBlank()) app.saveQqAccount(user, app.qqCookie)
-                        qqAccount = user
-                    }
-                    .onFailure { e ->
-                        if (e is CloudApiException && e.status == 301) {
-                            app.clearQqSession()
-                            qqAccount = null
-                        }
-                    }
-            }
+            validateQqAccount()
         }
     }
     fun refreshCloud() {

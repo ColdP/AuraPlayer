@@ -28,6 +28,8 @@ data class Appearance(
     val disableAdvancedMaterial: Boolean = false,
     /** Which cloud provider(s) the Cloud tab shows: "netease", "qq" or "all". */
     val cloudSource: String = "all",
+    /** Cloud search provider, independent of the providers displayed in the Cloud tab. */
+    val cloudSearchSource: String = "netease",
     /** Pure local player mode: hides and disables every cloud feature. */
     val cloudDisabled: Boolean = false,
 )
@@ -55,10 +57,11 @@ class AuraSettings(context: Context) {
         blacklist = prefs.getStringSet("blacklist", emptySet())!!.toSet(),
         disableAdvancedMaterial = prefs.getBoolean("disableAdvancedMaterial", false),
         cloudSource = prefs.getString("cloudSource", "all")!!.takeIf { it in setOf("netease", "qq", "all") } ?: "all",
+        cloudSearchSource = normalizeCloudSearchSource(prefs.getString("cloudSearchSource", null), prefs.getString("cloudSource", "all")),
         cloudDisabled = prefs.getBoolean("cloudDisabled", false),
     )
     fun update(transform: (Appearance) -> Appearance) {
-        val v = transform(value).let { it.copy(uiStyle = normalizeUiStyle(it.uiStyle)) }
+        val v = transform(value).let { it.copy(uiStyle = normalizeUiStyle(it.uiStyle), cloudSearchSource = normalizeCloudSearchSource(it.cloudSearchSource)) }
         prefs.edit().putString("navigation", v.navigation).putString("labels", v.labels)
             .putBoolean("predictive", v.predictive).putFloat("backMaximum", v.maxBackProgress)
             .putString("theme", v.theme).putString("uiStyle", v.uiStyle).putBoolean("monet", v.monet).putString("color", v.color)
@@ -68,12 +71,20 @@ class AuraSettings(context: Context) {
             .putBoolean("durationFilter", v.durationFilter).putInt("minimumSeconds", v.minimumSeconds)
             .putStringSet("blacklist", v.blacklist)
             .putBoolean("disableAdvancedMaterial", v.disableAdvancedMaterial)
-            .putString("cloudSource", v.cloudSource).putBoolean("cloudDisabled", v.cloudDisabled).apply()
+            .putString("cloudSource", v.cloudSource).putString("cloudSearchSource", v.cloudSearchSource)
+            .putBoolean("cloudDisabled", v.cloudDisabled).apply()
         value = v
         btm.m.auraplayer.widget.WidgetUpdateCoordinator.requestUpdate(appContext)
     }
 
     companion object {
+        fun normalizeCloudSearchSource(raw: String?, previousDisplaySource: String? = null): String = when (raw) {
+            "qq" -> "qq"
+            "netease" -> "netease"
+            null -> if (previousDisplaySource == "qq") "qq" else "netease"
+            else -> "netease"
+        }
+
         /** 将持久化或外部传入的界面风格值规范化为已支持的选项。 */
         @JvmStatic
         fun normalizeUiStyle(raw: String?): String = when (raw) {

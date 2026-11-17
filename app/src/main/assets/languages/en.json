@@ -192,6 +192,7 @@
     "cloud_playlist": "Cloud playlist",
     "cloud_request_failed": "NetEase request failed",
     "cloud_search_failed": "Cloud search failed. Please retry",
+    "cloud_search_source": "Cloud search content",
     "cloud_source": "Cloud content display",
     "cloud_source_all": "Show all",
     "collapse_player": "Collapse player",

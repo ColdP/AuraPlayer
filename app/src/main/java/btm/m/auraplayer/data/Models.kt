@@ -62,7 +62,8 @@ object LibraryFilter {
 
 
 enum class SearchCategory(val apiType: Int) { ALL(0), SONG(1), ALBUM(10), ARTIST(100), LYRICS(1006), VOICE(2000), BLOG(1009) }
-data class MusicSearchRequest(val query: String = "", val cloud: Boolean = false, val category: SearchCategory = SearchCategory.ALL)
+data class MusicSearchRequest(val query: String = "", val cloud: Boolean = false, val category: SearchCategory = SearchCategory.ALL,
+                              val source: String = "netease", val revision: Int = 0)
 data class MusicSearchHit(val id: Long, val kind: SearchCategory, val title: String, val subtitle: String,
                           val artwork: String = "", val song: Song? = null, val artistId: Long = 0, val cloud: Boolean = true) {
     val key: String get() = "${if (cloud) "cloud" else "local:${song?.volume.orEmpty()}"}:${kind.name}:$id"

@@ -65,6 +65,18 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
                     Preference(tr("qq_music", "QQ音乐"), model.qqAccount?.nickname
                         ?: if (model.app.qqEndpoint.isNotBlank()) tr("qq_custom_service", "自建服务连接")
                         else tr("qq_login_summary", "通过QQ音乐官方页面登录")) { open("qq_login") }
+                    val cloudSources = listOf("netease", "qq", "all")
+                    GlassDropdownPreference(tr("cloud_source", "云端内容显示"),
+                        listOf(tr("netease", "网易云音乐"), tr("qq_music", "QQ音乐"), tr("cloud_source_all", "全部显示")),
+                        cloudSources.indexOf(value.cloudSource).coerceAtLeast(0), backdrop = LocalToolbarBackdrop.current) { index ->
+                        model.updateSettings { it.copy(cloudSource = cloudSources[index]) }
+                    }
+                    val searchSources = listOf("netease", "qq")
+                    GlassDropdownPreference(tr("cloud_search_source", "云端搜索内容"),
+                        listOf(tr("netease", "网易云音乐"), tr("qq_music", "QQ音乐")),
+                        searchSources.indexOf(value.cloudSearchSource).coerceAtLeast(0), backdrop = LocalToolbarBackdrop.current) { index ->
+                        model.updateSettings { it.copy(cloudSearchSource = searchSources[index]) }
+                    }
                 }
                 SwitchPreference(tr("disable_cloud", "关闭所有云端功能"),
                     tr("disable_cloud_summary", "开启后隐藏并关闭网易云音乐、QQ音乐等所有云端功能，成为纯本地播放器"),
@@ -304,13 +316,17 @@ fun LoginPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Un
 
 /** QQ Music secondary page: mirrors NetEase LoginPage with official WebView login and optional self-hosted QQMusicApi. */
 @Composable
-fun QqMusicPage(model: AuraViewModel, padding: PaddingValues) {
+fun QqMusicPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Unit) {
     val context = LocalContext.current
     var endpoint by rememberSaveable { mutableStateOf(model.app.qqEndpoint) }
     var uin by rememberSaveable { mutableStateOf(model.app.qqUin) }
     var cookie by remember { mutableStateOf(model.app.qqCookie) }
     var advanced by rememberSaveable { mutableStateOf(model.app.qqEndpoint.isNotBlank()) }
     val qqAccount = model.qqAccount
+    LaunchedEffect(qqAccount, model.app.qqCookie, model.app.qqUin) {
+        cookie = model.app.qqCookie
+        uin = model.app.qqUin
+    }
     val officialLoginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             val sessionCookie = result.data?.getStringExtra(OfficialLoginActivity.EXTRA_COOKIE).orEmpty()
@@ -330,6 +346,7 @@ fun QqMusicPage(model: AuraViewModel, padding: PaddingValues) {
                     }
                     officialLoginLauncher.launch(OfficialLoginActivity.createIntent(context, clearCookies = false, provider = "qq"))
                 }
+                if (model.savedQqAccounts.isNotEmpty()) Preference(tr("switch_user", "切换账号")) { open("qq_switch_user") }
             }
         }
         if (qqAccount != null) item {
@@ -341,6 +358,7 @@ fun QqMusicPage(model: AuraViewModel, padding: PaddingValues) {
                         if (qqAccount.userId > 0L) Text("QQ ${qqAccount.userId}", style = MiuixTheme.textStyles.body2)
                     }
                 }
+                Preference(tr("switch_user", "切换账号")) { open("qq_switch_user") }
                 Preference(tr("qq_relogin", "重新登录")) {
                     officialLoginLauncher.launch(OfficialLoginActivity.createIntent(context, clearCookies = true, provider = "qq"))
                 }

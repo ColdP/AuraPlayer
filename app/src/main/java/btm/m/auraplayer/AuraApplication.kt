@@ -28,6 +28,7 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
     @Volatile var qqEndpoint: String = ""; private set
     @Volatile var qqUin: String = ""; private set
     @Volatile var qqCookie: String = ""; private set
+    @Volatile var qqAccountsState: MultiAccountState = MultiAccountState(); private set
     @Volatile var accountsState: MultiAccountState = MultiAccountState(); private set
     @Volatile var cookie: String = ""; private set
     @Volatile var endpoint: String = ""; private set
@@ -52,7 +53,16 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         getSharedPreferences("aura.cloud", MODE_PRIVATE).let {
             qqEndpoint = it.getString("qqEndpoint", "").orEmpty(); qqUin = it.getString("qqUin", "").orEmpty()
         }
-        qqCookie = session.readQq()
+        val qqPrefs = getSharedPreferences("aura.cloud", MODE_PRIVATE)
+        val legacyQq = qqPrefs.getLong("qqUserId", 0L).takeIf { it > 0L }?.let { id ->
+            CloudAccount(id, qqPrefs.getString("qqNickname", "").orEmpty().ifBlank { "QQ $id" },
+                qqPrefs.getString("qqAvatar", "").orEmpty())
+        }
+        qqAccountsState = MultiAccountStateCodec.migrateLegacyAccount(MultiAccountStateCodec.decode(session.readQq()), legacyQq)
+        qqCookie = qqAccountsState.activeCookie
+        qqAccountsState.activeAccount?.let { qqUin = it.userId.toString() }
+        session.saveQq(MultiAccountStateCodec.encode(qqAccountsState))
+        qqPrefs.edit().remove("qqUserId").remove("qqNickname").remove("qqAvatar").apply()
         qq = QqMusicApi({ qqEndpoint }, { qqUin }, { qqCookie })
         I18n.initialize(this, settings.value.language)
         btm.m.auraplayer.download.MusicDownloads.resume(this)
@@ -105,14 +115,11 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
     /** Saves the self-hosted QQMusicApi address, QQ number and optional y.qq.com cookie. A blank endpoint uses official QQ endpoints. */
     fun saveQq(endpointValue: String, uin: String, cookieValue: String) {
         val normalized = endpointValue.trim().takeIf { it.isNotEmpty() }?.let { NeteaseApi.normalizeEndpoint(it) }.orEmpty()
-        val changed = qqEndpoint != normalized
-        qqEndpoint = normalized; qqUin = uin.trim().filter(Char::isDigit); qqCookie = cookieValue.trim()
-        getSharedPreferences("aura.cloud", MODE_PRIVATE).edit().apply {
-            putString("qqEndpoint", qqEndpoint)
-            putString("qqUin", qqUin)
-            if (changed) { remove("qqUserId"); remove("qqNickname"); remove("qqAvatar") }
-        }.apply()
-        session.saveQq(qqCookie)
+        qqEndpoint = normalized
+        persistQqAccounts(qqAccountsState.copy(activeUserId = 0L, legacyCookie = cookieValue.trim()))
+        qqUin = QqSession.normalizeUin(uin).ifEmpty { QqSession(qqCookie).uin() }
+        getSharedPreferences("aura.cloud", MODE_PRIVATE).edit()
+            .putString("qqEndpoint", qqEndpoint).putString("qqUin", qqUin).apply()
     }
     fun useQqOfficialService() {
         if (qqEndpoint.isNotBlank()) clearQqSession()
@@ -120,30 +127,27 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         getSharedPreferences("aura.cloud", MODE_PRIVATE).edit().remove("qqEndpoint").apply()
     }
     fun saveQqAccount(user: CloudAccount, cookieValue: String) {
-        qqCookie = cookieValue.trim()
-        if (user.userId > 0L) qqUin = user.userId.toString()
-        session.saveQq(qqCookie)
-        getSharedPreferences("aura.cloud", MODE_PRIVATE).edit()
-            .putString("qqUin", qqUin)
-            .putLong("qqUserId", user.userId)
-            .putString("qqNickname", user.nickname)
-            .putString("qqAvatar", user.avatar)
-            .apply()
+        persistQqAccounts(MultiAccountStateCodec.upsertAndActivate(qqAccountsState, user, cookieValue))
     }
-    fun savedQqAccount(): CloudAccount? {
-        if (qqCookie.isBlank()) return null
-        val prefs = getSharedPreferences("aura.cloud", MODE_PRIVATE)
-        val uid = prefs.getLong("qqUserId", 0L)
-        val nick = prefs.getString("qqNickname", "").orEmpty()
-        if (uid <= 0L && nick.isBlank()) return null
-        return CloudAccount(uid, nick.ifBlank { "QQ $uid" }, prefs.getString("qqAvatar", "").orEmpty())
+    private fun persistQqAccounts(next: MultiAccountState) {
+        qqAccountsState = next
+        qqCookie = next.activeCookie
+        qqUin = next.activeAccount?.userId?.toString() ?: QqSession(qqCookie).uin()
+        session.saveQq(MultiAccountStateCodec.encode(next))
+        getSharedPreferences("aura.cloud", MODE_PRIVATE).edit().putString("qqUin", qqUin).apply()
     }
-    fun clearQqSession() {
-        qqCookie = ""
-        session.saveQq("")
-        getSharedPreferences("aura.cloud", MODE_PRIVATE).edit()
-            .remove("qqUserId").remove("qqNickname").remove("qqAvatar").apply()
+    fun savedQqAccounts(): List<StoredCloudAccount> = qqAccountsState.accounts
+    fun activeStoredQqAccount(): StoredCloudAccount? = qqAccountsState.activeAccount
+    fun savedQqAccount(): CloudAccount? = qqAccountsState.activeAccount?.toAccount()
+    fun switchQqAccount(userId: Long): StoredCloudAccount? {
+        persistQqAccounts(MultiAccountStateCodec.switchActive(qqAccountsState, userId))
+        return qqAccountsState.activeAccount
     }
+    fun removeQqAccount(userId: Long): StoredCloudAccount? {
+        persistQqAccounts(MultiAccountStateCodec.removeAccount(qqAccountsState, userId))
+        return qqAccountsState.activeAccount
+    }
+    fun clearQqSession() = persistQqAccounts(MultiAccountStateCodec.deactivateActive(qqAccountsState))
     fun saveEndpoint(value: String) {
         val normalized = NeteaseApi.normalizeEndpoint(value)
         if (endpoint != normalized) clearCookie()
