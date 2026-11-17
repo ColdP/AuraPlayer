@@ -4,7 +4,7 @@
 
 <h1 align="center"><strong>Aura Player</strong></h1>
 
-<p align="center">基于 MIUIX 与 Backdrop 的开源 Android 本地与网易云音乐播放器。</p>
+<p align="center">基于 MIUIX 与 Backdrop 的开源 Android 本地与云端（网易云音乐 / QQ音乐）播放器。</p>
 
 <p align="center">
   <strong>简体中文</strong> |
@@ -28,7 +28,7 @@
 
 ## 项目简介
 
-Aura Player（包名 `btm.m.auraplayer`）是一款面向 Android 13（API 33）及以上的音乐播放器，结合 MIUIX 界面组件、Backdrop 玻璃材质与 Media3 音频引擎，同时支持纯离线本地播放与可选的网易云音乐在线服务。
+Aura Player（包名 `btm.m.auraplayer`）是一款面向 Android 13（API 33）及以上的音乐播放器，结合 MIUIX 界面组件、Backdrop 玻璃材质与 Media3 音频引擎，同时支持纯离线本地播放与可选的网易云音乐、QQ音乐在线服务。
 
 当前源码版本以 [app/build.gradle.kts](app/build.gradle.kts) 中的 `versionName` 为准，README 不重复维护版本号。下载与更新说明请查看 [Releases](https://github.com/ColdP/AuraPlayer/releases)。
 
@@ -43,11 +43,12 @@ Aura Player（包名 `btm.m.auraplayer`）是一款面向 Android 13（API 33）
 - 支持文件夹黑白名单、最小时长过滤、通过系统文件选择器手动导入单曲（单次最多 20 首）、全量/增量文件夹扫描、持久化排序、下拉刷新与分类搜索。
 - 采用自适应响应式布局：紧凑歌曲行与 `44dp` 封面；支持自由小窗、分屏、横屏分栏与大屏多列布局并保留系统字体缩放。
 
-### 网易云音乐与缓存下载
+### 云端音乐（网易云音乐 / QQ音乐）与缓存下载
 
-- **官方直连与多账号管理**：默认通过官方 HTTPS 页面（`music.163.com`）登录，无需部署后端或手动复制 Cookie；会话凭证使用 Android Keystore 加密存储，支持多账号保存、切换、Cookie 查看/复制，退出登录或更换服务地址时自动清除当前会话。
-- **可选自建 API**：支持在“高级连接设置”中接入自建 [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) 服务（含短信验证码登录）；`server/` 目录提供可直接启动的 Node.js 与 Docker Compose 配置。
-- **云端浏览与详情**：支持云端推荐、歌单（每页 30 个）、曲目（每页 50 首）、搜索（综合 / 单曲 / 声音 / 播客）、专辑与艺术家详情及音质切换。
+- **官方直连与多账号管理**：网易云音乐（`music.163.com`）与 QQ音乐（`y.qq.com`）默认均支持通过官方 HTTPS 页面直接登录，无需部署后端或手动复制 Cookie；会话凭证使用 Android Keystore 加密存储，支持网易云多账号保存、切换、Cookie 查看/复制，退出登录或更换服务地址时自动清除当前会话。
+- **可选自建 API**：支持在各自的“高级连接设置”中接入自建 [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（含短信验证码登录，`server/` 目录提供可直接启动的 Node.js 与 Docker Compose 配置）或 [jsososo/QQMusicApi](https://github.com/jsososo/QQMusicApi) 服务。
+- **云端展示筛选与纯本地模式**：云端 Tab 顶部提供下拉菜单，支持选择展示 `网易云音乐 / QQ音乐 / 全部显示` 并联动云端搜索；在“设置 → 功能”中可一键开启“关闭所有云端功能”，隐藏云端入口、终止云端任务并清理队列中的云端曲目，使应用成为纯本地播放器。
+- **云端浏览与详情**：支持推荐内容、歌单与曲目分页加载、分类搜索、专辑与艺术家详情及音质切换（部分高级特性以网易云接口返回为准）。
 - **下载与解码**：通过系统下载器按所选音质下载，WorkManager 在后台完成 NCM 解码及 FLAC / MP3 标签与封面写入，保存至 `Music/Aura Player`（实际可下载音质以账号权限与网易云返回为准）。
 - **缓存管理**：封面缓存上限 `128 MiB`，元数据缓存上限 `16 MiB`，支持在“设置 → 网易云音乐 → 缓存”中分类查看与清理。
 
@@ -155,7 +156,7 @@ Aura-Player/
 - 控件与风格组件基于 [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）、[Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0），歌单标题栏搜索组件使用 [COUI-Kit](https://github.com/ItosEO/COUI-Kit)（MPL-2.0），`One` 界面风格与交互控件（`MonetTones`、`OneUiPalette`、`BoSwitchView`、`DragOnlySeekBar`）移植自 [OneUI_Kit](https://github.com/TGP258/OneUI_Kit)（MIT，源自 [OneUIProject/oneui-design](https://github.com/OneUIProject/oneui-design) 与 [OneUIProject/oneui-core](https://github.com/OneUIProject/oneui-core)）。
 - 歌词与 Apple Music 动态封面来源：[HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（AGPL-3.0）、[HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced)（GPL-3.0 / Apache-2.0）与 [Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics)（Apache-2.0）。
 - 端侧 AI 可选运行库与模型来源：[ONNX Runtime](https://github.com/microsoft/onnxruntime)（MIT，按需下载）、Qualcomm AI Engine Direct (QNN) 2.51.0 加速运行库（可选按需下载，仅限高通许可）、[Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) / [Depth Anything 3](https://github.com/ByteDance-Seed/depth-anything-3)（Apache-2.0）、[MiDaS](https://github.com/isl-org/MiDaS)（MIT）、[U2Net / DIS (rembg)](https://github.com/danielgatis/rembg)（MIT / Apache-2.0）、[BiRefNet](https://github.com/ZhengPeng7/BiRefNet)（MIT）、[Demucs v4 (HTDemucs)](https://github.com/facebookresearch/demucs)（MIT）及 [UVR / MDX-Net](https://github.com/Anjok07/ultimatevocalremovergui) / [KUIELab](https://github.com/kuielab/sdx23)（MIT）。
-- 其他核心依赖：[Media3](https://developer.android.com/media/media3)、[Coil](https://github.com/coil-kt/coil)、[OkHttp](https://github.com/square/okhttp)、[jaudiotagger](https://github.com/Adonai/jaudiotagger-android)（LGPL-2.1）、[MaterialKolor](https://github.com/jordond/MaterialKolor)（MIT）、[ZXing](https://github.com/zxing/zxing)（Apache-2.0）、[Shizuku](https://github.com/RikkaApps/Shizuku)（Apache-2.0）、[decent-player](https://github.com/Ma145/decent-player)（MIT，USB 独占音频驱动与 Media3 管线适配）及 [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT）。
+- 其他核心依赖：[Media3](https://developer.android.com/media/media3)、[Coil](https://github.com/coil-kt/coil)、[OkHttp](https://github.com/square/okhttp)、[jaudiotagger](https://github.com/Adonai/jaudiotagger-android)（LGPL-2.1）、[MaterialKolor](https://github.com/jordond/MaterialKolor)（MIT）、[ZXing](https://github.com/zxing/zxing)（Apache-2.0）、[Shizuku](https://github.com/RikkaApps/Shizuku)（Apache-2.0）、[decent-player](https://github.com/Ma145/decent-player)（MIT，USB 独占音频驱动与 Media3 管线适配）、[NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT）及 [jsososo/QQMusicApi](https://github.com/jsososo/QQMusicApi)（GPL-3.0）。
 
 ## Star History
 

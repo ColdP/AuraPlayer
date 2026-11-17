@@ -75,10 +75,11 @@ class LyricsRepository(
                     answers.trySend(Answer(rank, rows))
                 }
             }
-            val pkg = if (song.cloud) "com.netease.cloudmusic" else "btm.m.auraplayer"
+            val neteaseSong = song.cloud && song.provider != "qq"
+            val pkg = if (neteaseSong) "com.netease.cloudmusic" else "btm.m.auraplayer"
             val query = NcmLyrics.build(song.title, song.artist, song.album, song.duration)
             val order = OnlineLyrics.order(pkg)
-            if (song.cloud) {
+            if (neteaseSong) {
                 request(1) { NcmLyrics.lyricsOf(song.id.toString(), android.os.SystemClock.uptimeMillis())?.let {
                     LyricParse.parse(it.body, it.translation, it.roma)
                 }.orEmpty() }

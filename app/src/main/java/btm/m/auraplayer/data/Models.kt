@@ -21,13 +21,14 @@ data class Song(
     val albumArtist: String = "",
     val artists: List<SongArtist> = emptyList(),
     val playCount: Int = 0,
-) { val key: String get() = if (cloud) "cloud:$id" else "local:$uri" }
+    val provider: String = "",
+) { val key: String get() = if (cloud) (if (provider == "qq") "cloud:qq:$id" else "cloud:$id") else "local:$uri" }
 
 data class MusicCollection(val key: String, val title: String, val subtitle: String, val songs: List<Song>, val artwork: String = "")
 data class LocalPlaylist(val id: String, val name: String, val songKeys: List<String>)
 data class MusicDirectory(val title: String, val collections: List<MusicCollection>, val artists: Boolean = false)
 
-data class CloudPlaylist(val id: Long, val name: String, val count: Int, val artwork: String, val specialType: Int = 0, val creatorId: Long = 0)
+data class CloudPlaylist(val id: Long, val name: String, val count: Int, val artwork: String, val specialType: Int = 0, val creatorId: Long = 0, val provider: String = "")
 data class CloudAccount(val userId: Long, val nickname: String, val avatar: String)
 
 /** Server supplied NetEase home recommendation item; never backed by the user's playlists. */

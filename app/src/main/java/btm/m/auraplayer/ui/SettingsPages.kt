@@ -60,9 +60,17 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
         }
         item {
             Group(tr("features", "功能")) {
-                Preference(tr("netease", "网易云音乐"), model.account?.nickname ?: tr("login_summary", "通过网易云官方页面登录")) { open("login") }
+                if (!value.cloudDisabled) {
+                    Preference(tr("netease", "网易云音乐"), model.account?.nickname ?: tr("login_summary", "通过网易云官方页面登录")) { open("login") }
+                    Preference(tr("qq_music", "QQ音乐"), model.qqAccount?.nickname
+                        ?: if (model.app.qqEndpoint.isNotBlank()) tr("qq_custom_service", "自建服务连接")
+                        else tr("qq_login_summary", "通过QQ音乐官方页面登录")) { open("qq_login") }
+                }
+                SwitchPreference(tr("disable_cloud", "关闭所有云端功能"),
+                    tr("disable_cloud_summary", "开启后隐藏并关闭网易云音乐、QQ音乐等所有云端功能，成为纯本地播放器"),
+                    checked = value.cloudDisabled, onCheckedChange = { checked -> model.updateSettings { it.copy(cloudDisabled = checked) } })
                 Preference(tr("artist_and_album", "艺术家与专辑")) { open("artist_album_settings") }
-                GlassDropdownPreference(tr("home_content", "首页内容"),
+                if (!value.cloudDisabled) GlassDropdownPreference(tr("home_content", "首页内容"),
                     listOf(tr("home_content_local", "本地"), tr("home_content_cloud", "云端")),
                     if (value.homeContent == "cloud") 1 else 0, backdrop = LocalToolbarBackdrop.current) { index ->
                     model.updateSettings { it.copy(homeContent = if (index == 1) "cloud" else "local") }
@@ -291,6 +299,82 @@ fun LoginPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Un
             }
         }
         if (model.loginMessage.isNotBlank()) item { Text(model.loginMessage, color = MiuixTheme.colorScheme.primary, modifier = Modifier.padding(16.dp)) }
+    }
+}
+
+/** QQ Music secondary page: mirrors NetEase LoginPage with official WebView login and optional self-hosted QQMusicApi. */
+@Composable
+fun QqMusicPage(model: AuraViewModel, padding: PaddingValues) {
+    val context = LocalContext.current
+    var endpoint by rememberSaveable { mutableStateOf(model.app.qqEndpoint) }
+    var uin by rememberSaveable { mutableStateOf(model.app.qqUin) }
+    var cookie by remember { mutableStateOf(model.app.qqCookie) }
+    var advanced by rememberSaveable { mutableStateOf(model.app.qqEndpoint.isNotBlank()) }
+    val qqAccount = model.qqAccount
+    val officialLoginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val sessionCookie = result.data?.getStringExtra(OfficialLoginActivity.EXTRA_COOKIE).orEmpty()
+            if (sessionCookie.isNotBlank()) {
+                cookie = sessionCookie
+                model.completeQqOfficialLogin(sessionCookie)
+            }
+        }
+    }
+    LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        if (qqAccount == null) item {
+            SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+                Preference(tr("qq_official_login", "QQ音乐官方登录"), tr("qq_official_login_summary", "直接登录，无需配置服务器或 API 地址")) {
+                    if (model.app.qqEndpoint.isNotBlank()) {
+                        model.useQqOfficialService()
+                        endpoint = ""
+                    }
+                    officialLoginLauncher.launch(OfficialLoginActivity.createIntent(context, clearCookies = false, provider = "qq"))
+                }
+            }
+        }
+        if (qqAccount != null) item {
+            Group(tr("account", "账号")) {
+                Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Artwork(qqAccount.avatar, Modifier.size(60.dp), circular = true)
+                    Column(Modifier.padding(start = 16.dp)) {
+                        Text(qqAccount.nickname)
+                        if (qqAccount.userId > 0L) Text("QQ ${qqAccount.userId}", style = MiuixTheme.textStyles.body2)
+                    }
+                }
+                Preference(tr("qq_relogin", "重新登录")) {
+                    officialLoginLauncher.launch(OfficialLoginActivity.createIntent(context, clearCookies = true, provider = "qq"))
+                }
+                Preference(tr("logout", "退出登录")) {
+                    cookie = ""
+                    model.logoutQq()
+                }
+            }
+        }
+        item {
+            SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+                Preference(tr("advanced_connection", "高级连接设置"), tr("advanced_connection_summary", "可选：使用自建 API 服务")) { advanced = !advanced }
+            }
+        }
+        if (advanced) item {
+            Group(tr("connection", "连接")) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (model.app.qqEndpoint.isNotBlank()) Preference(tr("qq_use_official", "使用QQ音乐官方连接")) {
+                        model.useQqOfficialService(); endpoint = ""; advanced = false
+                    }
+                    AuraTextField(endpoint, { endpoint = it }, label = tr("qq_api_address", "QQ音乐 API 服务地址（可选）"), singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth())
+                    AuraTextField(uin, { uin = it.filter(Char::isDigit).take(12) }, label = tr("qq_number", "QQ 号（用于读取歌单）"), singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                    AuraTextField(cookie, { cookie = it }, label = tr("qq_cookie", "y.qq.com Cookie（可选，用于 VIP 歌曲）"), singleLine = true,
+                        modifier = Modifier.fillMaxWidth())
+                    GlassDialogButton({ model.configureQq(endpoint, uin, cookie) }, Modifier.fillMaxWidth(),
+                        enabled = endpoint.isNotBlank() && !model.qqBusy,
+                        colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("save_address", "保存服务地址")) }
+                    Preference(tr("api_project", "查看 API 开源项目与部署说明")) { openUrl(context, "https://github.com/jsososo/QQMusicApi") }
+                }
+            }
+        }
+        if (model.qqMessage.isNotBlank()) item { Text(model.qqMessage, color = MiuixTheme.colorScheme.primary, modifier = Modifier.padding(16.dp)) }
     }
 }
 

@@ -4,7 +4,7 @@
 
 <h1 align="center"><strong>Aura Player</strong></h1>
 
-<p align="center">An open-source local and NetEase Cloud Music player for Android built with MIUIX and Backdrop.</p>
+<p align="center">An open-source local and cloud (NetEase Cloud Music / QQ Music) player for Android built with MIUIX and Backdrop.</p>
 
 <p align="center">
   <a href="README.md">简体中文</a> |
@@ -28,7 +28,7 @@
 
 ## Overview
 
-Aura Player (`btm.m.auraplayer`) is an Android music player for Android 13 (API 33) and above. Built with MIUIX components, Backdrop glass materials, and Media3, it works both as a pure offline local player and as an optional NetEase Cloud Music client.
+Aura Player (`btm.m.auraplayer`) is an Android music player for Android 13 (API 33) and above. Built with MIUIX components, Backdrop glass materials, and Media3, it works both as a pure offline local player and as an optional NetEase Cloud Music & QQ Music client.
 
 The source version is defined by `versionName` in [app/build.gradle.kts](app/build.gradle.kts); the README does not duplicate the version string. See [Releases](https://github.com/ColdP/AuraPlayer/releases) for downloads and release notes.
 
@@ -43,11 +43,12 @@ See the [1.0.0 release notes](RELEASE_NOTES_1.0.0.md) for this stable release (i
 - Folder blacklist/whitelist, minimum-duration filter, manual audio file import via Android SAF (up to 20 files at once), full or folder-scoped scanning, persistent sorting, pull-to-refresh, and categorized search.
 - Adaptive responsive layout: compact track rows with `44dp` covers, freeform/multi-window and landscape split-pane Now Playing scaling, multi-column grids on large screens, and preserved system font scaling.
 
-### NetEase Cloud Music and Downloads
+### Cloud Music (NetEase / QQ Music) and Downloads
 
-- **Official Direct Sign-In and Multi-Account Switching**: Signs in on the official HTTPS page (`music.163.com`) by default with no self-hosted backend or manual cookie copying required; session cookies are encrypted via Android Keystore with multi-account saving, switching, and per-line cookie inspection/copying, and active credentials are cleared on logout or service URL change.
-- **Optional Custom API**: Advanced connection settings support connecting to a self-hosted [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) server (including SMS verification login), with ready-to-run Node.js and Docker Compose files in `server/`.
-- **Cloud Browsing and Details**: Cloud recommendations, paginated playlists (30 per page) and tracks (50 per page), search (All / Songs / Audio / Podcasts), album and artist detail pages, and audio quality selection.
+- **Official Direct Sign-In and Multi-Account Switching**: Both NetEase Cloud Music (`music.163.com`) and QQ Music (`y.qq.com`) support signing in directly via their official HTTPS login pages by default with no self-hosted backend or manual cookie copying required; session cookies are encrypted via Android Keystore, with NetEase multi-account saving, switching, and per-line cookie inspection/copying, and active credentials cleared on logout or service URL change.
+- **Optional Custom APIs**: Advanced connection settings support connecting to a self-hosted [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) server (including SMS verification login, with ready-to-run Node.js and Docker Compose files in `server/`) or [jsososo/QQMusicApi](https://github.com/jsososo/QQMusicApi).
+- **Cloud Source Filter and Pure Local Mode**: A dropdown at the top of the Cloud tab lets you display `NetEase Cloud Music / QQ Music / Show All` and filters cloud search accordingly. Under Settings → Features, **Disable all cloud features** hides cloud UI entries, cancels cloud jobs, and strips cloud tracks from the queue to turn Aura Player into a pure local player.
+- **Cloud Browsing and Details**: Cloud recommendations, paginated playlists and tracks, categorized search, album and artist detail pages, and audio quality selection (with extended features subject to NetEase API support).
 - **Downloads and Tagging**: Downloads selected qualities via the Android system downloader; WorkManager decodes NCM containers in the background and writes FLAC/MP3 tags and artwork to `Music/Aura Player` (subject to NetEase account and regional rights).
 - **Cache Management**: Artwork cache up to `128 MiB` and metadata cache up to `16 MiB`, with categorized inspection and clearing under Settings → NetEase Music → Cache.
 
@@ -155,7 +156,7 @@ This project is distributed under the [GNU AGPL-3.0-or-later](LICENSE) license. 
 - UI widgets and visual systems powered by [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix) (Apache-2.0) and [Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass) (Apache-2.0); playlist title-bar search uses [COUI-Kit](https://github.com/ItosEO/COUI-Kit) (MPL-2.0); the `One` interface style and native interactive widgets (`MonetTones`, `OneUiPalette`, `BoSwitchView`, `DragOnlySeekBar`) adapt [OneUI_Kit](https://github.com/TGP258/OneUI_Kit) (MIT, originating from [OneUIProject/oneui-design](https://github.com/OneUIProject/oneui-design) & [OneUIProject/oneui-core](https://github.com/OneUIProject/oneui-core)).
 - Lyric fetching, matching, rendering, and Apple Music motion cover pipeline from [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) (AGPL-3.0), [HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced) (GPL-3.0 / Apache-2.0), and [Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics) (Apache-2.0).
 - Optional on-device AI runtime & models: [ONNX Runtime](https://github.com/microsoft/onnxruntime) (MIT, downloaded on demand), Qualcomm AI Engine Direct (QNN) 2.51.0 acceleration pack (optional on-demand download, subject to Qualcomm proprietary SDK license), [Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) / [Depth Anything 3](https://github.com/ByteDance-Seed/depth-anything-3) (Apache-2.0), [MiDaS](https://github.com/isl-org/MiDaS) (MIT), [U2Net / DIS (rembg)](https://github.com/danielgatis/rembg) (MIT / Apache-2.0), [BiRefNet](https://github.com/ZhengPeng7/BiRefNet) (MIT), [Demucs v4 (HTDemucs)](https://github.com/facebookresearch/demucs) (MIT), and [UVR / MDX-Net](https://github.com/Anjok07/ultimatevocalremovergui) / [KUIELab](https://github.com/kuielab/sdx23) (MIT).
-- Additional dependencies: [Media3](https://developer.android.com/media/media3), [Coil](https://github.com/coil-kt/coil), [OkHttp](https://github.com/square/okhttp), [jaudiotagger](https://github.com/Adonai/jaudiotagger-android) (LGPL-2.1), [MaterialKolor](https://github.com/jordond/MaterialKolor) (MIT), [ZXing](https://github.com/zxing/zxing) (Apache-2.0), [Shizuku](https://github.com/RikkaApps/Shizuku) (Apache-2.0), [decent-player](https://github.com/Ma145/decent-player) (MIT, USB exclusive audio driver and Media3 pipeline adaptation), and [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) (MIT).
+- Additional dependencies: [Media3](https://developer.android.com/media/media3), [Coil](https://github.com/coil-kt/coil), [OkHttp](https://github.com/square/okhttp), [jaudiotagger](https://github.com/Adonai/jaudiotagger-android) (LGPL-2.1), [MaterialKolor](https://github.com/jordond/MaterialKolor) (MIT), [ZXing](https://github.com/zxing/zxing) (Apache-2.0), [Shizuku](https://github.com/RikkaApps/Shizuku) (Apache-2.0), [decent-player](https://github.com/Ma145/decent-player) (MIT, USB exclusive audio driver and Media3 pipeline adaptation), [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) (MIT), and [jsososo/QQMusicApi](https://github.com/jsososo/QQMusicApi) (GPL-3.0).
 
 ## Star History
 

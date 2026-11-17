@@ -37,6 +37,13 @@ song/download/url/v1 and Android DownloadManager. Downloaded NCM containers are
 decoded locally; FLAC Vorbis comments and MP3 ID3 tags are written without re-encoding audio.
 AndroidX WorkManager — Apache-2.0, https://developer.android.com/jetpack/androidx/releases/work
 
+QQMusicApi (jsososo/QQMusicApi) — GPL-3.0
+https://github.com/jsososo/QQMusicApi
+OfficialQqClient.kt and QqMusicApi.kt reference its endpoint conventions and
+official u.y.qq.com / c.y.qq.com parameter mapping (compatible under GPLv3/AGPLv3).
+Self-hosted QQMusicApi servers remain an optional separate deployment.
+Full GPL-3.0 license: licenses/HyperMusicCover-GPL-3.0.txt.
+
 jaudiotagger — LGPL-2.1, https://github.com/Adonai/jaudiotagger-android. Used for local audio tag editing. Full license: licenses/jaudiotagger-LGPL-2.1.txt.
 
 MIUIX cascading menu source adapted in ui/cascade; popup host and surfaces changed
@@ -130,4 +137,4 @@ Copyright (c) 2026 Marcelo Silva
 The native `usbdevfs` isochronous USB Audio Class driver (`app/src/main/cpp/usb-audio-output.{h,cpp}`) and Kotlin/Media3 exclusive USB audio pipeline (`btm/m/auraplayer/audio/usb/`: `UsbAudioDevice.kt`, `UsbAudioDeviceInfo.kt`, `UsbAudioStream.kt`, `UsbStreamingThread.kt`, `UsbExclusiveAudioSink.kt`) are adapted from `decent-usb-audio-driver` and `decent-usb-audio-wrapper-media3`. Changes: UAC 1.0 & UAC 2.0 descriptor/rate compatibility, full 16/24/32-bit PCM conversion matrix, live exclusive toggle & USB detach handling, mono-to-stereo expansion, and SonicAudioProcessor speed/pitch pass-through. Full MIT license: licenses/decent-player-MIT.txt.
 
 Aura Player 1.0.0 Original Components (AGPL-3.0-or-later, Copyright 2026 btm_m):
-Cover themes (Square, 3D Coverflow, and Tiled Cover Wall with MIUIX highlight outline, dwell switching, and gyroscope tilt parallax), Aura Sing on-device vocal/instrumental stem separation & live mixing (`btm/m/auraplayer/sing/`, `ui/AuraSingPages.kt`, `ui/player/AuraSingControl.kt`, Qualcomm QNN NPU/GPU hardware acceleration & auto-benchmark, multi-select WAV/ZIP cache export), OpenAI-compatible LLM lyric translation & raw response/cache inspector (`btm/m/auraplayer/lyrics/Llm*`), in-app GitHub release updater (`AppUpdateManager.kt`, `SoftwareUpdatePage.kt`), multi-account NetEase session manager and WebView login (`OfficialLoginActivity.kt`, `CloudAccountSession.kt`, `SwitchUserPage.kt`), custom AGSL lyric theme shaders (`PlayerLyricThemeShaders.kt`), 3D Cel-Shaded Tokyo cityscape and City Walk mode (`PlayerTokyoCityPrimitives.kt`, `PlayerTokyoCityScene.kt`), frameless Lyric Share Studio themes & Tokyo scene controls (`LyricShareTemplates.kt`, `LyricSharePages.kt`), global solid-color material fallback, and local audio detail inspection.
+Cover themes (Square, 3D Coverflow, and Tiled Cover Wall with MIUIX highlight outline, dwell switching, and gyroscope tilt parallax), Aura Sing on-device vocal/instrumental stem separation & live mixing (`btm/m/auraplayer/sing/`, `ui/AuraSingPages.kt`, `ui/player/AuraSingControl.kt`, Qualcomm QNN NPU/GPU hardware acceleration & auto-benchmark, multi-select WAV/ZIP cache export), OpenAI-compatible LLM lyric translation & raw response/cache inspector (`btm/m/auraplayer/lyrics/Llm*`), in-app GitHub release updater (`AppUpdateManager.kt`, `SoftwareUpdatePage.kt`), multi-account NetEase & QQ Music session management and WebView login (`OfficialLoginActivity.kt`, `CloudAccountSession.kt`, `SwitchUserPage.kt`, `QqMusicApi.kt`, `OfficialQqClient.kt`, `CloudHubPage.kt` source filter, and pure-local cloud toggle), custom AGSL lyric theme shaders (`PlayerLyricThemeShaders.kt`), 3D Cel-Shaded Tokyo cityscape and City Walk mode (`PlayerTokyoCityPrimitives.kt`, `PlayerTokyoCityScene.kt`), frameless Lyric Share Studio themes & Tokyo scene controls (`LyricShareTemplates.kt`, `LyricSharePages.kt`), global solid-color material fallback, and local audio detail inspection.

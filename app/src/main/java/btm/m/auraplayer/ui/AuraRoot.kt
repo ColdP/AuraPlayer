@@ -157,6 +157,8 @@ private fun AuraShell(model: AuraViewModel) {
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { model.refreshLibrary() }
     val selected = rememberSaveable { mutableIntStateOf(0) }
+    // Pure local mode has no Cloud tab; never stay on it.
+    if (!model.cloudEnabled && selected.intValue == 1) selected.intValue = 0
     val pages = remember { mutableStateListOf<String>() }
     val tagEditorExitGuard = remember { TagEditorExitGuard() }
     val seamless = remember { SeamlessNavigationState() }
@@ -381,10 +383,10 @@ private fun AuraShell(model: AuraViewModel) {
                                 }) { padding, _ ->
                                     val contentPadding = auraContentPadding(padding, if (model.current != null) 184 else 112)
                                     when (tab) {
-                                        0 -> if (settings.homeContent == "cloud") CloudHomePage(model, contentPadding,
+                                        0 -> if (settings.homeContent == "cloud" && !settings.cloudDisabled) CloudHomePage(model, contentPadding,
                                             login = { open("login") }, onRecommended = { open("cloud_recommended") })
                                             else HomePage(model, contentPadding, requestPermission)
-                                        1 -> CloudHubPage(model, contentPadding) { open("login") }
+                                        1 -> CloudHubPage(model, contentPadding, { open("login") }, { open("qq_login") })
                                         2 -> SongsPage(model, contentPadding, requestPermission) { secondary ->
                                             open(when (secondary) { 0 -> "albums"; 1 -> "artists"; else -> "localPlaylists" })
                                         }
@@ -554,6 +556,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "theme" -> tr("theme_color", "主题与颜色")
         "navigation_material" -> tr("nav_material_title", "底部导航栏材质参数调整")
         "login" -> tr("netease", "网易云音乐")
+        "qq_login" -> tr("qq_music", "QQ音乐")
         "switch_user" -> tr("switch_user", "切换账号")
         "cloud_recommended" -> tr("recommended_playlists", "推荐歌单")
         "downloads" -> tr("downloaded_music", "已下载的音乐")
@@ -694,6 +697,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             "theme" -> ThemePage(model, contentPadding)
             "navigation_material" -> NavigationMaterialPage(model, contentPadding, NavigationMaterialSettings.styles[materialTab])
             "login" -> LoginPage(model, contentPadding, open)
+            "qq_login" -> QqMusicPage(model, contentPadding)
         "switch_user" -> SwitchUserPage(model, contentPadding)
             "cloud_recommended" -> CloudRecommendedPage(model, contentPadding)
             "downloads" -> DownloadedMusicPage(model, contentPadding)
@@ -776,7 +780,12 @@ internal fun AuraBottomBar(selected: MutableIntState, model: AuraViewModel, back
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val barHeight = btm.m.auraplayer.ui.player.PlayerNavigationGeometry.barHeight
     val navExit = maxOf(searchPhase(searchProgress, 0f, .65f), secondaryProgress)
-    val labels = listOf(tr("home", "首页"), tr("cloud", "云端"), tr("local", "本地"))
+    // Tab ids stay 0 = home, 1 = cloud, 2 = local; pure local mode simply omits the cloud tab.
+    val tabIds = if (model.cloudEnabled) listOf(0, 1, 2) else listOf(0, 2)
+    val allLabels = listOf(tr("home", "首页"), tr("cloud", "云端"), tr("local", "本地"))
+    val labels = tabIds.map { allLabels[it] }
+    val navSelected = remember { mutableIntStateOf(0) }
+    navSelected.intValue = tabIds.indexOf(selected.intValue).coerceAtLeast(0)
     BoxWithConstraints(modifier.fillMaxWidth().height(100.dp + navInset)) {
         val buttonSize = barHeight
         val gap = btm.m.auraplayer.ui.player.PlayerNavigationGeometry.searchGap
@@ -797,13 +806,13 @@ internal fun AuraBottomBar(selected: MutableIntState, model: AuraViewModel, back
             translationY = navExit * (barHeight + navInset + 24.dp).toPx() + if (liquid) .44.dp.toPx() else 0f
             alpha = 1f - navExit
         }.blur((navExit * 10f).dp)) {
-            CustomNavigation(view, tabs = labels.mapIndexed { index, label -> HostTab(label, "aura.$index") {
-                if (!searchMounted && secondaryProgress < .01f) selected.intValue = index
-            } }, selectedIndex = selected, blurRadius = if (liquid) 3 else 18, labelMode = settings.labels,
+            CustomNavigation(view, tabs = labels.mapIndexed { index, label -> HostTab(label, "aura.${tabIds[index]}") {
+                if (!searchMounted && secondaryProgress < .01f) selected.intValue = tabIds[index]
+            } }, selectedIndex = navSelected, blurRadius = if (liquid) 3 else 18, labelMode = settings.labels,
                 navigationStyle = navigationStyle, advancedMaterial = LocalAdvancedMaterialEnabled.current, colorMode = settings.theme,
                 accentColorOverride = accent, material = rememberModuleNavigationMaterial(navigationStyle),
                 dimensionScale = dimensions, liquidBottomSpacingDp = 7, onHostPreDraw = {}, backdropOverride = backdrop,
-                tabIconContent = { index, color -> AuraTabIcon(index, color) })
+                tabIconContent = { index, color -> AuraTabIcon(tabIds.getOrElse(index) { index }, color) })
         }
         if (!searchMounted) SearchRoundButton(backdrop, buttonSize, false, 0f, navigationStyle,
             icon = appleMusicTabIcon(4),

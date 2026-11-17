@@ -1,7 +1,7 @@
 Aura Player Disclaimer
 
 Effective date: November 10, 2026
-Last revised: November 13, 2026
+Last revised: November 17, 2026
 
 Please read this Disclaimer carefully before editing audio tags, connecting to online services, or tuning custom audio effects in Aura Player. Back up important music files before writing tags or covers, and note that third-party APIs and returned resources are controlled by external providers.
 
@@ -25,7 +25,7 @@ Please read this Disclaimer carefully before editing audio tags, connecting to o
 
 ## 4. Third-Party Services and External Content
 
-4.1 NetEase Cloud Music sign-in and streaming endpoints, self-hosted API services you configure, online lyric sources (NetEase, QQ Music, Kugou, Kuwo, LRCLIB, AMLL, TTML Hub), and album artwork are provided and maintained by external platforms or community repositories.
+4.1 NetEase Cloud Music and QQ Music sign-in and streaming endpoints, self-hosted API services you configure, online lyric sources (NetEase, QQ Music, Kugou, Kuwo, LRCLIB, AMLL, TTML Hub), and album artwork are provided and maintained by external platforms or community repositories.
 
 4.2 Developers have no control over the uptime, speed, accuracy, copyright status, or privacy practices of those external services. API changes, rate limits, authentication changes, or service shutdowns may render related features unavailable, and displaying external resources does not constitute any endorsement or guarantee.
 

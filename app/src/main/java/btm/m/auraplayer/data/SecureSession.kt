@@ -22,18 +22,22 @@ class SecureSession(context: Context) {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
     }
-    fun read(): String = runCatching {
-        val payload = prefs.getString("cookie", null) ?: return ""
+    fun read(): String = readKey("cookie")
+    fun readQq(): String = readKey("qqCookie")
+    fun saveQq(cookie: String) = saveKey("qqCookie", cookie)
+    private fun readKey(name: String): String = runCatching {
+        val payload = prefs.getString(name, null) ?: return ""
         val parts = payload.split(':')
         Cipher.getInstance("AES/GCM/NoPadding").run {
             init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)))
             String(doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), Charsets.UTF_8)
         }
     }.getOrDefault("")
-    fun save(cookie: String) {
+    fun save(cookie: String) = saveKey("cookie", cookie)
+    private fun saveKey(name: String, cookie: String) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
         val encrypted = cipher.doFinal(cookie.toByteArray(Charsets.UTF_8))
-        prefs.edit().putString("cookie", "${Base64.encodeToString(cipher.iv, Base64.NO_WRAP)}:${Base64.encodeToString(encrypted, Base64.NO_WRAP)}").apply()
+        prefs.edit().putString(name, "${Base64.encodeToString(cipher.iv, Base64.NO_WRAP)}:${Base64.encodeToString(encrypted, Base64.NO_WRAP)}").apply()
     }
-    fun clear() { prefs.edit().clear().apply() }
+    fun clear() { prefs.edit().remove("cookie").apply() }
 }

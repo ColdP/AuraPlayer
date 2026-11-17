@@ -26,6 +26,10 @@ data class Appearance(
     val minimumSeconds: Int = 0,
     val blacklist: Set<String> = emptySet(),
     val disableAdvancedMaterial: Boolean = false,
+    /** Which cloud provider(s) the Cloud tab shows: "netease", "qq" or "all". */
+    val cloudSource: String = "all",
+    /** Pure local player mode: hides and disables every cloud feature. */
+    val cloudDisabled: Boolean = false,
 )
 
 class AuraSettings(context: Context) {
@@ -50,6 +54,8 @@ class AuraSettings(context: Context) {
         minimumSeconds = prefs.getInt("minimumSeconds", 0).coerceIn(0, 60),
         blacklist = prefs.getStringSet("blacklist", emptySet())!!.toSet(),
         disableAdvancedMaterial = prefs.getBoolean("disableAdvancedMaterial", false),
+        cloudSource = prefs.getString("cloudSource", "all")!!.takeIf { it in setOf("netease", "qq", "all") } ?: "all",
+        cloudDisabled = prefs.getBoolean("cloudDisabled", false),
     )
     fun update(transform: (Appearance) -> Appearance) {
         val v = transform(value).let { it.copy(uiStyle = normalizeUiStyle(it.uiStyle)) }
@@ -61,7 +67,8 @@ class AuraSettings(context: Context) {
             .putString("homeContent", v.homeContent)
             .putBoolean("durationFilter", v.durationFilter).putInt("minimumSeconds", v.minimumSeconds)
             .putStringSet("blacklist", v.blacklist)
-            .putBoolean("disableAdvancedMaterial", v.disableAdvancedMaterial).apply()
+            .putBoolean("disableAdvancedMaterial", v.disableAdvancedMaterial)
+            .putString("cloudSource", v.cloudSource).putBoolean("cloudDisabled", v.cloudDisabled).apply()
         value = v
         btm.m.auraplayer.widget.WidgetUpdateCoordinator.requestUpdate(appContext)
     }

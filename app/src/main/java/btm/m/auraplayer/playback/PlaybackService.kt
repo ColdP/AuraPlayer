@@ -80,6 +80,9 @@ class PlaybackService : MediaSessionService() {
             if (spec.uri.scheme == "aura" && spec.uri.host == "netease") {
                 val id = spec.uri.lastPathSegment?.toLongOrNull() ?: throw java.io.IOException("INVALID_SONG")
                 spec.withUri(Uri.parse(app.api.resolveBlocking(id, spec.uri.getQueryParameter("quality") ?: PlaybackPreferences(this).quality.level)))
+            } else if (spec.uri.scheme == "aura" && spec.uri.host == "qqmusic") {
+                val mid = spec.uri.lastPathSegment ?: throw java.io.IOException("INVALID_SONG")
+                spec.withUri(Uri.parse(app.qq.resolveBlocking(mid)))
             } else spec
         }
         val source = androidx.media3.datasource.cache.CacheDataSource.Factory()

@@ -64,16 +64,24 @@ class OfficialLoginActivity : ComponentActivity() {
     companion object {
         const val EXTRA_CLEAR_COOKIES = "clear_cookies"
         const val EXTRA_COOKIE = "cookie"
+        const val EXTRA_PROVIDER = "provider"
         private const val LOGIN_URL = "https://music.163.com/m/login"
+        private const val QQ_LOGIN_URL = "https://y.qq.com/"
         private val SESSION_COOKIE_KEYS = setOf("MUSIC_U", "__csrf", "MUSIC_A", "NMTID")
+        private val QQ_SESSION_COOKIE_KEYS = setOf(
+            "uin", "p_uin", "qqmusic_key", "qm_keyst", "skey", "p_skey",
+            "wxuin", "euin", "musickey", "login_type", "tmeLoginType", "pgv_pvid",
+        )
 
-        fun createIntent(context: Context, clearCookies: Boolean): Intent =
+        fun createIntent(context: Context, clearCookies: Boolean, provider: String = "netease"): Intent =
             Intent(context, OfficialLoginActivity::class.java)
                 .putExtra(EXTRA_CLEAR_COOKIES, clearCookies)
+                .putExtra(EXTRA_PROVIDER, provider)
     }
 
     private var webView: WebView? = null
     private var submitted = false
+    private var isQq = false
     private val failedState = mutableStateOf(false)
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -81,6 +89,8 @@ class OfficialLoginActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        isQq = intent.getStringExtra(EXTRA_PROVIDER) == "qq"
+        val loginUrl = if (isQq) QQ_LOGIN_URL else LOGIN_URL
         val app = application as AuraApplication
         val auraSettings = app.settings.value
         val seed = when (auraSettings.color) {
@@ -161,7 +171,7 @@ class OfficialLoginActivity : ComponentActivity() {
                             }
                             Spacer(Modifier.size(8.dp))
                             Text(
-                                text = tr("official_login", "网易云音乐官方登录"),
+                                text = if (isQq) tr("qq_official_login", "QQ音乐官方登录") else tr("official_login", "网易云音乐官方登录"),
                                 style = MiuixTheme.textStyles.title4,
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 1,
@@ -207,11 +217,18 @@ class OfficialLoginActivity : ComponentActivity() {
             this.settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             val cookieManager = CookieManager.getInstance()
             cookieManager.setAcceptCookie(true)
-            cookieManager.setAcceptThirdPartyCookies(this, false)
+            cookieManager.setAcceptThirdPartyCookies(this, isQq)
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     val url = request.url
-                    return !(url.scheme == "https" && (url.host == "music.163.com" || url.host?.endsWith(".163.com") == true))
+                    if (url.scheme != "https") return true
+                    val host = url.host.orEmpty()
+                    val allowed = if (isQq) {
+                        host == "qq.com" || host.endsWith(".qq.com") || host == "open.weixin.qq.com"
+                    } else {
+                        host == "music.163.com" || host.endsWith(".163.com")
+                    }
+                    return !allowed
                 }
 
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -234,12 +251,12 @@ class OfficialLoginActivity : ComponentActivity() {
             CookieManager.getInstance().removeAllCookies {
                 mainHandler.post {
                     if (!isFinishing && !isDestroyed) {
-                        view.loadUrl(LOGIN_URL)
+                        view.loadUrl(loginUrl)
                     }
                 }
             }
         } else {
-            view.loadUrl(LOGIN_URL)
+            view.loadUrl(loginUrl)
         }
 
         lifecycleScope.launch {
@@ -254,6 +271,27 @@ class OfficialLoginActivity : ComponentActivity() {
 
     private fun checkLoginCookie() {
         if (submitted) return
+        if (isQq) {
+            val merged = linkedMapOf<String, String>()
+            listOf("https://y.qq.com", "https://u.y.qq.com", "https://c.y.qq.com").forEach { origin ->
+                CookieManager.getInstance().getCookie(origin).orEmpty().split(';').forEach { part ->
+                    val trimmed = part.trim()
+                    val key = trimmed.substringBefore('=')
+                    val value = trimmed.substringAfter('=', "")
+                    if (key in QQ_SESSION_COOKIE_KEYS && value.isNotBlank()) merged[key] = value
+                }
+            }
+            val hasKey = !merged["qqmusic_key"].isNullOrBlank() || !merged["qm_keyst"].isNullOrBlank()
+            val hasUin = !merged["uin"].isNullOrBlank() || !merged["p_uin"].isNullOrBlank() ||
+                !merged["wxuin"].isNullOrBlank() || !merged["euin"].isNullOrBlank()
+            if (hasKey && hasUin) {
+                submitted = true
+                val cookie = merged.entries.joinToString("; ") { "${it.key}=${it.value}" }
+                setResult(RESULT_OK, Intent().putExtra(EXTRA_COOKIE, cookie))
+                finish()
+            }
+            return
+        }
         val cookie = CookieManager.getInstance().getCookie("https://music.163.com").orEmpty()
             .split(';')
             .map { it.trim() }

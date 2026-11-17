@@ -148,6 +148,96 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private var subscribedAlbumOffset = 0
     private var subscribedAlbumJob: Job? = null
     private var cloudGeneration = 0
+    val cloudEnabled get() = !settings.value.cloudDisabled
+    var qqAccount by mutableStateOf<CloudAccount?>(null); private set
+    var qqPlaylists by mutableStateOf<List<CloudPlaylist>>(emptyList()); private set
+    var qqRecommended by mutableStateOf<List<CloudPlaylist>>(emptyList()); private set
+    var qqLoading by mutableStateOf(false); private set
+    var qqBusy by mutableStateOf(false); private set
+    var qqFailed by mutableStateOf(false); private set
+    var qqMessage by mutableStateOf(""); private set
+    private var qqJob: Job? = null
+    fun refreshQq() {
+        if (!cloudEnabled || qqLoading) return
+        qqLoading = true; qqFailed = false
+        qqJob = viewModelScope.launch {
+            try {
+                val hasUser = qqAccount != null || app.qq.userUin().isNotBlank() || app.qqCookie.isNotBlank()
+                val mine = async { if (hasUser) runCatching { app.qq.playlists().items }.getOrNull() else emptyList() }
+                val rec = async { runCatching { app.qq.recommendedPlaylists() }.getOrNull() }
+                val mineList = mine.await(); val recList = rec.await()
+                ensureActive()
+                if (mineList == null && recList == null) { qqFailed = true; qqMessage = tr("qq_request_failed", "QQ音乐请求失败，请检查网络或服务地址") }
+                else { qqPlaylists = mineList.orEmpty(); qqRecommended = recList.orEmpty() }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { qqFailed = true }
+            finally { qqLoading = false }
+        }
+    }
+    fun completeQqOfficialLogin(sessionCookie: String, onSuccess: () -> Unit = {}) {
+        if (!cloudEnabled || qqBusy) return
+        viewModelScope.launch {
+            qqBusy = true
+            try {
+                if (app.qqEndpoint.isNotBlank()) app.useQqOfficialService()
+                val user = QqMusicApi({ "" }, { "" }, { sessionCookie }).account()
+                app.saveQqAccount(user, sessionCookie)
+                qqAccount = user
+                qqMessage = tr("login_success", "登录成功")
+                refreshQq()
+                onSuccess()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                qqMessage = if (e is CloudApiException && e.status == 301) tr("session_expired", "登录已过期，请重新登录")
+                else tr("qq_login_failed", "QQ音乐登录验证失败，请重试")
+            } finally { qqBusy = false }
+        }
+    }
+    fun logoutQq() {
+        qqJob?.cancel(); qqLoading = false
+        app.clearQqSession()
+        android.webkit.CookieManager.getInstance().removeAllCookies(null)
+        qqAccount = null; qqPlaylists = emptyList()
+        qqMessage = ""
+    }
+    fun useQqOfficialService() {
+        qqJob?.cancel(); qqLoading = false
+        val changed = app.qqEndpoint.isNotBlank()
+        app.useQqOfficialService()
+        if (changed) { qqAccount = null; qqPlaylists = emptyList() }
+        qqMessage = tr("qq_official_mode", "已切换为QQ音乐官方连接")
+        refreshQq()
+    }
+    fun configureQq(endpoint: String, uin: String, cookie: String): Boolean = runCatching {
+        qqJob?.cancel(); qqLoading = false
+        val normalized = endpoint.trim().takeIf { it.isNotEmpty() }?.let { NeteaseApi.normalizeEndpoint(it) }.orEmpty()
+        val changed = app.qqEndpoint != normalized
+        app.saveQq(endpoint, uin, cookie)
+        if (changed) qqAccount = null
+        qqPlaylists = emptyList(); qqRecommended = emptyList()
+        qqMessage = tr("api_saved", "服务地址已保存")
+        if (cookie.isNotBlank() || uin.isNotBlank()) {
+            viewModelScope.launch {
+                runCatching { app.qq.account() }.onSuccess { qqAccount = it }
+            }
+        }
+        refreshQq()
+    }.onFailure { qqMessage = tr("invalid_api", "请输入 HTTPS 地址；自建局域网服务可使用 HTTP") }.isSuccess
+    /** Pure local mode: stop every cloud job, drop cloud queue entries and forget in-memory cloud state. */
+    private fun shutdownCloud() {
+        cloudGeneration++
+        cloudJob?.cancel(); qqJob?.cancel(); qqLoading = false; qqBusy = false
+        queries.value.takeIf { it.cloud }?.let { searchCloud = false; submitSearch() }
+        controller?.let { player ->
+            val keep = (0 until player.mediaItemCount).filter { !songFor(player.getMediaItemAt(it)).cloud }
+            if (keep.size != player.mediaItemCount) {
+                if (current?.cloud == true) player.stop()
+                for (index in (0 until player.mediaItemCount).reversed()) if (index !in keep) player.removeMediaItem(index)
+            }
+        }
+        resetCloudPaging()
+        cloudPlaylists = emptyList(); qqPlaylists = emptyList(); qqRecommended = emptyList(); cloudBusy = false
+    }
     private var controller: MediaController? = null
     private val knownSongs = mutableMapOf<String, Song>()
     private val artistArtworkCache = mutableStateMapOf<Long, String>()
@@ -162,7 +252,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             current = player.currentMediaItem?.let(::songFor)
             current?.takeIf { it.key != lastCurrentKey }?.let { song ->
                 lastCurrentKey = song.key
-                if (song.cloud) viewModelScope.launch { resolveSongArtists(song) }
+                if (song.netease) viewModelScope.launch { resolveSongArtists(song) }
             }
             queue = (0 until player.mediaItemCount).map { songFor(player.getMediaItemAt(it)) }
             queueIndex = player.currentMediaItemIndex
@@ -199,7 +289,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             while (isActive) {
                 controller?.let { player ->
-                    streamInfo = current?.takeIf { it.cloud }?.let { btm.m.auraplayer.playback.PlaybackStreams.records[it.id] }
+                    streamInfo = current?.takeIf { it.netease }?.let { btm.m.auraplayer.playback.PlaybackStreams.records[it.id] }
                     position = player.currentPosition.coerceAtLeast(0)
                     duration = player.duration.takeIf { it > 0 } ?: current?.duration ?: 0
                     sleepRemaining = (playbackPreferences.sleepDeadline - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0L)
@@ -229,7 +319,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     if (request.query.isBlank()) { searchHits = emptyList(); searchResults = emptyList(); searchHasMore = false }
                     else {
-                        val page = if (request.cloud) app.api.searchCategory(request.query, request.category) else localSearch(request)
+                        val page = if (request.cloud) cloudSearch(request.query, request.category, 0) else localSearch(request)
                         ensureActive()
                         if (request != queries.value) return@collectLatest
                         searchHits = page.items; searchHasMore = page.hasMore; cloudSearchOffset = page.nextOffset
@@ -294,6 +384,9 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         val before = settings.value
         settings.update(transform)
         val after = settings.value
+        if (!before.cloudDisabled && after.cloudDisabled) shutdownCloud()
+        else if (before.cloudDisabled && !after.cloudDisabled) { restoreAccount(); refreshQq() }
+        if (before.cloudSource != after.cloudSource && searchCloud) submitSearch()
         if (before.whitelist != after.whitelist || before.blacklist != after.blacklist ||
             before.durationFilter != after.durationFilter || before.minimumSeconds != after.minimumSeconds) refreshLibrary(debounce = true)
     }
@@ -493,7 +586,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         }
     } }
     fun refreshQualities() {
-        val song = current?.takeIf { it.cloud } ?: return
+        val song = current?.takeIf { it.netease } ?: return
         qualityJob?.cancel()
         qualityJob = viewModelScope.launch {
             qualityLoading = true; qualityError = false; availableQualities = emptyList(); qualityDetails = emptyList()
@@ -554,7 +647,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         sleepRemaining = if (minutes > 0) minutes * 60_000L else 0L
     }
     fun download(song: Song, quality: btm.m.auraplayer.playback.StreamQuality, complete: (Boolean) -> Unit) {
-        if (!song.cloud || downloadBusy) return
+        if (!song.netease || downloadBusy) { if (song.isQq) complete(false); return }
         downloadBusy = true
         viewModelScope.launch {
             try {
@@ -587,6 +680,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     suspend fun loadSongCredits(songId: Long, forceRefresh: Boolean = false): SongCreditsData {
         if (!forceRefresh) songCreditsCache[songId]?.let { return it }
+        if (findCloudSongForCredits(songId)?.isQq == true) throw java.io.IOException("UNSUPPORTED")
         val data = app.api.songCredits(songId, findCloudSongForCredits(songId))
         songCreditsCache[songId] = data
         return data
@@ -648,20 +742,23 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun openDirectory(value: MusicDirectory) { directory = value }
     fun closeDirectory() { directory = null }
+    private fun contentKey(playlist: CloudPlaylist) = if (playlist.provider == PROVIDER_QQ) -playlist.id else playlist.id
     fun openCloudPlaylist(playlist: CloudPlaylist) {
-        cloudContents[playlist.id]?.let { old ->
+        if (!cloudEnabled) return
+        val contentKey = contentKey(playlist)
+        cloudContents[contentKey]?.let { old ->
             if (!old.loading && (old.playlist.count != playlist.count ||
                     old.loadedAt > 0 && System.currentTimeMillis() - old.loadedAt > CloudMetadataCache.FRESH_MS)) {
-                cloudContents.remove(playlist.id)
+                cloudContents.remove(contentKey)
             }
         }
-        val content = cloudContents.getOrPut(playlist.id) { CloudPlaylistContent(playlist) }
+        val content = cloudContents.getOrPut(contentKey) { CloudPlaylistContent(playlist) }
         // Keep only a few visited playlists in RAM. Their pages remain in the disk cache.
         while (cloudContents.size > 8) {
             val old = cloudContents.entries.firstOrNull { it.value !== content && it.value !== cloudQueue } ?: break
             old.value.job?.cancel(); cloudContents.remove(old.key)
         }
-        pushCollection(MusicCollection("cloud:${playlist.id}", playlist.name, "", content.songs, playlist.artwork), content)
+        pushCollection(MusicCollection(if (playlist.provider == PROVIDER_QQ) "cloud:qq:${playlist.id}" else "cloud:${playlist.id}", playlist.name, "", content.songs, playlist.artwork), content)
         if (content.songs.isEmpty() && !content.failed) loadCloudSongs(content)
     }
 
@@ -678,13 +775,13 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         val old = cloudCollection ?: return
         if (old.loading) return
         val content = CloudPlaylistContent(old.playlist, old.source)
-        if (old.source == "playlist") cloudContents[old.playlist.id] = content
+        if (old.source == "playlist") cloudContents[contentKey(old.playlist)] = content
         cloudCollection = content
         collectionDestinations[activeCollectionId]?.cloud = content
         loadCloudSongs(content, refresh = true)
     }
     private fun loadCloudSongs(content: CloudPlaylistContent, refresh: Boolean = false) {
-        if (content.loading || !content.hasMore || content.source == "playlist" && account == null) return
+        if (!cloudEnabled || content.loading || !content.hasMore || content.source == "playlist" && account == null && content.playlist.provider != PROVIDER_QQ) return
         val generation = cloudGeneration
         content.loading = true; content.failed = false
         content.job = viewModelScope.launch {
@@ -697,7 +794,8 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 val page = catalog?.page ?: when (content.source) {
                     "rank" -> app.api.listeningRank(content.playlist.id, if (listeningRankWeek) 1 else 0).let { CloudPage(it, it.size, false, it.size) }
                     "radio" -> app.api.radioPrograms(content.playlist.id, content.offset)
-                    else -> app.api.playlistSongs(content.playlist.id, content.offset, refresh = refresh)
+                    else -> if (content.playlist.provider == PROVIDER_QQ) app.qq.playlistSongs(content.playlist.id)
+                        else app.api.playlistSongs(content.playlist.id, content.offset, refresh = refresh)
                 }
                 ensureActive()
                 if (generation != cloudGeneration) return@launch
@@ -736,6 +834,23 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             if (index >= tracks.size - 5) loadCloudSongs(content)
         }
     }
+    /** Cloud search honouring the provider selected for the Cloud tab (NetEase, QQ Music or both). */
+    private suspend fun cloudSearch(query: String, category: SearchCategory, offset: Int): CloudPage<MusicSearchHit> {
+        if (!cloudEnabled) return CloudPage(emptyList(), 0, false)
+        val source = settings.value.cloudSource
+        val useQq = source != "netease" && app.qq.configured
+        val qqHits: suspend () -> CloudPage<MusicSearchHit> = {
+            if (category != SearchCategory.ALL && category != SearchCategory.SONG) CloudPage(emptyList(), 0, false)
+            else app.qq.search(query, offset).let { page ->
+                CloudPage(page.items.map { MusicSearchHit(it.id, SearchCategory.SONG, it.title, it.artist, it.artwork, it) }, page.nextOffset, page.hasMore, page.total)
+            }
+        }
+        if (source == "qq") return if (useQq) qqHits() else CloudPage(emptyList(), 0, false)
+        val netease = app.api.searchCategory(query, category, offset)
+        if (!useQq || offset != 0) return netease
+        val extra = runCatching { qqHits() }.getOrNull()?.items?.take(10).orEmpty()
+        return netease.copy(items = netease.items + extra)
+    }
     private suspend fun localSearch(request: MusicSearchRequest): CloudPage<MusicSearchHit> = withContext(Dispatchers.Default) {
         localMusicSearch(songs, request)
     }
@@ -758,7 +873,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         searchJob = viewModelScope.launch {
             searching = true
             try {
-                val page = app.api.searchCategory(request.query, request.category, cloudSearchOffset)
+                val page = cloudSearch(request.query, request.category, cloudSearchOffset)
                 if (request == queries.value) {
                     cloudSearchOffset = page.nextOffset; searchHasMore = page.hasMore
                     searchHits = (searchHits + page.items).distinctBy { it.key }
@@ -785,9 +900,9 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             else -> Unit
         }
     }
-    fun isFavorite(song: Song): Boolean = if (song.cloud) song.id in cloudLikedIds else song.key in history.favorites()
+    fun isFavorite(song: Song): Boolean = if (song.netease) song.id in cloudLikedIds else song.key in history.favorites()
     fun toggleFavorite(song: Song) {
-        if (!song.cloud) { history.toggle(song); return }
+        if (!song.netease) { history.toggle(song); return }
         val user = account ?: run { error = tr("login_required", "请先登录网易云音乐"); return }
         if (!liking.add(song.id)) return
         val generation = cloudGeneration
@@ -818,7 +933,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun addSongToCloudPlaylist(playlist: CloudPlaylist, song: Song, complete: (Boolean) -> Unit = {}) {
         val user = account ?: run { complete(false); return }
-        if (!song.cloud || playlist.creatorId != user.userId || playlist.specialType == 5) { complete(false); return }
+        if (!song.netease || playlist.creatorId != user.userId || playlist.specialType == 5) { complete(false); return }
         val generation = cloudGeneration
         viewModelScope.launch {
             try {
@@ -941,6 +1056,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     private fun restoreAccount() {
         syncSavedAccounts()
+        if (!cloudEnabled) return
         app.activeStoredAccount()?.let { account = it.toAccount() }
         if (app.cookie.isNotBlank()) cloudAction {
             val generation = cloudGeneration
@@ -952,9 +1068,29 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             account = user
             loadCloudPlaylists(reset = true)
         }
+        qqAccount = app.savedQqAccount()
+        if (app.qqCookie.isNotBlank() || (app.qqEndpoint.isNotBlank() && app.qqUin.isNotBlank())) {
+            viewModelScope.launch {
+                runCatching { app.qq.account() }
+                    .onSuccess { user ->
+                        if (app.qqCookie.isNotBlank()) app.saveQqAccount(user, app.qqCookie)
+                        qqAccount = user
+                    }
+                    .onFailure { e ->
+                        if (e is CloudApiException && e.status == 301) {
+                            app.clearQqSession()
+                            qqAccount = null
+                        }
+                    }
+            }
+        }
     }
-    fun refreshCloud() { loadCloudPlaylists(reset = true, refresh = true) }
+    fun refreshCloud() {
+        if (!cloudEnabled) return
+        loadCloudPlaylists(reset = true, refresh = true); refreshQq()
+    }
     fun refreshCloudHome() {
+        if (!cloudEnabled) return
         val user = account ?: return
         if (cloudHomeLoading) return
         cloudHomeLoading = true; cloudHomeFailed = false
@@ -1000,7 +1136,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     private fun loadCloudPlaylists(reset: Boolean = false, refresh: Boolean = false) {
         val user = account ?: return
-        if (cloudPlaylistsLoading || !reset && !cloudPlaylistsHasMore) return
+        if (!cloudEnabled || cloudPlaylistsLoading || !reset && !cloudPlaylistsHasMore) return
         if (reset) refreshCloudExtras()
         val generation = cloudGeneration
         val offset = if (reset) 0 else cloudPlaylistOffset

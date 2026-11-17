@@ -4,7 +4,7 @@
 
 <h1 align="center"><strong>Aura Player</strong></h1>
 
-<p align="center">MIUIX と Backdrop で構築された、オープンソースのローカル＆NetEase Cloud Music プレイヤー。</p>
+<p align="center">MIUIX と Backdrop で構築された、オープンソースのローカル＆クラウド（NetEase Cloud Music / QQ Music）プレイヤー。</p>
 
 <p align="center">
   <a href="README.md">简体中文</a> |
@@ -28,7 +28,7 @@
 
 ## 概要
 
-Aura Player（パッケージ名 `btm.m.auraplayer`）は、Android 13（API 33）以上向けの音楽プレイヤーです。MIUIX の UI コンポーネント、Backdrop のガラスマテリアル、Media3 オーディオエンジンを組み合わせ、完全オフラインのローカル再生と任意の NetEase Cloud Music オンライン機能の両方に対応しています。
+Aura Player（パッケージ名 `btm.m.auraplayer`）は、Android 13（API 33）以上向けの音楽プレイヤーです。MIUIX の UI コンポーネント、Backdrop のガラスマテリアル、Media3 オーディオエンジンを組み合わせ、完全オフラインのローカル再生と任意の NetEase Cloud Music / QQ Music オンライン機能の両方に対応しています。
 
 ソースコードのバージョンは [app/build.gradle.kts](app/build.gradle.kts) の `versionName` を基準とし、README ではバージョン文字列を重複管理しません。ダウンロードとリリースノートは [Releases](https://github.com/ColdP/AuraPlayer/releases) を参照してください。
 
@@ -43,11 +43,12 @@ Aura Player（パッケージ名 `btm.m.auraplayer`）は、Android 13（API 33�
 - フォルダーのブラックリスト／ホワイトリスト、最短再生時間フィルター、Android SAF による音声ファイルの手動インポート（1 回最大 20 ファイル）、全曲／フォルダー単位スキャン、並べ替え設定の保存、引っ張って更新、分類検索に対応しています。
 - レスポンシブレイアウト：コンパクトな曲行と `44dp` カバーアートを採用し、フリーフォーム／マルチウィンドウ、横画面2ペイン表示、大画面マルチカラムに対応しつつシステムの文字サイズ倍率を維持します。
 
-### NetEase Cloud Music とダウンロード
+### クラウド音楽（NetEase / QQ Music）とダウンロード
 
-- **公式ダイレクトログインと複数アカウント管理**：既定では公式 HTTPS ページ（`music.163.com`）で直接ログインするため、独自サーバーの構築や Cookie の手動コピーは不要です。セッション Cookie は Android Keystore で暗号化保存され、複数アカウントの保存・切り替え・Cookie の行単位確認／コピーに対応し、ログアウトやサービス URL 変更時は自動削除されます。
-- **任意の自前 API**：高度な接続設定から独自の [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) サーバー（SMS 認証コードログイン含む）に接続できます。`server/` に Node.js および Docker Compose の起動設定を用意しています。
-- **クラウド閲覧と詳細**：クラウドのおすすめ、ページング対応プレイリスト（1 ページ 30 件）と曲一覧（1 ページ 50 曲）、検索（すべて・曲・音声・ポッドキャスト）、アルバム・アーティスト詳細、音質切り替えに対応しています。
+- **公式ダイレクトログインと複数アカウント管理**：NetEase Cloud Music（`music.163.com`）および QQ Music（`y.qq.com`）ともに、既定では公式 HTTPS ページで直接ログインするため、独自サーバーの構築や Cookie の手動コピーは不要です。セッション Cookie は Android Keystore で暗号化保存され、NetEase の複数アカウント保存・切り替え・Cookie の行単位確認／コピーに対応し、ログアウトやサービス URL 変更時は自動削除されます。
+- **任意の自前 API**：それぞれの「高度な接続設定」から独自の [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（SMS 認証コードログイン含む、`server/` に Node.js / Docker Compose の起動設定あり）または [jsososo/QQMusicApi](https://github.com/jsososo/QQMusicApi) サーバーに接続できます。
+- **表示切り替えと純ローカルモード**：クラウドタブ上部のドロップダウンから `NetEase Cloud Music / QQ Music / すべて表示` を選択でき、クラウド検索にも連動します。「設定 → 機能」の「すべてのクラウド機能を無効化」を有効にすると、クラウド UI やタスクを停止し、再生キューのクラウド曲も取り除いて完全なローカルプレイヤーとして動作します。
+- **クラウド閲覧と詳細**：おすすめコンテンツ、ページング対応プレイリスト・曲一覧、分類検索、アルバム・アーティスト詳細、音質切り替えに対応しています（一部の拡張機能は NetEase API に準拠）。
 - **ダウンロードとタグ書き込み**：選択した音質をシステムダウンローダーで取得し、WorkManager がバックグラウンドで NCM デコードおよび FLAC / MP3 タグ・カバー埋め込みを行い、`Music/Aura Player` へ保存します（利用可能な音質はアカウント権限に依存します）。
 - **キャッシュ管理**：カバー画像キャッシュ上限 `128 MiB`、メタデータキャッシュ上限 `16 MiB`。「設定 → NetEase Music → キャッシュ」から種別ごとに確認・削除できます。
 
@@ -155,7 +156,7 @@ Issue や Pull Request を歓迎します。参加前に [日本語コントリ�
 - UI コンポーネントと各種スタイル表現：[MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）、[Backdrop / Shapes](https://github.com/Kyant0/AndroidLiquidGlass)（Apache-2.0）；プレイリストタイトルバーの検索コンポーネントは [COUI-Kit](https://github.com/ItosEO/COUI-Kit)（MPL-2.0）、`One` スタイルおよびスイッチ・シークバー（`MonetTones`、`OneUiPalette`、`BoSwitchView`、`DragOnlySeekBar`）は [OneUI_Kit](https://github.com/TGP258/OneUI_Kit)（MIT、[OneUIProject/oneui-design](https://github.com/OneUIProject/oneui-design) および [OneUIProject/oneui-core](https://github.com/OneUIProject/oneui-core) 由来）を使用しています。
 - 歌詞の取得・照合・描画および Apple Music モーションカバー取得：[HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（AGPL-3.0）、[HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced)（GPL-3.0 / Apache-2.0）、[Accompanist Lyrics Core](https://github.com/6xingyv/Accompanist-Lyrics)（Apache-2.0）。
 - 端末内 AI の任意ランタイムおよび推論モデル：[ONNX Runtime](https://github.com/microsoft/onnxruntime)（MIT・オンデマンド取得）、Qualcomm AI Engine Direct (QNN) 2.51.0 加速パッケージ（任意・オンデマンド取得・Qualcomm SDK 利用許諾に準拠）、[Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) / [Depth Anything 3](https://github.com/ByteDance-Seed/depth-anything-3)（Apache-2.0）、[MiDaS](https://github.com/isl-org/MiDaS)（MIT）、[U2Net / DIS (rembg)](https://github.com/danielgatis/rembg)（MIT / Apache-2.0）、[BiRefNet](https://github.com/ZhengPeng7/BiRefNet)（MIT）、[Demucs v4 (HTDemucs)](https://github.com/facebookresearch/demucs)（MIT）、[UVR / MDX-Net](https://github.com/Anjok07/ultimatevocalremovergui) / [KUIELab](https://github.com/kuielab/sdx23)（MIT）。
-- その他の主な依存ライブラリ：[Media3](https://developer.android.com/media/media3)、[Coil](https://github.com/coil-kt/coil)、[OkHttp](https://github.com/square/okhttp)、[jaudiotagger](https://github.com/Adonai/jaudiotagger-android)（LGPL-2.1）、[MaterialKolor](https://github.com/jordond/MaterialKolor)（MIT）、[ZXing](https://github.com/zxing/zxing)（Apache-2.0）、[Shizuku](https://github.com/RikkaApps/Shizuku)（Apache-2.0）、[decent-player](https://github.com/Ma145/decent-player)（MIT・USB 独占オーディオドライバーおよび Media3 パイプライン適応）、[NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT）。
+- その他の主な依存ライブラリ：[Media3](https://developer.android.com/media/media3)、[Coil](https://github.com/coil-kt/coil)、[OkHttp](https://github.com/square/okhttp)、[jaudiotagger](https://github.com/Adonai/jaudiotagger-android)（LGPL-2.1）、[MaterialKolor](https://github.com/jordond/MaterialKolor)（MIT）、[ZXing](https://github.com/zxing/zxing)（Apache-2.0）、[Shizuku](https://github.com/RikkaApps/Shizuku)（Apache-2.0）、[decent-player](https://github.com/Ma145/decent-player)（MIT・USB 独占オーディオドライバーおよび Media3 パイプライン適応）、[NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT）、[jsososo/QQMusicApi](https://github.com/jsososo/QQMusicApi)（GPL-3.0）。
 
 ## Star History
 
