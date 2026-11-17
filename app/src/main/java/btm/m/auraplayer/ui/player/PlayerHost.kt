@@ -345,7 +345,13 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
         val shape = RoundedCornerShape(if (settledFullScreen) 0.dp else (miniHeight / 2) * (1f - e) + screenCorner * e)
         Box(Modifier.offset(metrics.outerInset * (1f - e), miniY * (1f - e))
             .size(lerp(miniWidth, screenWidth, e), lerp(miniHeight, screenHeight, e))
-            .then(if (shareActive && e > .995f) Modifier else Modifier.miniPlayerMaterial(backdrop, style, shape, e))
+            .then(when {
+                shareActive && e > .995f -> Modifier
+                // The opaque player covers the mini surface. Keeping its Backdrop here
+                // turns a small pill's blur/refraction into a hidden full-screen pass.
+                settledFullScreen -> Modifier.background(Color(coverPalette.a2.tone(14)))
+                else -> Modifier.miniPlayerMaterial(backdrop, style, shape, e)
+            })
             .clip(shape)
             .playerMiniDragGesture(enabled = !open && !settlingSwipe && !shareOpening && e < .34f,
                 allowTrackSwipe = appearance.swipeTracks,

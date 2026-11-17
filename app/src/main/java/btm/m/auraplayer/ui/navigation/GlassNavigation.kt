@@ -1547,6 +1547,7 @@ private fun LiquidBottomTabs(
         Color(0xFF121212).copy(alpha = 0.4f)
     }
     val tabsBackdrop = rememberKyantLayerBackdrop()
+    val materialBackdrop = rememberKyantLayerBackdrop()
 
     BoxWithConstraints(modifier, contentAlignment = Alignment.CenterStart) {
         val density = LocalDensity.current
@@ -1622,6 +1623,7 @@ private fun LiquidBottomTabs(
                             Modifier.drawBackdrop(
                                 backdrop = backdrop,
                                 shape = { cornerShape },
+                                exportedBackdrop = materialBackdrop,
                                 effects = {
                                     vibrancy()
                                     blur(blurRadius.toPx() * material.blur / 100f)
@@ -1665,21 +1667,8 @@ private fun LiquidBottomTabs(
                         .alpha(0f)
                         .layerBackdrop(tabsBackdrop)
                         .graphicsLayer { translationX = panelOffset }
-                        .drawBackdrop(
-                            backdrop = backdrop,
-                            shape = { cornerShape },
-                            effects = {
-                                val progress = dragAnimation.pressProgress
-                                vibrancy()
-                                blur(blurRadius.toPx() * material.blur / 100f)
-                                lens(24.dp.toPx() * progress * material.pressBoost / 100f * material.thickness / 100f, 24.dp.toPx() * progress * material.pressBoost / 100f * material.refraction / 100f, chromaticAberration = material.dispersion ?: false)
-                            },
-                            highlight = {
-                                Highlight.Default.copy(alpha = material.light(dragAnimation.pressProgress))
-                            },
-                            onDrawSurface = { drawRect(containerColor.copy(alpha = material.alpha(containerColor.alpha))) }
-                        )
-                        .then(interactiveHighlight.modifier)
+                        // Record only tinted labels. The selector reuses the visible
+                        // glass below instead of blurring the page a second time.
                         .height(56.dp * heightScale)
                         .fillMaxWidth()
                         .padding(horizontal = 4.dp)
@@ -1705,7 +1694,7 @@ private fun LiquidBottomTabs(
                 .then(
                     if (advancedMaterial) {
                         Modifier.drawBackdrop(
-                            backdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop),
+                            backdrop = rememberCombinedBackdrop(materialBackdrop, tabsBackdrop),
                             shape = { cornerShape },
                             effects = {
                                 val progress = dragAnimation.pressProgress

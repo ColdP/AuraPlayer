@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
@@ -104,6 +105,13 @@ private val GlassMenuHorizontalOffset = 18.dp
 /** Keep the measured popup inside the safe window; its list scrolls at full item size. */
 internal fun glassMenuPositionInWindow(preferred: Int, popupSize: Int, safeStart: Int, safeEnd: Int): Int =
     preferred.coerceIn(safeStart, (safeEnd - popupSize).coerceAtLeast(safeStart))
+
+internal fun glassMenuHeightInWindow(requestedMax: Int?, layoutMax: Int, safeTop: Int, safeBottom: Int): Int =
+    minOf(requestedMax ?: layoutMax, layoutMax, (safeBottom - safeTop).coerceAtLeast(0)).coerceAtLeast(0)
+
+/** Position the visible surface; transparent shadow padding may extend beyond the safe bounds. */
+internal fun glassMenuPositionWithShadow(preferredSurface: Int, popupSize: Int, shadowPadding: Int, safeStart: Int, safeEnd: Int): Int =
+    glassMenuPositionInWindow(preferredSurface, (popupSize - shadowPadding * 2).coerceAtLeast(0), safeStart, safeEnd) - shadowPadding
 
 @Composable
 fun GlassDropdownPreference(
@@ -401,7 +409,7 @@ internal fun glassDropdownColors(): DropdownColors {
 }
 
 @Composable
-private fun GlassDropdownPopup(
+internal fun GlassDropdownPopup(
     entries: List<DropdownEntry>,
     show: Boolean,
     onDismiss: () -> Unit,
@@ -412,11 +420,18 @@ private fun GlassDropdownPopup(
     horizontalOffset: Dp = GlassMenuHorizontalOffset,
     useAnchorVerticalPosition: Boolean = false,
     dismissOnItemClick: Boolean = true,
+    onBack: (() -> Unit)? = null,
+    onDismissFinished: (() -> Unit)? = null,
+    growFromAnchor: Boolean = false,
+    trailingScreenInset: Dp? = null,
+    content: (@Composable () -> Unit)? = null,
 ) {
     val fraction = remember { Animatable(0f) }
     val alpha = remember { Animatable(0f) }
     var hostVisible by remember { mutableStateOf(false) }
     val currentDismiss by rememberUpdatedState(onDismiss)
+    val currentBack by rememberUpdatedState(onBack)
+    val currentDismissFinished by rememberUpdatedState(onDismissFinished)
     var parentBounds by remember { mutableStateOf(IntRect.Zero) }
     var hostPosition by remember { mutableStateOf(Offset.Zero) }
     var popupSize by remember { mutableStateOf(IntSize.Zero) }
@@ -441,6 +456,7 @@ private fun GlassDropdownPopup(
             alpha.animateTo(0f, tween(320))
             fraction.snapTo(0f)
             hostVisible = false
+            currentDismissFinished?.invoke()
         }
     }
 
@@ -464,6 +480,7 @@ private fun GlassDropdownPopup(
     val positionProvider = ListPopupDefaults.DropdownPositionProvider
     val shadowPadding = with(LocalDensity.current) { GlassMenuShadowPadding.roundToPx() }
     val horizontalOffsetPx = with(LocalDensity.current) { horizontalOffset.roundToPx() }
+    val trailingScreenInsetPx = with(LocalDensity.current) { trailingScreenInset?.roundToPx()?.coerceAtLeast(0) }
     val layoutInfo = rememberListPopupLayoutInfo(
         alignment = alignment,
         popupPositionProvider = positionProvider,
@@ -479,7 +496,7 @@ private fun GlassDropdownPopup(
         exitTransition = androidx.compose.animation.ExitTransition.None,
         renderInRootScaffold = true,
     ) {
-        BackHandler(enabled = show) { currentDismiss() }
+        BackHandler(enabled = show) { (currentBack ?: currentDismiss)() }
         Box(Modifier.fillMaxSize()) {
             Layout(
                 content = {
@@ -489,7 +506,7 @@ private fun GlassDropdownPopup(
                         backdrop = backdrop,
                         onSizeChanged = { popupSize = it },
                     ) {
-                        GlassDropdownEntries(entries, dropdownColors) { entryIndex, itemIndex ->
+                        if (content != null) content() else GlassDropdownEntries(entries, dropdownColors) { entryIndex, itemIndex ->
                             entries[entryIndex].items[itemIndex].onClick?.invoke()
                             if (dismissOnItemClick) currentDismiss()
                         }
@@ -503,12 +520,16 @@ private fun GlassDropdownPopup(
                 val measurable = measurables.single()
                 val safeTop = layoutInfo.windowBounds.top + layoutInfo.popupMargin.top
                 val safeBottom = layoutInfo.windowBounds.bottom - layoutInfo.popupMargin.bottom
-                // ListPopupColumn already provides vertical scrolling. Bound its
-                // viewport to the safe window without shrinking any menu items.
-                val maxPopupHeight = minOf(maxHeight?.roundToPx() ?: constraints.maxHeight,
-                    constraints.maxHeight, (safeBottom - safeTop).coerceAtLeast(1))
+                // An inline section grows down from the original popup's top.
+                // Its height must not cause the position provider to flip it
+                // above the trigger partway through the expansion animation.
+                val anchoredTop = (parentBounds.bottom - shadowPadding).coerceIn(safeTop, safeBottom.coerceAtLeast(safeTop))
+                // ListPopupColumn (or custom content) provides vertical scrolling.
+                // Bound the viewport without shrinking any menu items.
+                val maxPopupHeight = glassMenuHeightInWindow(maxHeight?.roundToPx(), constraints.maxHeight,
+                    if (growFromAnchor) anchoredTop else safeTop, safeBottom)
                 val placeable = measurable.measure(
-                    constraints.copy(minWidth = 0, minHeight = 0, maxHeight = maxPopupHeight.coerceAtLeast(1)),
+                    constraints.copy(minWidth = 0, minHeight = 0, maxHeight = maxPopupHeight.coerceAtLeast(0)),
                 )
                 val result = positionProvider.calculatePosition(
                     parentBounds,
@@ -518,7 +539,9 @@ private fun GlassDropdownPopup(
                     layoutInfo.popupMargin,
                     alignment,
                 )
-                val preferredY = if (useAnchorVerticalPosition) {
+                val preferredY = if (growFromAnchor) {
+                    anchoredTop
+                } else if (useAnchorVerticalPosition) {
                     // GlassPopupSurface reserves shadow padding inside the popup. Align
                     // the visible glass surface with the preference anchor instead of
                     // leaving a full preference-height gap below it.
@@ -537,9 +560,17 @@ private fun GlassDropdownPopup(
                 // Anchor placement is a preference, never permission to bypass
                 // the provider's screen bounds (especially for long quality lists).
                 val popupY = glassMenuPositionInWindow(preferredY, placeable.height, safeTop, safeBottom)
-                val popupX = glassMenuPositionInWindow(result.x + horizontalOffsetPx, placeable.width,
-                    layoutInfo.windowBounds.left + layoutInfo.popupMargin.left,
-                    layoutInfo.windowBounds.right - layoutInfo.popupMargin.right)
+                val popupX = if (trailingScreenInsetPx != null) {
+                    val safeLeft = layoutInfo.windowBounds.left + trailingScreenInsetPx
+                    val safeRight = (layoutInfo.windowBounds.right - trailingScreenInsetPx).coerceAtLeast(safeLeft)
+                    val surfaceWidth = (placeable.width - shadowPadding * 2).coerceAtLeast(0)
+                    val preferredSurfaceX = if (layoutDirection == LayoutDirection.Ltr) safeRight - surfaceWidth else safeLeft
+                    glassMenuPositionWithShadow(preferredSurfaceX, placeable.width, shadowPadding, safeLeft, safeRight)
+                } else {
+                    glassMenuPositionInWindow(result.x + horizontalOffsetPx, placeable.width,
+                        layoutInfo.windowBounds.left + layoutInfo.popupMargin.left,
+                        layoutInfo.windowBounds.right - layoutInfo.popupMargin.right)
+                }
                 layout(constraints.maxWidth, constraints.maxHeight) {
                     placeable.place(
                         popupX - hostPosition.x.toInt(),

@@ -58,22 +58,12 @@ internal fun PlayerThemeBackground(
         (compactProgress * (1f - queueBlend)).coerceIn(0f, 1f)
     }
     var phase by remember { mutableFloatStateOf(0f) }
-    var lyricPhase by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(animate, usesFlowingArt, usesMaterialWash, config.weather) {
         if (!animate || (!usesFlowingArt && !usesMaterialWash && config.weather == PlayerWeather.NONE)) return@LaunchedEffect
         var last = withFrameNanos { it }
         while (true) {
             val now = withFrameNanos { it }
             phase = (phase + ((now - last) / 1e9f).coerceAtMost(.05f)) % 120f
-            last = now
-        }
-    }
-    LaunchedEffect(animate, config.lyricTheme, lyricOverlayBlend > 0.005f) {
-        if (!animate || config.lyricTheme == LyricTheme.BLUR || lyricOverlayBlend <= 0.005f) return@LaunchedEffect
-        var last = withFrameNanos { it }
-        while (true) {
-            val now = withFrameNanos { it }
-            lyricPhase = (lyricPhase + ((now - last) / 1e9f).coerceAtMost(.05f)) % 600f
             last = now
         }
     }
@@ -176,7 +166,7 @@ internal fun PlayerThemeBackground(
                     theme == PlayerTheme.FULLSCREEN ||
                     (materialMode && (materialBg == MaterialPlayerBackground.BLUR || materialBg == MaterialPlayerBackground.AURORA_BLUR)))
                 if (advancedMaterial && materialMode && materialBg == MaterialPlayerBackground.MATERIAL && expressive != null) {
-                    MaterialExpressiveSurfaceWash(expressive, phase, washStrength = 1f - materialMix * .92f, Modifier.fillMaxSize())
+                    MaterialExpressiveSurfaceWash(expressive, { phase }, washStrength = 1f - materialMix * .92f, Modifier.fillMaxSize())
                 }
                 if (advancedMaterial && oneUiMode) {
                     OneUiSurfaceWash(oneUi, Modifier.fillMaxSize())
@@ -224,24 +214,56 @@ internal fun PlayerThemeBackground(
         }
         }
         if (lyricOverlayBlend > 0.001f) {
-            PlayerLyricThemeBackdrop(
-                theme = config.lyricTheme,
+            AnimatedPlayerLyricBackdrop(
+                config = config,
                 blend = lyricOverlayBlend,
-                phase = lyricPhase,
+                animate = animate,
                 palette = palette,
                 spatialTilt = if (config.spatialLyrics) spatialTilt else Offset.Zero,
-                tokyoSceneTime = config.tokyoSceneTime,
-                tokyoSceneLandmark = config.tokyoSceneLandmark,
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        if (config.weather != PlayerWeather.NONE) PlayerWeatherOverlay(config.weather, phase)
+        if (config.weather != PlayerWeather.NONE) PlayerWeatherOverlay(config.weather, { phase })
     }
 }
 
+// Keep the lyric scene's frame reads in its own scope. They must not recompose
+// the artwork/blur/capture layers behind it at the display refresh rate.
 @Composable
-private fun MaterialExpressiveSurfaceWash(colors: PlayerExpressiveColors, phase: Float, washStrength: Float, modifier: Modifier = Modifier) {
+private fun AnimatedPlayerLyricBackdrop(
+    config: NowPlayingConfig,
+    blend: Float,
+    animate: Boolean,
+    palette: CorePalette,
+    spatialTilt: Offset,
+    modifier: Modifier,
+) {
+    var phase by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(animate, config.lyricTheme, blend > 0.005f) {
+        if (!animate || config.lyricTheme == LyricTheme.BLUR || blend <= 0.005f) return@LaunchedEffect
+        var last = withFrameNanos { it }
+        while (true) {
+            val now = withFrameNanos { it }
+            phase = (phase + ((now - last) / 1e9f).coerceAtMost(.05f)) % 600f
+            last = now
+        }
+    }
+    PlayerLyricThemeBackdrop(
+        theme = config.lyricTheme,
+        blend = blend,
+        phase = phase,
+        palette = palette,
+        spatialTilt = spatialTilt,
+        tokyoSceneTime = config.tokyoSceneTime,
+        tokyoSceneLandmark = config.tokyoSceneLandmark,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun MaterialExpressiveSurfaceWash(colors: PlayerExpressiveColors, phase: () -> Float, washStrength: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
+        val phase = phase()
         drawRect(colors.surface)
         if (washStrength <= 0.005f) return@Canvas
         val primaryAlpha = (if (colors.dark) .36f else .48f) * washStrength
@@ -316,9 +338,17 @@ internal fun PlayerWeatherOverlay(
     weather: PlayerWeather,
     time: Float,
     modifier: Modifier = Modifier,
+) = PlayerWeatherOverlay(weather, { time }, modifier)
+
+@Composable
+private fun PlayerWeatherOverlay(
+    weather: PlayerWeather,
+    time: () -> Float,
+    modifier: Modifier = Modifier,
 ) {
     val particles = remember { Random(317).let { r -> List(64) { WeatherParticle(r.nextFloat(), r.nextFloat(), .08f + r.nextFloat() * .14f, .5f + r.nextFloat()) } } }
     Canvas(modifier.fillMaxSize()) {
+        val time = time()
         val rain = weather == PlayerWeather.RAIN
         for ((index, p) in particles.withIndex()) {
             val y = ((p.y + time * p.speed * if (rain) 3f else 1f) % 1f) * size.height

@@ -356,10 +356,14 @@ private fun AuraShell(model: AuraViewModel) {
                     Modifier.fillMaxSize()
                 } else {
                     Modifier.fillMaxSize().graphicsLayer {
+                        // Keep page state, but stop rendering its blur/captures while
+                        // the fully opaque player covers the shell. Restore on drag.
+                        val covered = playerExpansion >= 1f
+                        alpha = if (covered) 0f else 1f
                         // Read progress in the draw layer, without recomposing the whole page stack
                         // for each spring/gesture frame. Clamp keeps the screen edges filled.
                         val radius = ((searchProgress * 14f).dp + playerTransitionBlurRadius(miniBlurRadius, playerExpansion)).toPx()
-                        renderEffect = if (radius > .01f) BlurEffect(radius, radius, TileMode.Clamp) else null
+                        renderEffect = if (!covered && radius > .01f) BlurEffect(radius, radius, TileMode.Clamp) else null
                     }.layerBackdrop(backdrop)
                 }
                 Box(pageHostModifier) {
@@ -427,8 +431,10 @@ private fun AuraShell(model: AuraViewModel) {
                 }
                 }
                 AuraBottomBar(selected, model, backdrop, Modifier.align(Alignment.BottomCenter).graphicsLayer {
+                    val covered = playerExpansion >= 1f
+                    alpha = if (covered) 0f else 1f
                     val radius = ((searchProgress * 14f).dp + playerTransitionBlurRadius(miniBlurRadius, playerExpansion)).toPx()
-                    renderEffect = if (radius > .01f) BlurEffect(radius, radius, TileMode.Clamp) else null
+                    renderEffect = if (!covered && radius > .01f) BlurEffect(radius, radius, TileMode.Clamp) else null
                 },
                     searchVisible, searchProgress, secondaryProgress,
                     { if (searchAnchor.width > 0f) { searchVisible = true; searchOpen = true } },

@@ -94,6 +94,8 @@ internal fun AppPage(
         animationSpec = tween(280, easing = FastOutSlowInEasing),
         label = "topBarMaterialProgress",
     )
+    val recordProgressiveBackdrop = !useLegacyTopBarBackdrop && uiStyle != AppUiStyle.MATERIAL &&
+        LocalAdvancedMaterialEnabled.current && topBarMaterialProgress > 0f
     val provideScope: @Composable (@Composable () -> Unit) -> Unit = { inner ->
         if (couiBackdrop != null) ProvideCouiBackdrop(couiBackdrop, inner) else inner()
     }
@@ -281,10 +283,14 @@ internal fun AppPage(
             }
         }
     ) { padding ->
-        val baseContentModifier = Modifier.fillMaxSize().layerBackdrop(backdrop)
+        // Legacy pages already record their background above. A LayerBackdrop must
+        // have a single writer; recording content into it too includes its readers.
+        val baseContentModifier = Modifier.fillMaxSize().then(
+            if (useLegacyTopBarBackdrop && pageBackground != null) Modifier else Modifier.layerBackdrop(backdrop)
+        )
         val contentModifier = if (couiBackdrop != null) baseContentModifier.couiBackdrop(couiBackdrop) else baseContentModifier
         Box(
-            if (!useLegacyTopBarBackdrop) contentModifier.miuixLayerBackdrop(progressiveBackdrop) else contentModifier
+            if (recordProgressiveBackdrop) contentModifier.miuixLayerBackdrop(progressiveBackdrop) else contentModifier
         ) {
             if (!useLegacyTopBarBackdrop) pageBackground?.invoke(this)
             CompositionLocalProvider(LocalPageScroll provides scroll) { content(padding, scroll) }
