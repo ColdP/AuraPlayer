@@ -11,6 +11,21 @@ import java.io.File
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicReference
 
+internal fun playbackAudioCacheKey(provider: String, trackId: String, quality: String): String? = when (provider) {
+    "netease" -> "aura://netease/$trackId?quality=$quality"
+    "qqmusic" -> "aura://qqmusic/$trackId?quality=standard"
+    else -> null
+}
+
+internal fun playbackAudioCacheFlags(flags: Int): Int =
+    (flags and DataSpec.FLAG_DONT_CACHE_IF_LENGTH_UNKNOWN.inv()) or DataSpec.FLAG_ALLOW_CACHE_FRAGMENTATION
+
+internal fun migratePlaybackAudioCache(legacy: File, persistent: File): File = when {
+    persistent.isDirectory || !legacy.isDirectory -> persistent
+    legacy.renameTo(persistent) -> persistent
+    else -> legacy
+}
+
 /** Disk cache for online audio. The cache key is the stable Aura URI and includes quality. */
 object PlaybackAudioCache {
     private const val MAX_BYTES = 512L * 1024 * 1024
@@ -20,7 +35,7 @@ object PlaybackAudioCache {
     fun get(context: Context): SimpleCache {
         holder.get()?.let { return it }
         val cache = SimpleCache(
-            context.cacheDir.resolve("audio-streams"),
+            migratePlaybackAudioCache(legacyDirectory(context), persistentDirectory(context)),
             LeastRecentlyUsedCacheEvictor(MAX_BYTES),
             StandaloneDatabaseProvider(context.applicationContext),
         )
@@ -28,9 +43,12 @@ object PlaybackAudioCache {
         return cache
     }
 
-    fun key(songId: Long, quality: StreamQuality): String = "aura://netease/$songId?quality=${quality.level}"
+    fun key(songId: Long, quality: StreamQuality): String = key(songId, quality.level)
 
-    fun size(context: Context): Long = holder.get()?.cacheSpace ?: directory(context).walkTopDown().filter(File::isFile).sumOf(File::length)
+    internal fun key(songId: Long, level: String): String = checkNotNull(playbackAudioCacheKey("netease", "$songId", level))
+
+    fun size(context: Context): Long = holder.get()?.cacheSpace ?: listOf(persistentDirectory(context), legacyDirectory(context))
+        .sumOf { directory -> directory.walkTopDown().filter(File::isFile).sumOf(File::length) }
 
     /** Copies a complete cached item, returning false when playback has only cached a partial range. */
     fun copyIfFullyCached(context: Context, key: String, output: File): Boolean {
@@ -55,10 +73,14 @@ object PlaybackAudioCache {
     @Synchronized
     fun clear(context: Context) {
         holder.get()?.let { cache -> cache.keys.toList().forEach(cache::removeResource) }
-        if (holder.get() == null) directory(context).deleteRecursively()
+        if (holder.get() == null) {
+            persistentDirectory(context).deleteRecursively()
+            legacyDirectory(context).deleteRecursively()
+        }
     }
 
-    private fun directory(context: Context) = context.cacheDir.resolve("audio-streams")
+    private fun legacyDirectory(context: Context) = context.cacheDir.resolve("audio-streams")
+    private fun persistentDirectory(context: Context) = context.noBackupFilesDir.resolve("audio-streams")
 
     private fun copy(source: androidx.media3.datasource.DataSource, sink: OutputStream) {
         val buffer = ByteArray(64 * 1024)

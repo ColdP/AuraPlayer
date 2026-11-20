@@ -174,7 +174,17 @@ fun NowPlayingSettingsPage(padding: PaddingValues, open: (String) -> Unit = {}) 
                         }
                     }
                 }
-                SwitchPreference(tr("player_immersive_cover", "沉浸式封面"), checked = state.immersiveCover) { value -> store.update { it.copy(immersiveCover = value) } }
+                BlurAnimatedVisibility(state.coverTheme == CoverTheme.SQUARE, label = "player-immersive-cover-setting") {
+                    SwitchPreference(
+                        tr("player_immersive_cover", "沉浸式封面"),
+                        checked = state.immersiveCover,
+                        enabled = state.coverTheme == CoverTheme.SQUARE,
+                    ) { value ->
+                        if (state.coverTheme == CoverTheme.SQUARE) {
+                            store.update { it.copy(immersiveCover = value) }
+                        }
+                    }
+                }
                 SwitchPreference(
                     title = tr("player_apple_music_animated_cover", "Apple Music 动态封面"),
                     summary = tr("player_apple_music_animated_cover_summary", "获取到动态封面时强制使用沉浸式封面"),

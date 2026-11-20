@@ -167,6 +167,13 @@ class RearPlayerActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        configureRearWindow()
+        updateAodState()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        configureRearWindow()
         updateAodState()
     }
 
@@ -228,6 +235,8 @@ class RearPlayerActivity : ComponentActivity() {
         window.navigationBarColor = AndroidColor.TRANSPARENT
         window.attributes = window.attributes.apply {
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            width = WindowManager.LayoutParams.MATCH_PARENT
+            height = WindowManager.LayoutParams.MATCH_PARENT
         }
         hideSystemBars()
     }

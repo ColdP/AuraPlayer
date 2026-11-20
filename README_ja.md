@@ -47,10 +47,11 @@ Aura Player（パッケージ名 `btm.m.auraplayer`）は、Android 13（API 33�
 
 - **公式ダイレクトログインと複数アカウント管理**：NetEase Cloud Music（`music.163.com`）および QQ Music（`y.qq.com`）ともに、既定では公式 HTTPS ページで直接ログインするため、独自サーバーの構築や Cookie の手動コピーは不要です。セッション Cookie は Android Keystore で暗号化保存され、両サービスの複数アカウント保存・切り替え・削除・Cookie の行単位確認／コピーに対応し、ログアウトやサービス URL 変更時は現在のセッションが解除されます。
 - **任意の自前 API**：それぞれの「高度な接続設定」から独自の [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（SMS 認証コードログイン含む、`server/` に Node.js / Docker Compose の起動設定あり）または [jsososo/QQMusicApi](https://github.com/jsososo/QQMusicApi) サーバーに接続できます。
+- **クラウドホームとハートビート**：ホームはローカル、NetEase、QQ Music から選べます。クラウドホームではおすすめ曲を更新できます。NetEase にはフォロー一覧とハートビートモードがあり、通常のリピートに戻すと元のキューと再生位置が復元されます。NetEase 設定からこのモードを無効にできます。
 - **表示切り替えと純ローカルモード**：「設定 → 機能」の「クラウド表示内容」から `NetEase Cloud Music / QQ Music / すべて表示` を選択でき、独立した「クラウド検索内容」では `NetEase Cloud Music / QQ Music` を選択できます。QQ Music の自分のプレイリストはおすすめより上に表示されます。「すべてのクラウド機能を無効化」を有効にすると、クラウド UI やタスクを停止し、再生キューのクラウド曲も取り除いて完全なローカルプレイヤーとして動作します。
 - **クラウド閲覧と詳細**：おすすめコンテンツ、ページング対応プレイリスト・曲一覧、分類検索、アルバム・アーティスト詳細、音質切り替えに対応しています（一部の拡張機能は NetEase API に準拠）。
 - **ダウンロードとタグ書き込み**：選択した音質をシステムダウンローダーで取得し、WorkManager がバックグラウンドで NCM デコードおよび FLAC / MP3 タグ・カバー埋め込みを行い、`Music/Aura Player` へ保存します（利用可能な音質はアカウント権限に依存します）。
-- **キャッシュ管理**：カバー画像キャッシュ上限 `128 MiB`、メタデータキャッシュ上限 `16 MiB`。「設定 → NetEase Music → キャッシュ」から種別ごとに確認・削除できます。
+- **キャッシュ管理**：上限はカバー画像 `128 MiB`、メタデータ `16 MiB`、クラウド再生音声 `512 MiB`。「設定 → NetEase Music → キャッシュ」から種別ごとに確認・削除できます。
 
 ### 再生画面、歌詞、歌詞共有
 

@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
@@ -69,6 +70,7 @@ import top.yukonga.miuix.kmp.blur.highlight.Highlight as MiuixHighlight
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan
+import kotlin.math.roundToInt
 
 internal fun resolveActiveCoverTheme(
     coverTheme: CoverTheme,
@@ -499,11 +501,13 @@ internal fun PlayerActionRow(
     val modeIcon = when (model.playbackMode) {
         1 -> R.drawable.ic_player_shuffle
         2 -> R.drawable.ic_player_repeat_one
+        btm.m.auraplayer.HEARTBEAT_PLAYBACK_MODE -> R.drawable.ic_player_heartbeat
         else -> R.drawable.ic_player_repeat
     }
     val modeDescription = when (model.playbackMode) {
         1 -> tr("shuffle_mode", "随机播放")
         2 -> tr("repeat_one_mode", "单曲循环")
+        btm.m.auraplayer.HEARTBEAT_PLAYBACK_MODE -> tr("heartbeat_mode", "心动模式")
         else -> tr("repeat_all_mode", "列表循环")
     }
     @Suppress("UNUSED_VARIABLE")
@@ -776,7 +780,7 @@ internal data class CoverThemeStageParams(
     val mixVisual: AuraMixVisualTransition?,
     val spatialCoverState: SpatialCoverResolveState,
     val spatialCoverRendering: Boolean,
-    val spatialTilt: Offset,
+    val spatialTilt: State<Offset>,
     val motionVideoPath: String?,
     val motionVideoAllowed: Boolean,
     val active: Boolean,
@@ -791,7 +795,9 @@ internal data class CoverThemeStageParams(
     val reserveSpatialCubeSlot: Boolean,
     val maxWidth: Dp,
     val maxHeight: Dp,
-    val heroContentAlpha: Float,
+    val heroContentAlpha: State<Float>,
+    val stageVisible: Boolean = true,
+    val stageSettled: Boolean = true,
     val onLyrics: () -> Unit,
     val onQueue: () -> Unit,
     val onQualityMenuExpanded: (Boolean) -> Unit,
@@ -820,7 +826,6 @@ internal fun PlayerCoverThemeControlDock(
     val activeInk = params.activeInk
     val secondaryInk = params.secondaryInk
     val mixVisual = params.mixVisual
-    val heroContentAlpha = params.heroContentAlpha
     val active = params.active
     val interactive = params.interactive
     val lyricsOpen = params.lyricsOpen
@@ -877,7 +882,7 @@ internal fun PlayerCoverThemeControlDock(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(end = if (params.reserveSpatialCubeSlot) CoverThemeSpatialCubeReserve else 0.dp)
-                    .graphicsLayer { alpha = heroContentAlpha },
+                    .graphicsLayer { alpha = params.heroContentAlpha.value },
             )
             PlayerProgressSection(
                 model = model,
@@ -999,7 +1004,7 @@ internal fun PlayerCoverThemeControlDock(
                 modifier = Modifier
                     .weight(1f)
                     .padding(end = if (params.reserveSpatialCubeSlot) CoverThemeSpatialCubeReserve else 0.dp)
-                    .graphicsLayer { alpha = heroContentAlpha },
+                    .graphicsLayer { alpha = params.heroContentAlpha.value },
             )
             PlayerTransportRow(
                 model = model,
@@ -1033,10 +1038,8 @@ internal fun PlayerCoverflowStage(
     val spatialCoverState = params.spatialCoverState
     val spatialCoverRendering = params.spatialCoverRendering
     val spatialTilt = params.spatialTilt
-    val parallaxTilt = if (appearance.coverflowParallax) {
-        scaleSpatialParallaxTilt(spatialTilt, appearance.coverflowParallaxSensitivity)
-    } else {
-        Offset.Zero
+    val parallaxTilt by remember(spatialTilt, appearance.coverflowParallaxSensitivity) {
+        derivedStateOf { scaleSpatialParallaxTilt(spatialTilt.value, appearance.coverflowParallaxSensitivity) }
     }
     val motionVideoPath = params.motionVideoPath
     val motionVideoAllowed = params.motionVideoAllowed
@@ -1050,7 +1053,6 @@ internal fun PlayerCoverflowStage(
     val bottomInset = params.bottomInset
     val maxWidth = params.maxWidth
     val maxHeight = params.maxHeight
-    val heroContentAlpha = params.heroContentAlpha
     val onLyrics = params.onLyrics
     val onQueue = params.onQueue
     val onQualityMenuExpanded = params.onQualityMenuExpanded
@@ -1097,6 +1099,7 @@ internal fun PlayerCoverflowStage(
         pageCount = { tracks.size.coerceAtLeast(1) },
     )
     val latestTargetIndex by rememberUpdatedState(targetIndex)
+    val latestStageVisible by rememberUpdatedState(params.stageVisible)
     var syncingExternalTarget by remember { mutableStateOf(false) }
 
     LaunchedEffect(targetIndex, tracks.size) {
@@ -1105,7 +1108,7 @@ internal fun PlayerCoverflowStage(
         if (pagerState.currentPage != clamped || pagerState.settledPage != clamped) {
             syncingExternalTarget = true
             try {
-                if (abs(pagerState.currentPage - clamped) <= 3) {
+                if (latestStageVisible && abs(pagerState.currentPage - clamped) <= 3) {
                     pagerState.animateScrollToPage(clamped)
                 } else {
                     pagerState.scrollToPage(clamped)
@@ -1120,6 +1123,10 @@ internal fun PlayerCoverflowStage(
         var lastTickPage = pagerState.currentPage
         snapshotFlow { pagerState.currentPage to pagerState.isScrollInProgress }
             .collect { (page, scrolling) ->
+                if (!latestStageVisible) {
+                    lastTickPage = page
+                    return@collect
+                }
                 if (scrolling && page != lastTickPage) {
                     lastTickPage = page
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -1132,7 +1139,7 @@ internal fun PlayerCoverflowStage(
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage to pagerState.isScrollInProgress }
             .collect { (settled, scrolling) ->
-                if (!scrolling && !syncingExternalTarget && settled != latestTargetIndex && settled in tracks.indices) {
+                if (!scrolling && !syncingExternalTarget && latestStageVisible && settled != latestTargetIndex && settled in tracks.indices) {
                     model.queueTo(settled)
                 }
             }
@@ -1227,9 +1234,12 @@ internal fun PlayerCoverflowStage(
                     ),
             )
 
+            val reflectionDecodePx = remember(metrics.cardSize, density) {
+                with(density) { metrics.cardSize.toPx().roundToInt().coerceIn(128, 320) }
+            }
             HorizontalPager(
                 state = pagerState,
-                beyondViewportPageCount = 3,
+                beyondViewportPageCount = if (metrics.isLandscape) 3 else 2,
                 pageSize = PageSize.Fixed(metrics.cardSize),
                 pageSpacing = metrics.pageSpacing,
                 contentPadding = PaddingValues(horizontal = stageHorizontalPadding),
@@ -1278,7 +1288,7 @@ internal fun PlayerCoverflowStage(
                             }
                             scaleX = transform.scale
                             scaleY = transform.scale
-                            val slotHeroAlpha = if (isActiveTrack) heroContentAlpha else 1f
+                            val slotHeroAlpha = if (isActiveTrack) params.heroContentAlpha.value else 1f
                             alpha = transform.contentAlpha * slotHeroAlpha
                         },
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -1324,7 +1334,7 @@ internal fun PlayerCoverflowStage(
                             spatialState = if (isActiveTrack) spatialCoverState else SpatialCoverResolveState.Idle,
                             spatialActive = isActiveTrack && spatialCoverRendering,
                             spatialTilt = if (isActiveTrack && spatialCoverRendering) {
-                                scaleSpatialParallaxTilt(spatialTilt, appearance.spatialCoverSensitivity)
+                                scaleSpatialParallaxTilt(spatialTilt.value, appearance.spatialCoverSensitivity)
                             } else {
                                 Offset.Zero
                             },
@@ -1373,9 +1383,10 @@ internal fun PlayerCoverflowStage(
                     } else {
                         track.artwork
                     }
-                    val reflectionRequest = remember(reflectionArt, context) {
+                    val reflectionRequest = remember(reflectionArt, reflectionDecodePx, context) {
                         ImageRequest.Builder(context)
                             .data(reflectionArt)
+                            .size(reflectionDecodePx)
                             .precision(Precision.INEXACT)
                             .build()
                     }
@@ -1393,16 +1404,16 @@ internal fun PlayerCoverflowStage(
                                 compositingStrategy = CompositingStrategy.Offscreen
                             }
                             .clip(RoundedCornerShape(topStart = cornerRadius, topEnd = cornerRadius))
-                            .drawWithContent {
-                                drawContent()
-                                drawRect(
-                                    brush = Brush.verticalGradient(
-                                        0f to Color.Black.copy(alpha = 0.28f),
-                                        0.52f to Color.Black.copy(alpha = 0.09f),
-                                        1f to Color.Transparent,
-                                    ),
-                                    blendMode = BlendMode.DstIn,
+                            .drawWithCache {
+                                val fade = Brush.verticalGradient(
+                                    0f to Color.Black.copy(alpha = 0.28f),
+                                    0.52f to Color.Black.copy(alpha = 0.09f),
+                                    1f to Color.Transparent,
                                 )
+                                onDrawWithContent {
+                                    drawContent()
+                                    drawRect(brush = fade, blendMode = BlendMode.DstIn)
+                                }
                             },
                     ) {
                         val reflectionBlur = if (advancedMaterial) (6f + transform.blurRadiusDp * 0.55f).dp else 4.dp

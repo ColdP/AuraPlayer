@@ -76,7 +76,7 @@ class PlaybackService : MediaSessionService() {
         activeInstance = this
         val app = application as AuraApplication
         val http = OkHttpDataSource.Factory(OkHttpClient()).setDefaultRequestProperties(mapOf("Referer" to "https://music.163.com/"))
-        val resolving = ResolvingDataSource.Factory(DefaultDataSource.Factory(this, http)) { spec ->
+        val resolving = ResolvingDataSource.Factory(http) { spec ->
             if (spec.uri.scheme == "aura" && spec.uri.host == "netease") {
                 val id = spec.uri.lastPathSegment?.toLongOrNull() ?: throw java.io.IOException("INVALID_SONG")
                 spec.withUri(Uri.parse(app.api.resolveBlocking(id, spec.uri.getQueryParameter("quality") ?: PlaybackPreferences(this).quality.level)))
@@ -85,11 +85,19 @@ class PlaybackService : MediaSessionService() {
                 spec.withUri(Uri.parse(app.qq.resolveBlocking(mid)))
             } else spec
         }
-        val source = androidx.media3.datasource.cache.CacheDataSource.Factory()
+        val cacheSource = androidx.media3.datasource.cache.CacheDataSource.Factory()
             .setCache(PlaybackAudioCache.get(this))
-            .setCacheKeyFactory { spec -> spec.key ?: spec.uri.toString() }
             .setUpstreamDataSourceFactory(resolving)
             .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        val cloudSource = ResolvingDataSource.Factory(cacheSource) { spec ->
+            val uri = spec.uri
+            val key = if (uri.scheme == "aura") uri.lastPathSegment?.let { trackId ->
+                playbackAudioCacheKey(uri.host.orEmpty(), trackId,
+                    uri.getQueryParameter("quality") ?: PlaybackPreferences(this).quality.level)
+            } else null
+            if (key == null) spec else spec.buildUpon().setKey(key).setFlags(playbackAudioCacheFlags(spec.flags)).build()
+        }
+        val source = DefaultDataSource.Factory(this, cloudSource)
         val mediaSourceFactory = DefaultMediaSourceFactory(source)
         val renderersFactory = btm.m.auraplayer.audio.EffectsRenderersFactory(
             context = this,

@@ -179,14 +179,16 @@ class RearScreenTest {
         )
         assertTrue(cmd.contains("am force-stop"))
         assertTrue(cmd.contains("com.xiaomi.subscreencenter"))
-        assertTrue(cmd.contains(RearScreenLauncher.SUBSCREEN_LAUNCHER_COMPONENT))
-        assertTrue(cmd.indexOf("am force-stop") < cmd.indexOf("pidof"))
-        assertTrue(cmd.indexOf("pidof") < cmd.indexOf("0x10020000"))
+        assertFalse(cmd.contains(RearScreenLauncher.SUBSCREEN_LAUNCHER_COMPONENT))
+        assertTrue(cmd.indexOf("am force-stop") < cmd.indexOf("0x10000000"))
         assertTrue(cmd.contains("--display"))
         assertTrue(cmd.contains("service call activity_task 50"))
+        assertTrue(cmd.contains("am display move-stack"))
         assertTrue(cmd.contains("RootTask"))
         assertTrue(cmd.contains("awk"))
-        assertTrue(cmd.contains("visible=true"))
+        assertTrue(cmd.contains("taskId="))
+        assertFalse(cmd.contains("visible=true"))
+        assertFalse(cmd.contains("OK_MOVED_CALL"))
 
         val directCmd = RearScreenLauncher.buildRearCastCommand(
             packageName = "btm.m.auraplayer",
@@ -196,7 +198,7 @@ class RearScreenTest {
         )
         assertFalse(directCmd.contains("am force-stop"))
         assertFalse(directCmd.contains(RearScreenLauncher.SUBSCREEN_LAUNCHER_COMPONENT))
-        assertTrue(directCmd.contains("0x10020000"))
+        assertTrue(directCmd.contains("0x10000000"))
         assertTrue(directCmd.contains("--display"))
         assertTrue(directCmd.contains("service call activity_task 50"))
 

@@ -150,7 +150,8 @@ private fun NavigationMaterialPreview(model: AuraViewModel, style: NavigationSty
                 val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() +
                     PlayerNavigationGeometry.bottomSpacing + PlayerNavigationGeometry.barHeight + PlayerNavigationGeometry.miniGap
                 MaterialMiniPlayerPreview(cover, backdrop, style.preferenceValue,
-                    Modifier.align(Alignment.BottomCenter).padding(bottom = bottom).padding(horizontal = PlayerNavigationGeometry.outerInset))
+                    Modifier.align(Alignment.BottomCenter).offset(y = -model.settings.value.navigationOffsetDp.dp)
+                        .padding(bottom = bottom).padding(horizontal = PlayerNavigationGeometry.outerInset))
             }
             AuraBottomBar(selected, model, backdrop, Modifier.align(Alignment.BottomCenter),
                 searchMounted = false, searchProgress = 0f, secondaryProgress = 0f,

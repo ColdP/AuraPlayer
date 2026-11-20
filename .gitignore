@@ -6,6 +6,7 @@
 local.properties
 .idea/
 *.iml
+/AGENTS.md
 /docs/
 .verification/
 server/node_modules/

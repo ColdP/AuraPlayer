@@ -492,7 +492,7 @@ object AuraSingSeparator {
             val qualityName = parsed.getQueryParameter("quality") ?: PlaybackPreferences(app).quality.level
             val tmp = File.createTempFile("sing_src_", ".audio", workDir)
             onTempCreated(tmp)
-            if (PlaybackAudioCache.copyIfFullyCached(app, uriString, tmp)) {
+            if (PlaybackAudioCache.copyIfFullyCached(app, PlaybackAudioCache.key(id, qualityName), tmp)) {
                 return Uri.fromFile(tmp)
             }
             val resolvedUrl = app.api.resolveBlocking(id, qualityName)

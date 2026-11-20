@@ -25,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -344,10 +345,8 @@ internal fun PlayerTiledStage(
     val spatialCoverState = params.spatialCoverState
     val spatialCoverRendering = params.spatialCoverRendering
     val spatialTilt = params.spatialTilt
-    val parallaxTilt = if (appearance.tiledParallax) {
-        scaleSpatialParallaxTilt(spatialTilt, appearance.tiledParallaxSensitivity)
-    } else {
-        Offset.Zero
+    val parallaxTilt by remember(spatialTilt, appearance.tiledParallaxSensitivity) {
+        derivedStateOf { scaleSpatialParallaxTilt(spatialTilt.value, appearance.tiledParallaxSensitivity) }
     }
     val motionVideoPath = params.motionVideoPath
     val motionVideoAllowed = params.motionVideoAllowed
@@ -361,7 +360,6 @@ internal fun PlayerTiledStage(
     val bottomInset = params.bottomInset
     val maxWidth = params.maxWidth
     val maxHeight = params.maxHeight
-    val heroContentAlpha = params.heroContentAlpha
     val onLyrics = params.onLyrics
     val onQueue = params.onQueue
     val onQualityMenuExpanded = params.onQualityMenuExpanded
@@ -419,6 +417,7 @@ internal fun PlayerTiledStage(
 
     val tiltXAnim = remember { Animatable(0f) }
     val tiltYAnim = remember { Animatable(0f) }
+    val latestStageVisible by rememberUpdatedState(params.stageVisible)
 
     // Keep external track changes (Next / Prev / Queue click) smoothly glided by spring.
     LaunchedEffect(targetIndex, tracks.size) {
@@ -440,9 +439,14 @@ internal fun PlayerTiledStage(
                 trackCount = tracks.size,
             )
             anchoredCell = nearest
-            val spec = spring<Float>(dampingRatio = 0.80f, stiffness = 240f)
-            launch { panCol.animateTo(nearest.col.toFloat(), spec) }
-            launch { panRow.animateTo(nearest.row.toFloat(), spec) }
+            if (latestStageVisible) {
+                val spec = spring<Float>(dampingRatio = 0.80f, stiffness = 240f)
+                launch { panCol.animateTo(nearest.col.toFloat(), spec) }
+                launch { panRow.animateTo(nearest.row.toFloat(), spec) }
+            } else {
+                panCol.snapTo(nearest.col.toFloat())
+                panRow.snapTo(nearest.row.toFloat())
+            }
         }
     }
 
@@ -573,9 +577,13 @@ internal fun PlayerTiledStage(
         )
     }
     val dockChromeVisible by remember { derivedStateOf { !isDragging || dockChromeAlphaAnim.value > 0.01f } }
-    // Capture MIUIX progressive blur only once panning + spring settle finish so scroll stays 100% fluid.
-    val wallSettled by remember { derivedStateOf { !isDragging && !panCol.isRunning && !panRow.isRunning } }
+    // Capture MIUIX progressive blur only once open/close morph + panning + spring settle finish so animations stay fluid.
+    val stageSettledState = rememberUpdatedState(params.stageSettled)
+    val wallSettled by remember {
+        derivedStateOf { stageSettledState.value && !isDragging && !panCol.isRunning && !panRow.isRunning }
+    }
     val progressiveBlurAlphaAnim = remember { Animatable(1f) }
+    val progressiveBlurVisible by remember { derivedStateOf { progressiveBlurAlphaAnim.value > 0.01f } }
     LaunchedEffect(wallSettled) {
         if (!wallSettled) {
             progressiveBlurAlphaAnim.snapTo(0f)
@@ -835,7 +843,7 @@ internal fun PlayerTiledStage(
                                     scaleX = tileScale
                                     scaleY = tileScale
                                     val edgeAlpha = (1f - falloff * 0.08f).coerceIn(0.90f, 1f)
-                                    alpha = edgeAlpha * (if (isPlayingAnchored) heroContentAlpha else 1f)
+                                    alpha = edgeAlpha * (if (isPlayingAnchored) params.heroContentAlpha.value else 1f)
                                     if (isFocusedTile) {
                                         shadowElevation = if (isArmedCandidate || isHoveredCandidate) 18.dp.toPx() else 12.dp.toPx()
                                         ambientShadowColor = focusShadowAmbient
@@ -846,7 +854,6 @@ internal fun PlayerTiledStage(
                                     shape = tileShape
                                     clip = true
                                 }
-                                .clip(tileShape)
                                 .drawWithContent {
                                     drawContent()
                                     if (!isFocusedTile) {
@@ -947,14 +954,13 @@ internal fun PlayerTiledStage(
                             scaleX = tileScale
                             scaleY = tileScale
                             val edgeAlpha = (1f - falloff * 0.08f).coerceIn(0.90f, 1f)
-                            alpha = edgeAlpha * heroContentAlpha
+                            alpha = edgeAlpha * params.heroContentAlpha.value
                             shadowElevation = 12.dp.toPx()
                             ambientShadowColor = focusShadowAmbient
                             spotShadowColor = focusShadowSpot
                             shape = tileShape
                             clip = true
                         }
-                        .clip(tileShape)
                         .then(
                             if (useMiuixHighlight) {
                                 Modifier.drawWithContent {
@@ -979,7 +985,7 @@ internal fun PlayerTiledStage(
                         spatialState = spatialCoverState,
                         spatialActive = spatialCoverRendering && !isDragging,
                         spatialTilt = if (spatialCoverRendering && !isDragging) {
-                            scaleSpatialParallaxTilt(spatialTilt, appearance.spatialCoverSensitivity)
+                            scaleSpatialParallaxTilt(spatialTilt.value, appearance.spatialCoverSensitivity)
                         } else {
                             Offset.Zero
                         },
@@ -1020,7 +1026,7 @@ internal fun PlayerTiledStage(
                     .height(bottomControlBackdropHeight)
                     .graphicsLayer { alpha = dockChromeAlphaAnim.value },
             ) {
-                if (captureBackdrop && progressiveBlurAlphaAnim.value > 0.01f) {
+                if (captureBackdrop && progressiveBlurVisible) {
                     Box(
                         modifier = Modifier
                             .matchParentSize()
@@ -1034,16 +1040,16 @@ internal fun PlayerTiledStage(
                                 blurRadius = 4.2f,
                                 gradient = ProgressiveBlur.Bottom.copy(startFraction = 0.14f, endFraction = 0.96f),
                             )
-                            .drawWithContent {
-                                drawContent()
-                                drawRect(
-                                    Brush.verticalGradient(
-                                        0f to Color.Transparent,
-                                        0.30f to Color.Black,
-                                        1f to Color.Black,
-                                    ),
-                                    blendMode = BlendMode.DstIn,
+                            .drawWithCache {
+                                val fade = Brush.verticalGradient(
+                                    0f to Color.Transparent,
+                                    0.30f to Color.Black,
+                                    1f to Color.Black,
                                 )
+                                onDrawWithContent {
+                                    drawContent()
+                                    drawRect(brush = fade, blendMode = BlendMode.DstIn)
+                                }
                             },
                     )
                 }

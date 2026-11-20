@@ -15,6 +15,14 @@ import java.util.concurrent.TimeUnit
 
 class CloudApiException(val status: Int, message: String) : IOException(message)
 
+internal suspend fun <T> cloudSection(fetch: suspend () -> T): T? = try {
+    fetch()
+} catch (e: kotlinx.coroutines.CancellationException) {
+    throw e
+} catch (_: Exception) {
+    null
+}
+
 /** Uses official NetEase endpoints by default, or an optional user-configured Enhanced API service. */
 class NeteaseApi(
     private val endpoint: () -> String,
@@ -108,15 +116,18 @@ class NeteaseApi(
             val id = resource.optLong("resourceId", ext.optLong("id", 0L))
             if (id <= 0 || title.isBlank() || image.isBlank()) return null
             val lower = (blockCode + " " + creativeType + " " + title).lowercase()
+            val resourceType = resource.optString("resourceType").lowercase()
             val kind = when {
+                resourceType in setOf("playlist", "song", "album") -> resourceType
+                ext.has("songData") -> "song"
                 lower.contains("album") -> "album"
-                lower.contains("song") || lower.contains("music") -> "song"
-                else -> "playlist"
+                lower.contains("playlist") -> "playlist"
+                else -> return null
             }
             val section = when {
-                lower.contains("radar") -> "radar"
+                kind == "playlist" && (title.contains("雷达") || lower.contains("radar")) -> "radar"
                 lower.contains("daily") -> "daily"
-                lower.contains("playlist") -> "recommended"
+                kind == "playlist" -> "recommended"
                 else -> ""
             }
             val actionType = when (kind) { "song" -> "song"; "album" -> "album"; else -> "playlist" }
@@ -125,7 +136,6 @@ class NeteaseApi(
         for (i in 0 until blocks.length()) {
             val block = blocks.optJSONObject(i) ?: continue
             val code = block.optString("blockCode")
-            val showType = block.optString("showType")
             val creatives = block.optJSONArray("creatives") ?: continue
             for (j in 0 until creatives.length()) {
                 val creative = creatives.optJSONObject(j) ?: continue
@@ -137,9 +147,10 @@ class NeteaseApi(
     }
 
     /** Personalized playlist recommendations. This is separate from /user/playlist. */
-    suspend fun recommendedPlaylists(limit: Int = 30): List<CloudHomeItem> = withContext(Dispatchers.IO) {
-        val response = try { requestBlocking("recommend/resource", mapOf("limit" to "$limit") ) }
-            catch (_: IOException) { requestBlocking("personalized/playlist", mapOf("limit" to "$limit"), authenticated = false) }
+    suspend fun recommendedPlaylists(limit: Int = 30, personalized: Boolean = true): List<CloudHomeItem> = withContext(Dispatchers.IO) {
+        val params = mapOf("limit" to "$limit")
+        val response = (if (personalized) cloudSection { requestBlocking("recommend/resource", params) } else null)
+            ?: requestBlocking("personalized/playlist", params, authenticated = false)
         val rows = response.optJSONArray("recommend")
             ?: response.optJSONObject("result")?.optJSONArray("recommend")
             ?: response.optJSONObject("data")?.optJSONArray("recommend")
@@ -154,7 +165,7 @@ class NeteaseApi(
             val lower = title.lowercase()
             val section = when {
                 title.contains("每日推荐") || lower.contains("daily") -> "daily"
-                title.contains("私人雷达") || title.contains("宝藏雷达") || lower.contains("radar") -> "radar"
+                title.contains("雷达") || lower.contains("radar") -> "radar"
                 title.contains("红心") || title.contains("喜欢") -> "feature"
                 else -> "recommended"
             }
@@ -227,6 +238,43 @@ class NeteaseApi(
         return parseSongs(response.optJSONObject("result")?.optJSONArray("songs") ?: JSONArray())
     }
     suspend fun songDetail(id: Long): Song? = parseSongs(request("song/detail", mapOf("ids" to "$id")).optJSONArray("songs") ?: JSONArray()).firstOrNull()
+    suspend fun dailySongs(refresh: Boolean = false): List<Song> {
+        val response = request("recommend/songs", if (refresh) mapOf("afresh" to "true") else emptyMap())
+        val rows = response.optJSONObject("data")?.optJSONArray("dailySongs") ?: response.optJSONArray("recommend") ?: JSONArray()
+        return parseSongs(rows).distinctBy { it.id }
+    }
+    suspend fun discoverySongs(limit: Int = 50): List<Song> {
+        val rows = request("personalized/newsong", mapOf("limit" to "$limit"), authenticated = false)
+            .optJSONArray("result") ?: JSONArray()
+        val songs = JSONArray()
+        for (index in 0 until rows.length()) {
+            rows.optJSONObject(index)?.optJSONObject("song")?.let(songs::put)
+        }
+        return parseSongs(songs).distinctBy { it.id }
+    }
+    suspend fun heartbeatSongs(playlistId: Long, seedId: Long): List<Song> {
+        val rows = request("playmode/intelligence/list", mapOf("id" to "$seedId", "pid" to "$playlistId", "count" to "30"))
+            .optJSONArray("data") ?: JSONArray()
+        val ids = (0 until rows.length()).mapNotNull { index ->
+            val row = rows.optJSONObject(index) ?: return@mapNotNull null
+            row.optLong("id", row.optJSONObject("songInfo")?.optLong("id") ?: 0).takeIf { it > 0 }
+        }.distinct()
+        if (ids.isEmpty()) return emptyList()
+        val details = request("song/detail", mapOf("ids" to ids.joinToString(",")))
+        val songs = parseSongs(details.optJSONArray("songs") ?: JSONArray()).associateBy { it.id }
+        return ids.mapNotNull(songs::get)
+    }
+    suspend fun follows(uid: Long, offset: Int = 0, limit: Int = 30): CloudPage<CloudFollow> {
+        val response = request("user/follows", mapOf("uid" to "$uid", "offset" to "$offset", "limit" to "$limit"))
+        val rows = response.optJSONArray("follow") ?: JSONArray()
+        val items = (0 until rows.length()).mapNotNull { index ->
+            val row = rows.optJSONObject(index) ?: return@mapNotNull null
+            val id = row.optLong("userId").takeIf { it > 0 } ?: return@mapNotNull null
+            CloudFollow(id, row.optString("nickname"), row.optString("avatarUrl"),
+                row.optString("signature").takeUnless { it == "null" }.orEmpty())
+        }
+        return CloudPage(items, offset + rows.length(), rows.length() > 0 && response.optBoolean("more", rows.length() == limit))
+    }
     fun invalidatePlaylist(id: Long) {
         metadataCache?.removePrefix(cacheScope() + "/playlist/track/all/$id/")
         official.invalidatePlaylist(id)
@@ -242,7 +290,7 @@ class NeteaseApi(
     }
     suspend fun listeningRank(uid: Long, type: Int = 0): List<Song> {
         val response = request("user/record", mapOf("uid" to "$uid", "type" to "$type"))
-        val rows = response.optJSONArray("allData") ?: JSONArray()
+        val rows = response.optJSONArray(if (type == 1) "weekData" else "allData") ?: JSONArray()
         val songs = JSONArray()
         val counts = mutableMapOf<Long, Int>()
         for (i in 0 until rows.length()) rows.getJSONObject(i).let { row ->
@@ -250,11 +298,19 @@ class NeteaseApi(
         }
         return parseSongs(songs).map { it.copy(playCount = counts[it.id] ?: 0) }.distinctBy { it.id }
     }
-    private fun parseAlbums(items: JSONArray): List<CatalogAlbum> = List(items.length()) { i ->
+    private fun parseAlbums(items: JSONArray, defaultArtistId: Long = 0L): List<CatalogAlbum> = List(items.length()) { i ->
         val album = items.getJSONObject(i)
         val artist = album.optJSONObject("artist") ?: album.optJSONArray("artists")?.optJSONObject(0)
-        CatalogAlbum(album.getLong("id"), album.optString("name"), album.optString("picUrl"), artist?.optLong("id") ?: 0L,
-            artist?.optString("name").orEmpty(), album.optLong("publishTime"), album.optInt("size"))
+        CatalogAlbum(
+            id = album.getLong("id"),
+            title = album.optString("name"),
+            artwork = album.optString("picUrl"),
+            artistId = artist?.optLong("id") ?: defaultArtistId,
+            artist = artist?.optString("name").orEmpty(),
+            published = album.optLong("publishTime"),
+            count = album.optInt("size"),
+            type = album.optString("type"),
+        )
     }
     suspend fun subscribedAlbums(offset: Int = 0): CloudPage<CatalogAlbum> {
         val response = request("album/sublist", mapOf("offset" to "$offset", "limit" to "25"))
@@ -367,17 +423,54 @@ class NeteaseApi(
         val tracks = parseSongs(response.optJSONArray("songs") ?: JSONArray())
         val detail = if (offset == 0) try { request("artist/detail", mapOf("id" to "$id")) }
             catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: IOException) { JSONObject() } else JSONObject()
-        val artist = detail.optJSONObject("data")?.optJSONObject("artist") ?: detail.optJSONObject("artist") ?: response.optJSONObject("artist") ?: JSONObject()
-        return CloudCatalogPage(artist.optString("name"), artist.optString("cover", artist.optString("picUrl")),
+        val data = detail.optJSONObject("data")
+        val artist = data?.optJSONObject("artist") ?: detail.optJSONObject("artist") ?: response.optJSONObject("artist") ?: JSONObject()
+        val artistName = artist.optString("name")
+        val catalogInfo = if (offset == 0) {
+            CatalogInfo(
+                artistId = id,
+                artist = artistName,
+                description = artist.optString("briefDesc"),
+                albums = optionalArtistAlbums(id),
+                artistAliases = parseArtistAliases(artist, artistName),
+                artistIdentity = data?.optJSONObject("identify")?.optString("imageDesc").orEmpty().trim(),
+                artistSongCount = artist.optInt("musicSize", 0).coerceAtLeast(0),
+                artistAlbumCount = artist.optInt("albumSize", 0).coerceAtLeast(0),
+            )
+        } else null
+        return CloudCatalogPage(artistName, artist.optString("cover", artist.optString("picUrl")),
             CloudPage(tracks, offset + tracks.size, tracks.isNotEmpty() && response.optBoolean("more", tracks.size == 50),
                 response.optInt("total").takeIf { response.has("total") }),
-            if (offset == 0) CatalogInfo(id, artist.optString("name"), description = artist.optString("briefDesc"), albums = optionalArtistAlbums(id)) else null)
+            catalogInfo)
+    }
+
+    private fun parseArtistAliases(artist: JSONObject, artistName: String): List<String> {
+        val seen = HashSet<String>().apply {
+            val normalizedName = artistName.trim().lowercase()
+            if (normalizedName.isNotEmpty()) add(normalizedName)
+        }
+        return buildList {
+            for (field in listOf("transNames", "alias")) {
+                val array = artist.optJSONArray(field) ?: continue
+                for (i in 0 until array.length()) {
+                    val value = array.optString(i).trim()
+                    if (value.isNotEmpty() && seen.add(value.lowercase())) add(value)
+                }
+            }
+        }
     }
     suspend fun artistArtwork(id: Long): String {
         val response = request("artist/detail", mapOf("id" to "$id"))
         val artist = response.optJSONObject("data")?.optJSONObject("artist")
             ?: response.optJSONObject("artist") ?: JSONObject()
         return artist.optString("cover", artist.optString("picUrl"))
+    }
+    suspend fun artistFollowed(id: Long): Boolean {
+        val response = request("artist/detail/dynamic", mapOf("id" to "$id"))
+        return response.optBoolean("followed", response.optJSONObject("data")?.optBoolean("followed", false) ?: false)
+    }
+    suspend fun followArtist(id: Long, follow: Boolean) {
+        request("artist/sub", mapOf("id" to "$id", "t" to if (follow) "1" else "0"))
     }
     suspend fun songArtists(id: Long): List<SongArtist> =
         parseSongs(request("song/detail", mapOf("ids" to "$id")).optJSONArray("songs") ?: JSONArray()).firstOrNull()?.artists.orEmpty()
@@ -457,11 +550,8 @@ class NeteaseApi(
         }
     }
     private suspend fun optionalArtistAlbums(id: Long): List<CatalogAlbum> = try {
-        val response = request("artist/album", mapOf("id" to "$id", "offset" to "0", "limit" to "12"))
-        val albums = response.optJSONArray("hotAlbums") ?: JSONArray()
-        List(albums.length()) { i -> val album = albums.getJSONObject(i); val artist = album.optJSONObject("artist")
-            CatalogAlbum(album.getLong("id"), album.optString("name"), album.optString("picUrl"), artist?.optLong("id") ?: id,
-                artist?.optString("name").orEmpty(), album.optLong("publishTime"), album.optInt("size")) }
+        val response = request("artist/album", mapOf("id" to "$id", "offset" to "0", "limit" to "30"))
+        parseAlbums(response.optJSONArray("hotAlbums") ?: JSONArray(), defaultArtistId = id)
     } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: IOException) { emptyList() }
     suspend fun downloadSource(id: Long, quality: btm.m.auraplayer.playback.StreamQuality): btm.m.auraplayer.playback.DownloadSource {
         val response = request("song/download/url/v1", mapOf("id" to "$id", "level" to quality.level))

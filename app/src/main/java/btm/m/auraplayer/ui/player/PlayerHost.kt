@@ -26,6 +26,7 @@ import androidx.compose.ui.geometry.*
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.res.painterResource
@@ -68,6 +69,7 @@ import com.kyant.backdrop.effects.blur as backdropBlur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
+import com.materialkolor.palettes.CorePalette
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -88,7 +90,14 @@ import top.yukonga.miuix.kmp.blur.layerBackdrop as miuixLayerBackdrop
 import kotlin.math.*
 
 private const val PlayerPaddingScale = 1.15f
+private const val PlayerChromeRevealStart = .12f
 internal const val PlayerIconScale = .85f
+
+private fun GraphicsLayerScope.setPlayerLayerBlur(radius: Dp) {
+    val pixels = radius.toPx()
+    clip = pixels > 0f
+    renderEffect = if (clip) BlurEffect(pixels, pixels, TileMode.Clamp) else null
+}
 
 /** Shared geometry for the floating navigation + search envelope and its mini player. */
 internal object PlayerNavigationGeometry {
@@ -139,6 +148,9 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
     val lyricShareTransition = LocalLyricShareTransition.current
     val miniSwipeOffset = remember { Animatable(0f) }
     val miniDrag = remember { MiniPlayerDragState() }
+    val onLyricsToggle = remember { { lyricsOpen = !lyricsOpen; queueOpen = false } }
+    val onQueueToggle = remember { { queueOpen = !queueOpen; lyricsOpen = false } }
+    val onMoreActions = remember { { actionsOpen = true } }
     LaunchedEffect(open, gesturing, shareOpening) {
         if (!gesturing && !shareOpening) expansion.animateTo(if (open) 1f else 0f, spring(.88f, 300f, visibilityThreshold = .0005f))
     }
@@ -178,12 +190,12 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
     val style = model.settings.value.navigation
     val playerBackdrop = rememberLayerBackdrop()
     val miuixBackdrop = rememberMiuixBackdrop()
-    val coverPalette = rememberPlayerMonetPalette(song.artwork)
     val isMaterialTheme = appearance.theme == PlayerTheme.MATERIAL
     val isOneTheme = appearance.theme == PlayerTheme.ONE
     val lyricThemeActiveOnScreen = appearance.lyricTheme != btm.m.auraplayer.playback.LyricTheme.BLUR && lyricsOpen && !queueOpen
     val isDarkScheme = !isMaterialTheme || dark || appearance.materialBackground != MaterialPlayerBackground.MATERIAL || lyricThemeActiveOnScreen
     val coverSeed = rememberPlayerArtworkSeed(song.artwork)
+    val coverPalette = remember(coverSeed) { CorePalette.of(coverSeed) }
     val expressive = rememberPlayerExpressiveColors(coverSeed, isDark = isDarkScheme)
     val activeExpressive = if (isMaterialTheme) expressive else null
     val oneUiColors = rememberPlayerOneUiColors(coverSeed, isDark = dark || lyricThemeActiveOnScreen)
@@ -295,7 +307,15 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
     val spatialCoverActive = spatialCoverEligible && spatialCoverRequested &&
         spatialCoverState is SpatialCoverResolveState.Ready && open && foreground && !compactOpen && !shareActive
     val spatialActive = spatialLyricsActive || spatialCoverActive || stageGyroParallaxActive
-    val spatialTilt by rememberSpatialGyroTilt(enabled = spatialActive)
+    val spatialTilt = rememberSpatialGyroTilt(enabled = spatialActive)
+    val canPrepareBackground = foreground && miniVisible && !open
+    var prepareBackground by remember { mutableStateOf(false) }
+    LaunchedEffect(canPrepareBackground) {
+        if (canPrepareBackground && !prepareBackground) {
+            delay(300)
+            prepareBackground = true
+        }
+    }
     val hostAlpha by animateFloatAsState(if (miniVisible || open) 1f else 0f, tween(280, easing = FastOutSlowInEasing), label = "playerHostVisibility")
     val chromeExitDistance = PlayerNavigationGeometry.barHeight +
         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp
@@ -319,10 +339,20 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
         val miniWidth = lerp(screenWidth - metrics.outerInset * 2, metrics.bodyWidth(screenWidth), dock)
         val rootMiniY = screenHeight - nav - metrics.bottomSpacing - metrics.barHeight - metrics.miniGap - metrics.miniHeight
         val dockMiniY = screenHeight - nav - metrics.bottomSpacing - metrics.barHeight
-        val miniY = lerp(rootMiniY, dockMiniY, dock)
+        val miniY = lerp(rootMiniY, dockMiniY, dock) - model.settings.value.navigationOffsetDp.dp
         val swipeRange = with(LocalDensity.current) { miniY.toPx().coerceAtLeast(1f) }
-        val gestureExpansion = if (miniDrag.axis == MiniPlayerDragAxis.EXPAND) miniDrag.progress else expansion.value
-        val e = (gestureExpansion - swipeDistance / swipeRange).coerceIn(0f, 1f)
+        val morphProgress = remember(swipeRange) {
+            derivedStateOf {
+                val gestureExpansion = if (miniDrag.axis == MiniPlayerDragAxis.EXPAND) miniDrag.progress else expansion.value
+                (gestureExpansion - swipeDistance / swipeRange).coerceIn(0f, 1f)
+            }
+        }
+        val e = morphProgress.value
+        val backgroundVisible = e > 0f
+        val backgroundModifier = remember(morphProgress, shareBgAlpha, shareBgBlur, playerBackdrop, miuixBackdrop) {
+            Modifier.fillMaxSize().graphicsLayer { alpha = morphProgress.value * shareBgAlpha }
+                .blur(shareBgBlur).layerBackdrop(playerBackdrop).miuixLayerBackdrop(miuixBackdrop)
+        }
         // Publish the actual morph, including drag/predictive back and cancelled gestures.
         // The shell blurs its own page layers so shared artwork/metadata stay sharp.
         SideEffect { onExpansionProgress(e * (1f - shareProgress)) }
@@ -340,17 +370,24 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                 } finally { settlingSwipe = false; gesturing = false; playerSwipeGesturing = false }
             }
         }
+        val playerBaseColor = when {
+            isMaterialTheme && appearance.materialBackground == MaterialPlayerBackground.MATERIAL && activeExpressive != null -> activeExpressive.surface
+            isOneTheme && activeOneUi != null -> activeOneUi.background
+            else -> Color(coverPalette.a2.tone(14))
+        }
         val settledFullScreen = open && !playerSwipeGesturing && !backExiting && !settlingSwipe &&
             !expansion.isRunning && miniDrag.axis != MiniPlayerDragAxis.EXPAND && e >= .999f
-        val shape = RoundedCornerShape(if (settledFullScreen) 0.dp else (miniHeight / 2) * (1f - e) + screenCorner * e)
+        val restingCorner by animateDpAsState(if (settledFullScreen) 18.dp else screenCorner,
+            animationSpec = if (settledFullScreen) tween(180, easing = FastOutSlowInEasing) else snap(),
+            label = "playerRestingCorner")
+        val radius = if (settledFullScreen) restingCorner else playerMorphCornerRadius(e, miniHeight / 2, screenCorner)
+        val shape = RoundedCornerShape(radius)
         Box(Modifier.offset(metrics.outerInset * (1f - e), miniY * (1f - e))
             .size(lerp(miniWidth, screenWidth, e), lerp(miniHeight, screenHeight, e))
             .then(when {
                 shareActive && e > .995f -> Modifier
-                // The opaque player covers the mini surface. Keeping its Backdrop here
-                // turns a small pill's blur/refraction into a hidden full-screen pass.
-                settledFullScreen -> Modifier.background(Color(coverPalette.a2.tone(14)))
-                else -> Modifier.miniPlayerMaterial(backdrop, style, shape, e)
+                settledFullScreen -> Modifier.background(playerBaseColor, shape)
+                else -> Modifier.miniPlayerMaterial(backdrop, style, shape, e, playerBaseColor)
             })
             .clip(shape)
             .playerMiniDragGesture(enabled = !open && !settlingSwipe && !shareOpening && e < .34f,
@@ -398,18 +435,20 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
             // Full content keeps its final measurement during the morph; only the container changes.
             Box(Modifier.wrapContentSize(Alignment.TopStart, unbounded = true).requiredSize(screenWidth, screenHeight)) {
                 Box(Modifier.fillMaxSize()) {
-                    if (e > 0f) PlayerThemeBackground(song.artwork, coverPalette, appearance, lyricProgress.value.coerceIn(0f, 1f),
+                    PlayerThemeBackground(song.artwork, coverPalette, appearance, lyricProgress.value.coerceIn(0f, 1f),
                         animate = open && foreground && !gesturing && !shareActive,
                         queueBlend = queueBlend.value.coerceIn(0f, 1f),
-                        spatialTilt = if (appearance.spatialLyrics) {
-                            scaleSpatialParallaxTilt(spatialTilt, appearance.spatialLyricsSensitivity) * lyricProgress.value.coerceIn(0f, 1f)
+                        spatialTilt = if (appearance.spatialLyrics && lyricProgress.value > 0f) {
+                            scaleSpatialParallaxTilt(spatialTilt.value, appearance.spatialLyricsSensitivity) * lyricProgress.value.coerceIn(0f, 1f)
                         } else {
                             Offset.Zero
                         },
                         expressive = activeExpressive,
                         oneUi = activeOneUi,
-                        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = e * shareBgAlpha }.blur(shareBgBlur).layerBackdrop(playerBackdrop).miuixLayerBackdrop(miuixBackdrop))
-                    FullPlayer(model, lyricProgress.value, expansion = e, miniColor = miniColor, miniSwipe = miniSwipeOffset.value + miniDrag.horizontalOffset,
+                        modifier = backgroundModifier,
+                        visible = backgroundVisible,
+                        prepare = prepareBackground && foreground && miniVisible)
+                    FullPlayer(model, lyricProgress.value, expansion = morphProgress, miniColor = miniColor, miniSwipe = miniSwipeOffset.value + miniDrag.horizontalOffset,
                         miniWidth = miniWidth, miniHeight = miniHeight,
                         miniControlClearance = 110.dp - 50.dp * dock,
                         appearance = appearance, active = open && foreground && !shareActive, controlsUnobscured = !actionsBusy && !lyricMenuOpen && !shareActive,
@@ -421,19 +460,20 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                         onSwipeStart = { gesturing = true; playerSwipeGesturing = true; scope.launch { expansion.stop() } },
                         onSwipeDelta = { swipeDistance = (swipeDistance + it).coerceIn(0f, swipeRange) },
                         onSwipeRelease = { settleSwipe(it, false) }, onSwipeCancel = { settleSwipe(0f, true) },
-                        onLyrics = { lyricsOpen = !lyricsOpen; queueOpen = false }, queueOpen = queueOpen,
+                        onLyrics = onLyricsToggle, queueOpen = queueOpen,
                         lyricsOpen = lyricsOpen, queueBlend = queueBlend.value, backdrop = playerBackdrop, menuTint = Color(coverPalette.a2.tone(20)),
                         coverPalette = coverPalette,
                         expressive = activeExpressive,
                         oneUi = activeOneUi,
                         onLyricMenuExpanded = { lyricMenuOpen = it },
-                        miuixBackdrop = miuixBackdrop, onMore = { actionsOpen = true },
+                        miuixBackdrop = miuixBackdrop, onMore = onMoreActions,
                         spatialCoverRequested = spatialCoverRequested,
                         spatialCoverState = spatialCoverState,
                         onToggleSpatialCover = { spatialCoverRequested = !spatialCoverRequested },
                         motionVideoPath = amMotionPath,
                         motionVideoAllowed = foreground && !shareActive,
-                        onQueue = { queueOpen = !queueOpen; lyricsOpen = false },
+                        prepareStage = prepareBackground && foreground && miniVisible,
+                        onQueue = onQueueToggle,
                         openSharePage = { index, rowBounds, viewportBounds ->
                             if (!shareOpening) {
                                 shareOpening = true
@@ -490,7 +530,11 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                         onClick = { onOpenChange(true) }))
             }
             if (miniAlpha > 0f) Box(Modifier.fillMaxWidth().height(miniHeight)
-                .graphicsLayer { alpha = miniAlpha }.blur((e * 24).dp)
+                .graphicsLayer {
+                    val progress = morphProgress.value
+                    alpha = (1f - progress / .34f).coerceIn(0f, 1f)
+                    setPlayerLayerBlur((progress * 24f).dp)
+                }
                 .padding(end = 10.dp)) {
                 // Share the page morph's progress so interrupted/predictive back reverses both
                 // the play button's movement and the next button's disappearance in place.
@@ -531,9 +575,9 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
 }
 
 @Composable
-private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
+private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: State<Float>,
                        appearance: NowPlayingConfig, active: Boolean, controlsUnobscured: Boolean,
-                       spatialTilt: Offset = Offset.Zero,
+                       spatialTilt: State<Offset>,
                        mixVisual: btm.m.auraplayer.auramix.AuraMixVisualTransition?,
                        shareTransition: LyricShareTransitionState? = null,
                        miniColor: Color, miniSwipe: Float, miniWidth: Dp, miniHeight: Dp,
@@ -550,6 +594,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                        onToggleSpatialCover: () -> Unit,
                        motionVideoPath: String? = null,
                        motionVideoAllowed: Boolean = false,
+                       prepareStage: Boolean = false,
                        onQueue: () -> Unit, openSharePage: (Int, Rect?, Rect?) -> Unit,
                        expressive: PlayerExpressiveColors? = null,
                        oneUi: PlayerOneUiColors? = null) {
@@ -562,7 +607,9 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     val p = progress.coerceIn(0f, 1f)
-    val alpha = ((expansion - .12f) / .88f).coerceIn(0f, 1f)
+    val collapsed by remember(expansion) { derivedStateOf { expansion.value == 0f } }
+    val chromeVisible by remember(expansion) { derivedStateOf { expansion.value > PlayerChromeRevealStart } }
+    val stageVisible by remember(expansion) { derivedStateOf { expansion.value > .05f } }
     val safeDrawing = WindowInsets.safeDrawing.asPaddingValues()
     val status = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -605,7 +652,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
         }
         .playerDismissGesture(swipeEnabled, p > .5f, headerBottom, onSwipeStart, onSwipeDelta, onSwipeRelease, onSwipeCancel)
         .clickable(indication = null, interactionSource = remember { MutableInteractionSource() },
-            enabled = expansion == 0f, onClick = onExpand)) {
+            enabled = collapsed, onClick = onExpand)) {
         val m = rememberFullPlayerMetrics(
             w = maxWidth,
             h = maxHeight,
@@ -613,8 +660,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             isMultiWindow = isMultiWindow,
             appearance = appearance,
             p = p,
-            e = expansion.coerceIn(0f, 1f),
-            alpha = alpha,
+            expansion = expansion,
             controlsVisibility = controlsVisibility,
             effectiveLeftInset = effectiveLeftInset,
             effectiveStatus = effectiveStatus,
@@ -627,7 +673,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             queueCount = model.queue.size,
             queueBlend = queueBlend,
             motionVideoPath = motionVideoPath,
-            spatialTilt = spatialTilt,
+            spatialTilt = if (spatialCoverRequested) spatialTilt.value else Offset.Zero,
             spatialCoverRequested = spatialCoverRequested,
             spatialCoverState = spatialCoverState,
             mixVisual = mixVisual,
@@ -637,10 +683,12 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             expressive = expressive,
             oneUi = oneUi,
             coverPalette = coverPalette,
-            sharedClick = { if (expansion.coerceIn(0f, 1f) < .5f) onExpand() else if (queueOpen) onQueue() else onLyrics() },
+            sharedClick = { if (expansion.value < .5f) onExpand() else if (queueOpen) onQueue() else onLyrics() },
         )
         var textHeight by remember { mutableIntStateOf(0) }
         var tiledWallDragging by remember { mutableStateOf(false) }
+        val onQualityMenuExpandedCb = remember { { expanded: Boolean -> qualityMenuOpen = expanded } }
+        val onDragActiveChangeCb = remember { { dragging: Boolean -> tiledWallDragging = dragging } }
         val tiledChromeVis = remember { Animatable(1f) }
         LaunchedEffect(m.activeCoverTheme, active, tiledWallDragging, p < 0.05f) {
             if (m.activeCoverTheme != CoverTheme.TILED || !active) tiledWallDragging = false
@@ -648,7 +696,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             tiledChromeVis.animateTo(target, tween(180))
         }
 
-        if (m.glassCardRect != null && m.alpha > 0f) {
+        if (m.glassCardRect != null && chromeVisible) {
             FullPlayerGlassCardLayer(
                 m = m,
                 glassCardRect = m.glassCardRect,
@@ -678,7 +726,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
             model = model,
         )
 
-        if (m.coverflowActive && m.e > 0.05f) {
+        if (m.coverflowActive && (stageVisible || prepareStage)) {
             FullPlayerCoverThemeStageLayer(
                 m = m,
                 model = model,
@@ -696,16 +744,17 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 motionVideoPath = motionVideoPath,
                 motionVideoAllowed = motionVideoAllowed,
                 active = active,
+                stageVisible = stageVisible,
                 lyricsOpen = lyricsOpen,
                 queueOpen = queueOpen,
                 onLyrics = onLyrics,
                 onQueue = onQueue,
-                onQualityMenuExpanded = { qualityMenuOpen = it },
-                onDragActiveChange = { tiledWallDragging = it },
+                onQualityMenuExpanded = onQualityMenuExpandedCb,
+                onDragActiveChange = onDragActiveChangeCb,
             )
         }
 
-        if (m.alpha > 0f) {
+        if (chromeVisible) {
             FullPlayerChromeAndLyricsLayer(
                 m = m,
                 model = model,
@@ -723,7 +772,7 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: Float,
                 isMultiWindow = isMultiWindow,
                 tiledChromeAlpha = tiledChromeVis.value,
                 textHeight = textHeight,
-                spatialTilt = spatialTilt,
+                spatialTilt = if (appearance.spatialLyrics && p > 0f) spatialTilt.value else Offset.Zero,
                 shareTransition = shareTransition,
                 onClose = onClose,
                 onLyrics = onLyrics,
@@ -788,17 +837,12 @@ private class FullPlayerMetrics(
     val smallY: Dp,
     val smallX: Dp,
     val p: Float,
-    val e: Float,
-    val alpha: Float,
+    private val expansion: State<Float>,
     val controlsVisibility: Float,
     val effectiveLeftInset: Dp,
     val effectiveStatus: Dp,
     val effectiveRightInset: Dp,
     val effectiveBottomInset: Dp,
-    val coverflowReveal: Float,
-    val stageRevealAlpha: Float,
-    val stageHeroContentAlpha: Float,
-    val coverflowSharedVis: Float,
     val normalSeekY: Dp,
     val seekY: Dp,
     val titleY: Dp,
@@ -827,10 +871,11 @@ private class FullPlayerMetrics(
     val cubeGap: Dp,
     val coverThemeHeaderTopPad: Dp,
     val coverThemeHeaderTop: Dp,
-    val spatialCoverRendering: Boolean,
-    val spatialCoverTilt: Offset,
+    private val spatialCoverRequested: Boolean,
+    private val requestedSpatialTilt: Offset,
+    private val spatialCoverReady: Boolean,
     val effLyricsProgress: Float,
-    val motionOverlayAlpha: Float,
+    private val mixActive: Boolean,
     val shareActive: Boolean,
     val shareP: Float,
     val shareChromeAlpha: Float,
@@ -842,6 +887,21 @@ private class FullPlayerMetrics(
     val lyricChromeBlend: Float,
     val sharedClick: () -> Unit,
 ) {
+    val e: Float get() = expansion.value
+    val alpha: Float get() = ((e - PlayerChromeRevealStart) / (1f - PlayerChromeRevealStart)).coerceIn(0f, 1f)
+    val coverflowReveal: Float get() = if (coverflowActive) alpha * (1f - p) else 0f
+    val stageRevealAlpha: Float get() = if (coverflowActive) smoothstep01(.16f, .90f, coverflowReveal) else 0f
+    val stageHeroContentAlpha: Float get() = if (coverflowActive) smoothstep01(.68f, .90f, coverflowReveal) else 1f
+    val coverflowSharedVis: Float get() = if (coverflowActive) 1f - smoothstep01(.76f, .97f, coverflowReveal) else 1f
+    val spatialCoverRendering: Boolean get() = spatialCoverAllowed && spatialCoverRequested && p < .99f && e > .25f
+    val spatialCoverTilt: Offset get() = if (spatialCoverRendering) requestedSpatialTilt else Offset.Zero
+    val motionOverlayAlpha: Float get() = computeMotionCoverOverlayAlpha(
+        expansion = e,
+        lyricsProgress = effLyricsProgress,
+        mixActive = mixActive,
+        spatialActive = spatialCoverRendering && spatialCoverReady,
+    )
+
     fun controlSize(cardSize: Dp, normalSize: Dp): Dp =
         if (squareCardFullscreen) cardSize + (normalSize - cardSize) * p else normalSize
 }
@@ -854,8 +914,7 @@ private fun rememberFullPlayerMetrics(
     isMultiWindow: Boolean,
     appearance: NowPlayingConfig,
     p: Float,
-    e: Float,
-    alpha: Float,
+    expansion: State<Float>,
     controlsVisibility: Float,
     effectiveLeftInset: Dp,
     effectiveStatus: Dp,
@@ -963,10 +1022,6 @@ private fun rememberFullPlayerMetrics(
     }
     val smallY = effectiveStatus + (if (compactWindow) 14.dp else 48.dp * PlayerPaddingScale)
     val smallX = if (compactWindow) normalMargin else 26.dp * PlayerPaddingScale
-    val coverflowReveal = if (coverflowActive) ((e - 0.12f) / 0.88f).coerceIn(0f, 1f) * (1f - p) else 0f
-    val stageRevealAlpha = if (coverflowActive) smoothstep01(0.16f, 0.90f, coverflowReveal) else 0f
-    val stageHeroContentAlpha = if (coverflowActive) smoothstep01(0.68f, 0.90f, coverflowReveal) else 1f
-    val coverflowSharedVis = if (coverflowActive) 1f - smoothstep01(0.76f, 0.97f, coverflowReveal) else 1f
     val normalSeekY = immGeom?.seekY ?: maxOf(normalTitleY + titleToSeek, h * .637f).coerceAtMost(seekCeiling)
     val seekY = controlSize(fullCard.top + 64.dp, normalSeekY)
     val titleY = if (squareCardFullscreen && !landscape) fullCard.top + 14.dp else normalTitleY
@@ -1050,19 +1105,12 @@ private fun rememberFullPlayerMetrics(
     val cubeGap = CoverThemeSpatialCubeGap
     val coverThemeHeaderTopPad = coverThemeHeaderTopPadding(landscape || compactWindow)
     val coverThemeHeaderTop = effectiveStatus + coverThemeHeaderTopPad
-    val spatialCoverRendering = spatialCoverAllowed && spatialCoverRequested && p < .99f && e > .25f
-    val spatialCoverTilt = if (spatialCoverRendering) {
+    val requestedSpatialTilt = if (spatialCoverAllowed && spatialCoverRequested && p < .99f) {
         scaleSpatialParallaxTilt(spatialTilt, appearance.spatialCoverSensitivity)
     } else {
         Offset.Zero
     }
     val effLyricsProgress = if (landscapeGeom != null) showSmallLandscapeCover else p
-    val motionOverlayAlpha = computeMotionCoverOverlayAlpha(
-        expansion = e,
-        lyricsProgress = effLyricsProgress,
-        mixActive = mixVisual != null,
-        spatialActive = spatialCoverRendering && spatialCoverState is SpatialCoverResolveState.Ready,
-    )
     val shareActive = shareTransition?.active == true
     val shareP = if (shareActive) shareTransition.progress.coerceIn(0f, 1f) else 0f
     val shareChromeAlpha = if (shareActive) 1f - lyricShareSmoothStep(0f, .82f, shareP) else 1f
@@ -1105,17 +1153,12 @@ private fun rememberFullPlayerMetrics(
         smallY = smallY,
         smallX = smallX,
         p = p,
-        e = e,
-        alpha = alpha,
+        expansion = expansion,
         controlsVisibility = controlsVisibility,
         effectiveLeftInset = effectiveLeftInset,
         effectiveStatus = effectiveStatus,
         effectiveRightInset = effectiveRightInset,
         effectiveBottomInset = effectiveBottomInset,
-        coverflowReveal = coverflowReveal,
-        stageRevealAlpha = stageRevealAlpha,
-        stageHeroContentAlpha = stageHeroContentAlpha,
-        coverflowSharedVis = coverflowSharedVis,
         normalSeekY = normalSeekY,
         seekY = seekY,
         titleY = titleY,
@@ -1144,10 +1187,11 @@ private fun rememberFullPlayerMetrics(
         cubeGap = cubeGap,
         coverThemeHeaderTopPad = coverThemeHeaderTopPad,
         coverThemeHeaderTop = coverThemeHeaderTop,
-        spatialCoverRendering = spatialCoverRendering,
-        spatialCoverTilt = spatialCoverTilt,
+        spatialCoverRequested = spatialCoverRequested,
+        requestedSpatialTilt = requestedSpatialTilt,
+        spatialCoverReady = spatialCoverState is SpatialCoverResolveState.Ready,
         effLyricsProgress = effLyricsProgress,
-        motionOverlayAlpha = motionOverlayAlpha,
+        mixActive = mixVisual != null,
         shareActive = shareActive,
         shareP = shareP,
         shareChromeAlpha = shareChromeAlpha,
@@ -1431,10 +1475,11 @@ private fun FullPlayerCoverThemeStageLayer(
     menuTint: Color,
     mixVisual: btm.m.auraplayer.auramix.AuraMixVisualTransition?,
     spatialCoverState: SpatialCoverResolveState,
-    spatialTilt: Offset,
+    spatialTilt: State<Offset>,
     motionVideoPath: String?,
     motionVideoAllowed: Boolean,
     active: Boolean,
+    stageVisible: Boolean,
     lyricsOpen: Boolean,
     queueOpen: Boolean,
     onLyrics: () -> Unit,
@@ -1442,12 +1487,32 @@ private fun FullPlayerCoverThemeStageLayer(
     onQualityMenuExpanded: (Boolean) -> Unit,
     onDragActiveChange: (Boolean) -> Unit,
 ) {
-    val stageMod = Modifier
-        .fillMaxSize()
-        .graphicsLayer { this.alpha = m.stageRevealAlpha * m.shareChromeAlpha }
-        .blur(((1f - m.stageRevealAlpha) * 14f).dp + m.shareChromeBlur)
-    val stageInteractive = !m.shareActive && m.stageRevealAlpha > 0.45f
-    val stageMotionAllowed = motionVideoAllowed && m.stageRevealAlpha > 0.30f
+    val metrics by rememberUpdatedState(m)
+    val stageVisibleState = rememberUpdatedState(stageVisible)
+    val stageMod = remember {
+        Modifier
+            .fillMaxSize()
+            .layout { measurable, constraints ->
+                val stage = measurable.measure(constraints)
+                layout(stage.width, stage.height) {
+                    if (stageVisibleState.value) stage.place(0, 0)
+                }
+            }
+            .graphicsLayer {
+                val revealAlpha = metrics.stageRevealAlpha
+                alpha = revealAlpha * metrics.shareChromeAlpha
+                setPlayerLayerBlur(metrics.shareChromeBlur)
+            }
+    }
+    val heroContentAlpha = remember { derivedStateOf { metrics.stageHeroContentAlpha } }
+    val stageInteractive by remember {
+        derivedStateOf { !metrics.shareActive && metrics.stageRevealAlpha > 0.45f }
+    }
+    val stageSettled by remember {
+        derivedStateOf { !metrics.shareActive && metrics.e >= 0.985f && metrics.p < 0.01f }
+    }
+    val stageMotionVisible by remember { derivedStateOf { metrics.stageRevealAlpha > 0.30f } }
+    val stageSpatialCoverRendering by remember { derivedStateOf { metrics.spatialCoverRendering } }
     val stageParams = CoverThemeStageParams(
         model = model,
         song = song,
@@ -1462,10 +1527,10 @@ private fun FullPlayerCoverThemeStageLayer(
         secondaryInk = m.secondaryInk,
         mixVisual = mixVisual,
         spatialCoverState = spatialCoverState,
-        spatialCoverRendering = m.spatialCoverRendering,
+        spatialCoverRendering = stageSpatialCoverRendering,
         spatialTilt = spatialTilt,
         motionVideoPath = motionVideoPath,
-        motionVideoAllowed = stageMotionAllowed,
+        motionVideoAllowed = motionVideoAllowed && stageMotionVisible,
         active = active,
         interactive = stageInteractive,
         lyricsOpen = lyricsOpen,
@@ -1478,7 +1543,9 @@ private fun FullPlayerCoverThemeStageLayer(
         reserveSpatialCubeSlot = m.hasCubeOnTitleRow,
         maxWidth = m.w,
         maxHeight = m.h,
-        heroContentAlpha = m.stageHeroContentAlpha,
+        heroContentAlpha = heroContentAlpha,
+        stageVisible = stageVisible,
+        stageSettled = stageSettled,
         onLyrics = onLyrics,
         onQueue = onQueue,
         onQualityMenuExpanded = onQualityMenuExpanded,
@@ -1523,8 +1590,11 @@ private fun FullPlayerChromeAndLyricsLayer(
     Box(
         Modifier
             .fillMaxSize()
-            .graphicsLayer { this.alpha = m.alpha * m.shareChromeAlpha }
-            .blur(((1f - m.alpha) * 14f).dp + m.shareChromeBlur),
+            .graphicsLayer {
+                val morphAlpha = m.alpha
+                this.alpha = morphAlpha * m.shareChromeAlpha
+                setPlayerLayerBlur(((1f - morphAlpha) * 14f).dp + m.shareChromeBlur)
+            },
     ) {
         val handleAlpha = when {
             m.landscape && immersive -> 0.48f
@@ -1822,8 +1892,10 @@ private fun FullPlayerChromeAndLyricsLayer(
         Box(
             lyricBoxModifier
                 .graphicsLayer {
+                    val morphAlpha = m.alpha
                     val shareExitAlpha = if (m.shareActive) 1f - lyricShareSmoothStep(.06f, .62f, m.shareP) else 1f
-                    this.alpha = m.alpha * m.p * (1f - queueBlend) * shareExitAlpha
+                    this.alpha = morphAlpha * m.p * (1f - queueBlend) * shareExitAlpha
+                    setPlayerLayerBlur(((1f - morphAlpha) * 14f + (1f - m.p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp)
                     var tx = 0f
                     var ty = (1f - m.p) * 24.dp.toPx()
                     if (m.shareActive && shareTransition != null) {
@@ -1849,8 +1921,7 @@ private fun FullPlayerChromeAndLyricsLayer(
                     }
                     translationX = tx
                     translationY = ty
-                }
-                .blur(((1f - m.alpha) * 14f + (1f - m.p) * 12f + queueBlend * (1f - queueBlend) * 20f).dp),
+                },
         ) {
             if (model.lyrics.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -2594,11 +2665,13 @@ private fun PlayerBottomActionsSection(
         val modeIcon = when (model.playbackMode) {
             1 -> R.drawable.ic_player_shuffle
             2 -> R.drawable.ic_player_repeat_one
+            btm.m.auraplayer.HEARTBEAT_PLAYBACK_MODE -> R.drawable.ic_player_heartbeat
             else -> R.drawable.ic_player_repeat
         }
         val modeDescription = when (model.playbackMode) {
             1 -> tr("shuffle_mode", "随机播放")
             2 -> tr("repeat_one_mode", "单曲循环")
+            btm.m.auraplayer.HEARTBEAT_PLAYBACK_MODE -> tr("heartbeat_mode", "心动模式")
             else -> tr("repeat_all_mode", "列表循环")
         }
         val revision = model.history.revision
@@ -2886,30 +2959,57 @@ internal fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp
     } else {
         Modifier
     }
-    Box(modifier.clip(RoundedCornerShape(topStart = radius, topEnd = topEndRadius, bottomStart = bottomRadius, bottomEnd = bottomEndRadius))
-        .then(if (onClick == null) Modifier else Modifier.playerSurfaceClick(onClick))
-        .then(featherMask)
-        .then(if (showPlaceholderBackground) Modifier.background(Color.White.copy(alpha = .12f * (1f - feather))) else Modifier), contentAlignment = Alignment.Center) {
+    val coverShape = RoundedCornerShape(topStart = radius, topEnd = topEndRadius, bottomStart = bottomRadius, bottomEnd = bottomEndRadius)
+    val placeholderColor = if (showPlaceholderBackground) Color.White.copy(alpha = .12f * (1f - feather)) else Color.Transparent
+    Box(
+        modifier
+            .then(if (onClick == null) Modifier else Modifier.playerSurfaceClick(onClick, coverShape))
+            .then(featherMask),
+        contentAlignment = Alignment.Center,
+    ) {
         if (mixVisual == null) {
-            Box(Modifier.fillMaxSize().blur(coverBlurDp.dp)) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .then(if (coverBlurDp > 0.01f) Modifier.clip(coverShape) else Modifier)
+                    .blur(coverBlurDp.dp),
+            ) {
                 val advancedMaterial = btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled.current
                 Box(
                     Modifier
                         .fillMaxSize()
                         .then(if (feather > 0.001f && advancedMaterial) Modifier.miuixLayerBackdrop(coverBackdrop) else Modifier),
                 ) {
-                    if (uri.isNotBlank()) AnimatedPlayerArtwork(uri, transitionKey, animation, animate)
-                    else if (showPlaceholderBackground) Image(painterResource(R.drawable.ic_player_queue), null, Modifier.fillMaxSize(.3f * PlayerIconScale), colorFilter = ColorFilter.tint(placeholderTint))
+                    if (uri.isNotBlank()) {
+                        AnimatedPlayerArtwork(
+                            artwork = uri,
+                            transitionKey = transitionKey,
+                            animation = animation,
+                            enabled = animate,
+                            shape = coverShape,
+                            placeholderBackgroundColor = placeholderColor,
+                        )
+                    } else if (showPlaceholderBackground) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .clip(coverShape)
+                                .background(placeholderColor),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Image(painterResource(R.drawable.ic_player_queue), null, Modifier.fillMaxSize(.3f * PlayerIconScale), colorFilter = ColorFilter.tint(placeholderTint))
+                        }
+                    }
                     if (!motionVideoPath.isNullOrBlank()) {
                         AnimatedMotionCoverVideo(
                             videoPath = motionVideoPath,
                             playing = motionPlaying && !(spatialActive && spatialAssets != null),
                             visibleAlpha = motionOverlayAlpha,
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier.fillMaxSize().clip(coverShape),
                         )
                     }
                     if (spatialAssets != null && showSpatial > 0.001f) {
-                        Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = showSpatial }) {
+                        Box(Modifier.fillMaxSize().clip(coverShape).graphicsLayer { this.alpha = showSpatial }) {
                             SpatialCoverRenderer(
                                 assets = spatialAssets,
                                 tiltProvider = { spatialTilt },
@@ -2922,6 +3022,7 @@ internal fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp
                     Box(
                         Modifier
                             .matchParentSize()
+                            .clip(coverShape)
                             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                             .progressiveTextureBlur(
                                 backdrop = coverBackdrop,
@@ -2948,6 +3049,7 @@ internal fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp
                 Box(
                     Modifier
                         .fillMaxSize()
+                        .clip(coverShape)
                         .background(Color.Black.copy(alpha = 0.36f * progressOverlayAlpha))
                         .graphicsLayer { this.alpha = progressOverlayAlpha },
                     contentAlignment = Alignment.Center,
@@ -2998,11 +3100,11 @@ internal fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp
             val toReq = remember(mixVisual.toArtwork, context) {
                 if (mixVisual.toArtwork.isNotBlank()) ImageRequest.Builder(context).data(mixVisual.toArtwork).size(1600).precision(Precision.INEXACT).build() else null
             }
-            Box(Modifier.fillMaxSize().graphicsLayer { alpha = fromAlpha }.blur((progress * 26f).dp)) {
+            Box(Modifier.fillMaxSize().clip(coverShape).graphicsLayer { alpha = fromAlpha }.blur((progress * 26f).dp)) {
                 if (fromReq != null) AsyncImage(fromReq, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                else if (uri.isNotBlank()) AnimatedPlayerArtwork(uri, transitionKey, animation, animate)
+                else if (uri.isNotBlank()) AnimatedPlayerArtwork(uri, transitionKey, animation, animate, shape = coverShape, placeholderBackgroundColor = placeholderColor)
             }
-            Box(Modifier.fillMaxSize().graphicsLayer { alpha = toAlpha }.blur(((1f - progress) * 26f).dp)) {
+            Box(Modifier.fillMaxSize().clip(coverShape).graphicsLayer { alpha = toAlpha }.blur(((1f - progress) * 26f).dp)) {
                 if (toReq != null) AsyncImage(toReq, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             }
         }
@@ -3132,13 +3234,21 @@ private fun PlayerQueue(model: AuraViewModel, modifier: Modifier = Modifier, exp
 
 /** Feedback is clipped by the actual cover/handle shape, including during shared transforms. */
 @Composable
-private fun Modifier.playerSurfaceClick(onClick: () -> Unit): Modifier {
+private fun Modifier.playerSurfaceClick(onClick: () -> Unit, shape: Shape = RectangleShape): Modifier {
     val interactions = remember { MutableInteractionSource() }
     val hovered by interactions.collectIsHoveredAsState()
     val pressed by interactions.collectIsPressedAsState()
     val feedback by animateFloatAsState(if (pressed) .14f else if (hovered) .07f else 0f, tween(120), label = "playerSurfaceFeedback")
     return clickable(interactionSource = interactions, indication = null, role = Role.Button, onClick = onClick)
-        .drawWithContent { drawContent(); if (feedback > 0f) drawRect(Color.White.copy(alpha = feedback)) }
+        .drawWithContent {
+            drawContent()
+            if (feedback > 0f) {
+                drawOutline(
+                    outline = shape.createOutline(size, layoutDirection, this),
+                    color = Color.White.copy(alpha = feedback),
+                )
+            }
+        }
 }
 
 @Composable

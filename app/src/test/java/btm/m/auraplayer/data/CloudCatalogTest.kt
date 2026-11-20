@@ -25,10 +25,16 @@ class CloudCatalogTest {
     }
     @Test fun artistUsesPortraitAndDoesNotRefetchBiographyForEachPage() = withServer { server, api ->
         server.reply("""{"code":200,"more":true,"total":60,"songs":[{"id":1,"name":"Top"}]}""")
-        server.reply("""{"code":200,"data":{"artist":{"id":5,"name":"Singer","cover":"portrait","briefDesc":"Biography"}}}""")
-        server.reply("""{"code":200,"hotAlbums":[{"id":12,"name":"New release","publishTime":2026}]}""")
+        server.reply("""{"code":200,"data":{"artist":{"id":5,"name":"Singer","cover":"portrait","briefDesc":"Biography","transNames":["歌手"],"alias":["Singer","Alias B"],"musicSize":128,"albumSize":14},"identify":{"imageDesc":"华语流行歌手"}}}""")
+        server.reply("""{"code":200,"hotAlbums":[{"id":12,"name":"New release","publishTime":2026,"type":"专辑"},{"id":13,"name":"Latest EP","publishTime":2026,"type":"EP/Single"}]}""")
         val first = api.artistPage(5)
         assertEquals("portrait", first.artwork); assertEquals("Biography", first.info!!.description)
+        assertEquals(listOf("歌手", "Alias B"), first.info!!.artistAliases)
+        assertEquals("华语流行歌手", first.info!!.artistIdentity)
+        assertEquals(128, first.info!!.artistSongCount)
+        assertEquals(14, first.info!!.artistAlbumCount)
+        assertEquals("专辑", first.info!!.albums[0].type)
+        assertEquals("EP/Single", first.info!!.albums[1].type)
         assertTrue(first.page.hasMore); assertEquals(60, first.page.total)
         server.reply("""{"code":200,"more":false,"songs":[{"id":2,"name":"Next"}]}""")
         val second = api.artistPage(5, first.page.nextOffset)
@@ -51,5 +57,20 @@ class CloudCatalogTest {
         try { api.downloadSource(1, StreamQuality.LOSSLESS); fail("Expected quality mismatch") } catch (_: IllegalArgumentException) { }
         server.reply("""{"code":200,"data":{"url":null}}""")
         try { api.downloadSource(1, StreamQuality.STANDARD); fail("Expected unavailable") } catch (_: java.io.IOException) { }
+    }
+    @Test fun artistFollowStateAndSubscriptionUseExpectedEndpoints() = withServer { server, api ->
+        server.reply("""{"code":200,"followed":true}""")
+        assertTrue(api.artistFollowed(5))
+        assertEquals("/artist/detail/dynamic", server.takeRequest().path)
+        server.reply("""{"code":200}""")
+        api.followArtist(5, true)
+        val sub = server.takeRequest()
+        assertEquals("/artist/sub", sub.path)
+        assertTrue(sub.body.readUtf8().contains("id=5&t=1"))
+        server.reply("""{"code":200}""")
+        api.followArtist(5, false)
+        val unsub = server.takeRequest()
+        assertEquals("/artist/sub", unsub.path)
+        assertTrue(unsub.body.readUtf8().contains("id=5&t=0"))
     }
 }

@@ -234,7 +234,6 @@ fun LlmRawOutputHistoryPage(
     AppPage(
         title = tr("llm_raw_history_title", "历史输出"),
         onBack = back,
-        recordCouiBackdrop = true,
         actions = {
             AnimatedVisibility(
                 visible = !selectionMode,

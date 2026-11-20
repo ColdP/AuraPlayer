@@ -1,5 +1,11 @@
 package btm.m.auraplayer.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -15,6 +21,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -23,6 +31,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -30,16 +39,24 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.data.*
+import btm.m.auraplayer.ui.navigation.InteractiveHighlight
 import btm.m.auraplayer.ui.player.findCachedArtworkMemoryEntry
 import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.itos.coui.search.CouiSearchBarDefaults
-import com.itos.coui.search.SearchBar
-import com.itos.coui.search.rememberCouiSearchBarState
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
+import com.kyant.backdrop.shadow.Shadow
+import com.kyant.shapes.Capsule
+import com.kyant.shapes.RoundedCornerStyle
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.*
+import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import btm.m.auraplayer.ui.navigation.appleMusicTabIcon
 import btm.m.auraplayer.ui.player.LocalSongActions
@@ -538,30 +555,169 @@ internal fun PlaylistHeaderSearchBar(
         }
         return
     }
-    val backdrop = LocalAuraCouiBackdrop.current ?: return
-    val searchState = rememberCouiSearchBarState(expanded)
+    val backdrop = LocalToolbarBackdrop.current
     val scheme = MiuixTheme.colorScheme
     val dark = scheme.surface.luminance() < .5f
-    val colors = CouiSearchBarDefaults.colors(dark).copy(
-        foreground = scheme.onSurface,
-        secondary = scheme.onSurfaceVariantSummary,
-        fallbackBackground = scheme.surfaceContainerHigh,
-    )
-    SearchBar(
-        modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
-        state = searchState,
-        query = query,
-        onQueryChange = onQueryChange,
-        onExpandedChange = onExpandedChange,
-        placeholder = placeholder,
-        cancelText = tr("cancel", "取消"),
-        clearDescription = tr("clear", "清空"),
-        dark = dark,
-        backdrop = backdrop,
-        onSearch = onSearch,
-        shadowProgress = LocalToolbarCollapsed.current,
-        colors = colors,
-    )
+    val colorStyle = LocalAppInterfaceStyle.current == AppInterfaceStyle.COLOR
+    val advancedMaterial = LocalAdvancedMaterialEnabled.current
+    val glassAvailable = advancedMaterial && backdrop != null && isRuntimeShaderSupported()
+    val shape = remember { Capsule(RoundedCornerStyle.Continuous) }
+    val surfaceTint = remember(scheme.surfaceContainer, scheme.primaryContainer, dark) {
+        lerp(scheme.surfaceContainer, scheme.primaryContainer, if (dark) .22f else .16f)
+    }
+    val collapsed = LocalToolbarCollapsed.current
+    val glassModifier: Modifier = if (glassAvailable) {
+        val activeBackdrop = requireNotNull(backdrop)
+        val drawTint = surfaceTint.copy(alpha = if (colorStyle) .62f else .58f)
+        Modifier.drawBackdrop(
+            backdrop = activeBackdrop,
+            shape = { shape },
+            effects = {
+                vibrancy()
+                blur((if (colorStyle) 14.dp else 4.dp).toPx())
+                lens(
+                    10.dp.toPx(),
+                    (if (colorStyle) 0.dp else 24.dp).toPx(),
+                    depthEffect = true,
+                    chromaticAberration = !colorStyle,
+                )
+            },
+            highlight = { Highlight.Default.copy(alpha = if (colorStyle) .82f else .65f) },
+            shadow = {
+                Shadow.Default.copy(
+                    radius = 10.dp,
+                    color = if (!dark) Color.Gray else Color.Black,
+                    alpha = .14f + collapsed * .18f,
+                )
+            },
+            innerShadow = null,
+            onDrawSurface = { drawRect(drawTint) },
+        )
+    } else {
+        Modifier.background(surfaceTint.copy(alpha = if (!advancedMaterial) 1f else .92f), shape)
+    }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
+    val animationScope = rememberCoroutineScope()
+    val highlight = remember(animationScope) {
+        InteractiveHighlight(animationScope) { size, offset ->
+            Offset(offset.x.coerceIn(0f, size.width), offset.y.coerceIn(0f, size.height))
+        }
+    }
+    val searchActive = expanded || query.isNotEmpty()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp, bottom = 8.dp)
+            .height(CouiSearchBarDefaults.height)
+            .padding(horizontal = CouiSearchBarDefaults.horizontalMargin),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .height(CouiSearchBarDefaults.surfaceHeight)
+                .clip(shape)
+                .then(glassModifier)
+                .then(highlight.gestureModifier)
+                .then(highlight.modifier)
+                .clickable(interactionSource = null, indication = null) {
+                    if (!expanded) onExpandedChange(true)
+                    focusRequester.requestFocus()
+                    keyboard?.show()
+                }
+                .padding(start = 12.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = MiuixIcons.Regular.Search,
+                contentDescription = null,
+                modifier = Modifier.size(CouiSearchBarDefaults.iconSize),
+                tint = scheme.onSurfaceVariantSummary,
+            )
+            Spacer(Modifier.width(8.dp))
+            BasicTextField(
+                value = query,
+                onValueChange = {
+                    if (!expanded) onExpandedChange(true)
+                    onQueryChange(it)
+                },
+                singleLine = true,
+                textStyle = MiuixTheme.textStyles.body1.copy(color = scheme.onSurface),
+                cursorBrush = SolidColor(scheme.primary),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = {
+                    focusManager.clearFocus()
+                    keyboard?.hide()
+                    onSearch()
+                }),
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester),
+                decorationBox = { inner ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (query.isEmpty()) {
+                            Text(
+                                text = placeholder,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MiuixTheme.textStyles.body1,
+                                color = scheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        inner()
+                    }
+                },
+            )
+            if (query.isNotEmpty()) {
+                IconButton(
+                    onClick = { onQueryChange("") },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = MiuixIcons.Regular.Close,
+                        contentDescription = tr("clear", "清空"),
+                        modifier = Modifier.size(18.dp),
+                        tint = scheme.onSurfaceVariantSummary,
+                    )
+                }
+            } else {
+                Spacer(Modifier.width(8.dp))
+            }
+        }
+        AnimatedVisibility(
+            visible = searchActive,
+            enter = fadeIn(tween(220)) + expandHorizontally(expandFrom = Alignment.End),
+            exit = fadeOut(tween(180)) + shrinkHorizontally(shrinkTowards = Alignment.End),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.width(CouiSearchBarDefaults.cancelGap))
+                Box(
+                    modifier = Modifier
+                        .height(CouiSearchBarDefaults.surfaceHeight)
+                        .clip(shape)
+                        .then(glassModifier)
+                        .clickable {
+                            focusManager.clearFocus()
+                            keyboard?.hide()
+                            onQueryChange("")
+                            onExpandedChange(false)
+                        }
+                        .padding(horizontal = CouiSearchBarDefaults.cancelPadding),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = tr("cancel", "取消"),
+                        color = scheme.onSurface,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable

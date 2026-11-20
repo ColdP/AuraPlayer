@@ -14,12 +14,16 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import btm.m.auraplayer.playback.*
 import coil3.compose.AsyncImage
 import coil3.SingletonImageLoader
@@ -31,6 +35,7 @@ import coil3.toBitmap
 import com.materialkolor.palettes.CorePalette
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlin.math.*
 import kotlin.random.Random
@@ -47,68 +52,58 @@ internal fun PlayerThemeBackground(
     expressive: PlayerExpressiveColors? = null,
     oneUi: PlayerOneUiColors? = null,
     modifier: Modifier = Modifier,
+    visible: Boolean = true,
+    prepare: Boolean = false,
 ) {
     val advancedMaterial = btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled.current
-    val usesFlowingArt = advancedMaterial && (config.theme == PlayerTheme.AURORA_BLUR ||
-        (config.theme == PlayerTheme.MATERIAL && config.materialBackground == MaterialPlayerBackground.AURORA_BLUR))
-    val usesMaterialWash = advancedMaterial && config.theme == PlayerTheme.MATERIAL && config.materialBackground == MaterialPlayerBackground.MATERIAL
-    val lyricOverlayBlend = if (!advancedMaterial || config.lyricTheme == LyricTheme.BLUR) {
-        0f
-    } else {
-        (compactProgress * (1f - queueBlend)).coerceIn(0f, 1f)
-    }
-    var phase by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(animate, usesFlowingArt, usesMaterialWash, config.weather) {
-        if (!animate || (!usesFlowingArt && !usesMaterialWash && config.weather == PlayerWeather.NONE)) return@LaunchedEffect
-        var last = withFrameNanos { it }
-        while (true) {
-            val now = withFrameNanos { it }
-            phase = (phase + ((now - last) / 1e9f).coerceAtMost(.05f)) % 120f
-            last = now
-        }
-    }
-    val blur by animateFloatAsState(config.blurRadius, tween(220), label = "playerBackgroundBlur")
-    val materialMix by animateFloatAsState((config.materialColorMix / 100f).coerceIn(0f, 1f), tween(220), label = "playerMaterialMix")
     // Keep decoded pixels outside the theme Crossfade and outside Coil's loading state. A new
     // model must never clear the last successful background while its artwork is being decoded.
     val context = LocalContext.current
     val usesArtwork = advancedMaterial && config.usesArtworkBackground
-    val initialCachedBg = remember(artwork, usesArtwork) {
-        if (!usesArtwork || artwork.isBlank()) null
-        else findCachedArtworkMemoryEntry(SingletonImageLoader.get(context), artwork)
-            ?.let { runCatching { it.image.toBitmap().asImageBitmap() }.getOrNull() }
-    }
-    var background by remember { mutableStateOf<ImageBitmap?>(initialCachedBg) }
+    var background by remember { mutableStateOf<ImageBitmap?>(null) }
     var previousBackground by remember { mutableStateOf<ImageBitmap?>(null) }
-    var loadedArtwork by remember { mutableStateOf(if (initialCachedBg != null) artwork else "") }
+    var loadedArtwork by remember { mutableStateOf("") }
     val artworkBlend = remember { Animatable(1f) }
+    val visibility = rememberUpdatedState(visible)
+    val backgroundVisible by visibility
+    val canLoadFullArtwork by rememberUpdatedState(visible || prepare)
     LaunchedEffect(artwork, usesArtwork, context) {
         artworkBlend.snapTo(1f)
         previousBackground = null
+        if (!backgroundVisible && loadedArtwork != artwork) {
+            background = null
+            loadedArtwork = ""
+        }
         if (!usesArtwork || artwork.isBlank()) {
             loadedArtwork = ""
             return@LaunchedEffect
         }
-        val imageLoader = SingletonImageLoader.get(context)
-        val cached = findCachedArtworkMemoryEntry(imageLoader, artwork)
-        val cachedBitmap = cached?.let { runCatching { it.image.toBitmap().asImageBitmap() }.getOrNull() }
-        if (cached != null && cachedBitmap != null) {
+        val cached = withContext(Dispatchers.IO) {
+            findCachedArtworkMemoryEntry(SingletonImageLoader.get(context), artwork)?.let { entry ->
+                val bitmap = runCatching { entry.image.toBitmap().asImageBitmap() }.getOrNull()
+                    ?: return@let null
+                val largeEnough = entry.exactUriMatch && minOf(entry.image.width, entry.image.height) >= 512
+                bitmap to largeEnough
+            }
+        }
+        if (cached != null) {
+            val (cachedBitmap, largeEnough) = cached
             if (loadedArtwork != artwork || background == null) {
                 previousBackground = background
                 background = cachedBitmap
                 loadedArtwork = artwork
-                if (previousBackground != null) {
+                if (backgroundVisible && previousBackground != null) {
                     artworkBlend.snapTo(0f)
                     artworkBlend.animateTo(1f, tween(400))
                 }
                 previousBackground = null
             }
-            if (cached.exactUriMatch && minOf(cached.image.width, cached.image.height) >= 512) {
-                return@LaunchedEffect
-            }
+            if (largeEnough) return@LaunchedEffect
         }
+        snapshotFlow { canLoadFullArtwork }.first { it }
         val decoded = try {
             withContext(Dispatchers.IO) {
+                val imageLoader = SingletonImageLoader.get(context)
                 (imageLoader.execute(
                     ImageRequest.Builder(context).data(artwork).size(1024).allowHardware(false).build()
                 ) as? SuccessResult)?.image?.toBitmap()?.asImageBitmap()
@@ -124,15 +119,41 @@ internal fun PlayerThemeBackground(
             previousBackground = background
             background = decoded
             loadedArtwork = artwork
-            if (previousBackground != null) {
+            if (backgroundVisible && previousBackground != null) {
                 artworkBlend.snapTo(0f)
                 artworkBlend.animateTo(1f, tween(400))
             }
             previousBackground = null
         }
     }
+    if (!visible && !prepare) return
+    val usesFlowingArt = advancedMaterial && (config.theme == PlayerTheme.AURORA_BLUR ||
+        (config.theme == PlayerTheme.MATERIAL && config.materialBackground == MaterialPlayerBackground.AURORA_BLUR))
+    val usesMaterialWash = advancedMaterial && config.theme == PlayerTheme.MATERIAL && config.materialBackground == MaterialPlayerBackground.MATERIAL
+    val lyricOverlayBlend = if (!advancedMaterial || config.lyricTheme == LyricTheme.BLUR) {
+        0f
+    } else {
+        (compactProgress * (1f - queueBlend)).coerceIn(0f, 1f)
+    }
+    var phase by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(visible, animate, usesFlowingArt, usesMaterialWash, config.weather) {
+        if (!visible) {
+            phase = 0f
+            return@LaunchedEffect
+        }
+        if (!animate || (!usesFlowingArt && !usesMaterialWash && config.weather == PlayerWeather.NONE)) return@LaunchedEffect
+        var last = withFrameNanos { it }
+        while (true) {
+            val now = withFrameNanos { it }
+            phase = (phase + ((now - last) / 1e9f).coerceAtMost(.05f)) % 120f
+            last = now
+        }
+    }
+    val backgroundSpec: FiniteAnimationSpec<Float> = if (visible) tween(220) else snap()
+    val blur by animateFloatAsState(config.blurRadius, backgroundSpec, label = "playerBackgroundBlur")
+    val materialMix by animateFloatAsState((config.materialColorMix / 100f).coerceIn(0f, 1f), backgroundSpec, label = "playerMaterialMix")
     val baseSpatialWeight = if (config.spatialLyrics) (compactProgress * (1f - queueBlend)).coerceIn(0f, 1f) else 0f
-    Box(modifier.clipToBounds()) {
+    PlayerBackgroundLayout(modifier, visibility) {
         Box(
             Modifier
                 .fillMaxSize()
@@ -149,7 +170,7 @@ internal fun PlayerThemeBackground(
                     }
                 },
         ) {
-        Crossfade(config.theme to config.materialBackground, animationSpec = tween(380), label = "playerTheme") { (theme, materialBg) ->
+        Crossfade(config.theme to config.materialBackground, animationSpec = if (visible) tween(380) else snap(), label = "playerTheme") { (theme, materialBg) ->
             val materialMode = theme == PlayerTheme.MATERIAL
             val oneUiMode = theme == PlayerTheme.ONE && oneUi != null
             val baseColor = when {
@@ -172,7 +193,7 @@ internal fun PlayerThemeBackground(
                     OneUiSurfaceWash(oneUi, Modifier.fillMaxSize())
                 }
                 if (showAurora) {
-                    PlayerAmbientBackground(palette, Modifier.fillMaxSize(), animate)
+                    PlayerAmbientBackground(palette, Modifier.fillMaxSize(), animate, visible)
                 }
                 if (showArtwork) {
                     val flowing = theme == PlayerTheme.AURORA_BLUR ||
@@ -213,7 +234,7 @@ internal fun PlayerThemeBackground(
             }
         }
         }
-        if (lyricOverlayBlend > 0.001f) {
+        if (visible && lyricOverlayBlend > 0.001f) {
             AnimatedPlayerLyricBackdrop(
                 config = config,
                 blend = lyricOverlayBlend,
@@ -224,6 +245,16 @@ internal fun PlayerThemeBackground(
             )
         }
         if (config.weather != PlayerWeather.NONE) PlayerWeatherOverlay(config.weather, { phase })
+    }
+}
+
+@Composable
+private fun PlayerBackgroundLayout(modifier: Modifier, visibility: State<Boolean>, content: @Composable BoxScope.() -> Unit) {
+    Layout(content = { Box(modifier.clipToBounds(), content = content) }) { measurables, constraints ->
+        val background = measurables.single().measure(constraints)
+        layout(background.width, background.height) {
+            if (visibility.value) background.place(0, 0)
+        }
     }
 }
 
@@ -360,7 +391,14 @@ private fun PlayerWeatherOverlay(
 }
 
 @Composable
-internal fun AnimatedPlayerArtwork(artwork: String, transitionKey: String, animation: CoverAnimation, enabled: Boolean) {
+internal fun AnimatedPlayerArtwork(
+    artwork: String,
+    transitionKey: String,
+    animation: CoverAnimation,
+    enabled: Boolean,
+    shape: Shape = RectangleShape,
+    placeholderBackgroundColor: Color = Color.Transparent,
+) {
     var current by remember { mutableStateOf(artwork) }
     var currentKey by remember { mutableStateOf(transitionKey) }
     var previous by remember { mutableStateOf<String?>(null) }
@@ -381,6 +419,8 @@ internal fun AnimatedPlayerArtwork(artwork: String, transitionKey: String, anima
     fun Modifier.frame(incoming: Boolean): Modifier = graphicsLayer {
         val at = if (incoming) 1f - t else t
         cameraDistance = 14f * density
+        this.shape = shape
+        clip = true
         when (animation) {
             CoverAnimation.DEFAULT -> alpha = if (incoming) t else 1f - t
             CoverAnimation.CARD -> {
@@ -396,8 +436,18 @@ internal fun AnimatedPlayerArtwork(artwork: String, transitionKey: String, anima
                 alpha = if (at < .999f) 1f else 0f
             }
             CoverAnimation.STACK -> {
-                translationY = size.height * at * if (incoming) .18f else -.08f
-                scaleX = 1f - .18f * at; scaleY = scaleX; alpha = 1f - at
+                if (incoming) {
+                    val stackScale = 0.86f + 0.14f * t
+                    scaleX = stackScale
+                    scaleY = stackScale
+                    translationY = size.height * 0.065f * (1f - t)
+                    alpha = 0.90f + 0.10f * t
+                } else {
+                    val exitFade = ((t - 0.30f) / 0.65f).coerceIn(0f, 1f)
+                    translationY = -size.height * 0.38f * t
+                    alpha = 1f - exitFade * exitFade
+                    shadowElevation = 10.dp.toPx() * sin(PI.toFloat() * t)
+                }
             }
             CoverAnimation.VERTICAL_FLIP, CoverAnimation.HORIZONTAL_FLIP -> {
                 val angle = if (incoming) 180f * (1f - t) else -180f * t
@@ -405,7 +455,8 @@ internal fun AnimatedPlayerArtwork(artwork: String, transitionKey: String, anima
                 alpha = if (abs(angle) < 90f) 1f else 0f
             }
         }
-    }.then(if (animation == CoverAnimation.BLUR) Modifier.blur((18f * if (incoming) 1f - t else t).dp) else Modifier)
+    }.then(if (placeholderBackgroundColor.alpha > 0f) Modifier.background(placeholderBackgroundColor) else Modifier)
+        .then(if (animation == CoverAnimation.BLUR) Modifier.blur((18f * if (incoming) 1f - t else t).dp) else Modifier)
     val context = LocalContext.current
     val previousRequest = remember(previous, context) {
         previous?.let {
@@ -427,9 +478,28 @@ internal fun AnimatedPlayerArtwork(artwork: String, transitionKey: String, anima
             .apply { if (placeholderKey != null) placeholderMemoryCacheKey(placeholderKey) }
             .build()
     }
+    val previousOnTop = animation == CoverAnimation.STACK
     Box(Modifier.fillMaxSize()) {
-        previousRequest?.let { AsyncImage(it, null, Modifier.fillMaxSize().frame(false), contentScale = ContentScale.Crop) }
-        AsyncImage(currentRequest, null, Modifier.fillMaxSize().frame(true), contentScale = ContentScale.Crop)
+        previousRequest?.let {
+            AsyncImage(
+                it,
+                null,
+                Modifier
+                    .fillMaxSize()
+                    .zIndex(if (previousOnTop) 1f else 0f)
+                    .frame(false),
+                contentScale = ContentScale.Crop,
+            )
+        }
+        AsyncImage(
+            currentRequest,
+            null,
+            Modifier
+                .fillMaxSize()
+                .zIndex(if (previousOnTop) 0f else 1f)
+                .frame(true),
+            contentScale = ContentScale.Crop,
+        )
     }
 }
 

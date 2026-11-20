@@ -24,6 +24,9 @@ class LibraryFilterTest {
         assertTrue(accepts("Music/", 30000, enabled = true, minimum = 30))
         assertTrue(accepts("Music/", 1, enabled = false, minimum = 60))
         assertTrue(accepts("Music/", 0, enabled = true, minimum = 0))
+        assertFalse(accepts("Music/", 89999, enabled = true, minimum = 90))
+        assertTrue(accepts("Music/", 90000, enabled = true, minimum = 90))
+        assertFalse(accepts("Music/", 119999, enabled = true, minimum = 120))
     }
     @Test fun normalizesPickerPathsWithoutBlockingEverythingForEmptyEntry() {
         assertFalse(accepts("Music/Voice", blocked = setOf("/Music\\Voice/")))

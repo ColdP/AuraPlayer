@@ -50,6 +50,22 @@ class OfficialNeteaseClientTest {
         assertEquals("/weapi/v6/playlist/detail", server.takeRequest().path)
         assertEquals("/weapi/v3/song/detail", server.takeRequest().path)
     }
+    @Test fun routesDiscoveryHeartbeatAndFollowsThroughOfficialClient() = withServer { server, client ->
+        val routes = listOf(
+            Triple("playmode/intelligence/list", mapOf("id" to "42", "pid" to "10"), "/eapi/playmode/intelligence/list"),
+            Triple("recommend/songs", emptyMap(), "/weapi/v3/discovery/recommend/songs"),
+            Triple("personalized/newsong", emptyMap(), "/weapi/personalized/newsong"),
+            Triple("user/follows", mapOf("uid" to "42"), "/weapi/user/getfollows/42"),
+            Triple("artist/detail/dynamic", mapOf("id" to "77"), "/weapi/artist/detail/dynamic"),
+            Triple("artist/sub", mapOf("id" to "77", "t" to "1"), "/weapi/artist/sub"),
+            Triple("artist/sub", mapOf("id" to "77", "t" to "0"), "/weapi/artist/unsub"),
+        )
+        for ((route, parameters, path) in routes) {
+            server.enqueue(MockResponse().setBody("""{"code":200}"""))
+            client.request(route, parameters, true)
+            assertEquals(path, server.takeRequest().path)
+        }
+    }
     @Test fun unauthenticatedRequestDoesNotAttachSavedSession() = withServer { server, client ->
         server.enqueue(MockResponse().setBody("""{"code":200}"""))
         client.request("captcha/sent", mapOf("phone" to "12345"), false)

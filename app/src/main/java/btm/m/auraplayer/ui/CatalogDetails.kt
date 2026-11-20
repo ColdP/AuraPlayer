@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
@@ -67,8 +68,65 @@ internal fun formatArtistSongAlbumYear(song: Song): String =
         .filter { it.isNotBlank() }
         .joinToString(" · ")
 
+@Composable
+internal fun PopularSongStrip(
+    songs: List<Song>,
+    model: AuraViewModel,
+    margin: Dp = 0.dp,
+    foreground: Color = MiuixTheme.colorScheme.onSurface,
+    muted: Color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+    accent: Color = MiuixTheme.colorScheme.primary,
+    subtitle: (Song) -> String = ::formatArtistSongAlbumYear,
+    scrollState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
+    onPlay: (Int) -> Unit,
+) {
+    if (songs.isEmpty()) return
+    val openSongActions = LocalSongActions.current
+    val backdrop = LocalToolbarBackdrop.current
+    val columnCount = if (songs.size < 5) 1 else maxOf(3, (songs.size + 4) / 5)
+    val rowHeight = 48.dp * 1.35f * .92f * .93f
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val cardWidth = artistTopSongCardWidth(maxWidth, margin, columnCount)
+        LazyRow(state = scrollState, contentPadding = PaddingValues(horizontal = margin), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(columnCount) { column ->
+                Column(Modifier.width(cardWidth), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (index in column until songs.size step columnCount) {
+                        val song = songs[index]
+                        val detail = subtitle(song)
+                        Row(Modifier.fillMaxWidth().heightIn(min = rowHeight).clickable { onPlay(index) },
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Artwork(song.artwork, Modifier.size(40.dp * 1.35f * .88f * .93f), cornerRadius = ListArtworkCornerRadius)
+                            Column(Modifier.weight(1f).padding(start = 10.dp, end = 4.dp)) {
+                                Text(song.title, color = if (model.current?.key == song.key) accent else foreground,
+                                    fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (detail.isNotEmpty()) Text(detail, color = muted, fontSize = 12.sp, maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                            }
+                            IconButton(onClick = { openSongActions(SongActionRequest(song, backdrop)) }, modifier = Modifier.size(44.dp)) {
+                                Image(AuraMoreHorizontalIcon, tr("more", "更多"), Modifier.size(20.dp), colorFilter = ColorFilter.tint(muted))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 internal fun MusicCollection.isCatalog() = key.startsWith("album:") || key.startsWith("artist:") || key.startsWith("cloud:album:") || key.startsWith("cloud:artist:")
 internal fun MusicCollection.isArtist() = key.startsWith("artist:") || key.startsWith("cloud:artist:")
+
+internal enum class ArtistContentMode {
+    SONGS,
+    ALBUMS,
+    SINGLES_EPS,
+}
+
+internal fun isArtistSingleOrEp(album: CatalogAlbum): Boolean {
+    val normalized = album.type.trim().lowercase()
+    if (normalized.isEmpty()) return false
+    return normalized.contains("single") || normalized.contains("ep") || normalized.contains("单曲")
+}
 private const val ArtistHeroHeightScale = 1.25f * .90f
 private const val ArtistHeroTransitionScale = .35f * .85f / ArtistHeroHeightScale
 internal val AlbumTrackRowHeight = 74.dp * .88f * .92f * .93f
@@ -329,10 +387,29 @@ internal fun CatalogDetailPage(
         .groupBy { it.albumId }.values.map { album -> val first = album.first()
             CatalogAlbum(first.albumId, first.album, first.artwork, first.artistId, first.artist, count = album.size) }
         .filterNot { !artist && it.id == collection.key.substringAfterLast(':').toLongOrNull() }
-    var descriptionOpen by remember(collection.key) { mutableStateOf(false) }
     val context = LocalContext.current
     val favoritePrefs = remember { context.getSharedPreferences("aura.catalog.favorites", android.content.Context.MODE_PRIVATE) }
-    var artistFavorite by remember(collection.key) { mutableStateOf(favoritePrefs.getBoolean(collection.key, false)) }
+    val artistId = remember(collection.key) { collection.key.substringAfterLast(':').toLongOrNull() ?: 0L }
+    val isCloudArtist = remember(collection.key) { collection.key.startsWith("cloud:artist:") }
+    val canSyncArtistFollow = artist && isCloudArtist && artistId > 0L && model.cloudEnabled && model.account != null
+    val remoteFollowed = if (canSyncArtistFollow) model.isArtistFollowed(artistId) else null
+    var artistFavorite by remember(collection.key) {
+        mutableStateOf(remoteFollowed ?: favoritePrefs.getBoolean(collection.key, false))
+    }
+    LaunchedEffect(canSyncArtistFollow, artistId, model.account?.userId) {
+        if (canSyncArtistFollow) {
+            model.refreshArtistFollowed(artistId)?.let { followed ->
+                artistFavorite = followed
+                favoritePrefs.edit().putBoolean(collection.key, followed).apply()
+            }
+        }
+    }
+    LaunchedEffect(remoteFollowed) {
+        if (remoteFollowed != null && remoteFollowed != artistFavorite) {
+            artistFavorite = remoteFollowed
+            favoritePrefs.edit().putBoolean(collection.key, remoteFollowed).apply()
+        }
+    }
     fun openAlbum(album: CatalogAlbum) { model.openSongAlbum(Song(0, "", album.artist, album.title, album.id, album.artistId, uri = "", artwork = album.artwork, cloud = collection.key.startsWith("cloud:"))) }
     LazyColumn(pageContentModifier(), contentPadding = PaddingValues(bottom = padding.calculateBottomPadding()),
         verticalArrangement = Arrangement.spacedBy(0.dp)) {
@@ -428,12 +505,38 @@ internal fun CatalogDetailPage(
                         }
                     }
                     Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                        IconButton({ descriptionOpen = true }, Modifier.size(42.dp).background(heroCardFill, CircleShape)) { Text("i", color = foreground) }
+                        IconButton(
+                            onClick = { if (destinationId > 0) open("artistInfo:$destinationId") },
+                            modifier = Modifier.size(42.dp).background(heroCardFill, CircleShape),
+                            enabled = destinationId > 0,
+                        ) {
+                            Image(
+                                painterResource(R.drawable.ic_album_info),
+                                tr("artist_details", "艺术家详情"),
+                                Modifier.size(26.dp),
+                                colorFilter = ColorFilter.tint(foreground),
+                            )
+                        }
                         IconButton({ model.playCollection(tracks, content = cloud) }, Modifier.size(60.dp).background(accent, CircleShape), enabled = tracks.isNotEmpty()) {
                             Image(painterResource(R.drawable.ic_player_play), tr("play", "播放"), Modifier.size(32.dp), colorFilter = ColorFilter.tint(onAccent))
                         }
-                        IconButton({ artistFavorite = !artistFavorite; favoritePrefs.edit().putBoolean(collection.key, artistFavorite).apply() },
-                            Modifier.size(42.dp).background(heroCardFill, CircleShape)) {
+                        IconButton(
+                            onClick = {
+                                val previous = artistFavorite
+                                val next = !previous
+                                artistFavorite = next
+                                favoritePrefs.edit().putBoolean(collection.key, next).apply()
+                                if (canSyncArtistFollow) {
+                                    model.toggleArtistFollow(artistId, next) { succeeded ->
+                                        if (!succeeded) {
+                                            artistFavorite = previous
+                                            favoritePrefs.edit().putBoolean(collection.key, previous).apply()
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.size(42.dp).background(heroCardFill, CircleShape),
+                        ) {
                             Image(painterResource(if (artistFavorite) R.drawable.ic_player_favorite_on else R.drawable.ic_player_favorite),
                                 tr("favorite_artist", "收藏艺术家"), Modifier.size(24.dp), colorFilter = ColorFilter.tint(foreground))
                         }
@@ -575,61 +678,8 @@ internal fun CatalogDetailPage(
         }
         if (artist) item("top_songs") {
             CatalogSectionLink(tr("top_songs", "热门歌曲"), margin, foreground) { open("artistSongs:$destinationId") }
-            val popular = tracks.take(15)
-            val columnCount = if (popular.size < 5) minOf(1, popular.size) else 3
-            val rowHeight = 48.dp * 1.35f * .92f * .93f
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val cardWidth = artistTopSongCardWidth(maxWidth, margin, columnCount)
-                LazyRow(contentPadding = PaddingValues(horizontal = margin), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(columnCount) { column ->
-                        Column(Modifier.width(cardWidth), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            for (index in column until popular.size step columnCount) {
-                                val song = popular[index]
-                                val albumYearSubtitle = formatArtistSongAlbumYear(song)
-                                Row(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(min = rowHeight)
-                                        .clickable { model.playCollection(tracks, index, cloud) },
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Artwork(song.artwork, Modifier.size(40.dp * 1.35f * .88f * .93f), cornerRadius = ListArtworkCornerRadius)
-                                    Column(Modifier.weight(1f).padding(start = 10.dp, end = 4.dp)) {
-                                        Text(
-                                            song.title,
-                                            color = if (model.current?.key == song.key) accent else foreground,
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        if (albumYearSubtitle.isNotEmpty()) {
-                                            Text(
-                                                albumYearSubtitle,
-                                                color = muted,
-                                                fontSize = 12.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.padding(top = 2.dp),
-                                            )
-                                        }
-                                    }
-                                    IconButton(
-                                        onClick = { openSongActions(SongActionRequest(song, songActionsBackdrop)) },
-                                        modifier = Modifier.size(44.dp),
-                                    ) {
-                                        Image(
-                                            AuraMoreHorizontalIcon,
-                                            tr("more", "更多"),
-                                            Modifier.size(20.dp),
-                                            colorFilter = ColorFilter.tint(muted),
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            PopularSongStrip(tracks.take(15), model, margin, foreground, muted, accent) { index ->
+                model.playCollection(tracks, index, cloud)
             }
             if (cloud != null && tracks.isEmpty() && (cloud.loading || cloud.failed))
                 CloudPagingFooter(cloud.loading, cloud.failed) { model.loadMoreCloudSongsFor(cloud) }
@@ -673,15 +723,30 @@ internal fun CatalogDetailPage(
                 }
             }
         }
-        if (artist) item("artist_albums") {
-            CatalogSectionLink(tr("albums", "专辑"), margin, foreground) { open("artistAlbums:$destinationId") }
+        if (artist) {
+            val (artistSingles, artistAlbums) = (cloud?.albums?.takeIf { it.isNotEmpty() } ?: related).partition(::isArtistSingleOrEp)
             val albumWidth = (configuration.screenWidthDp.dp - margin * 2 - 24.dp) / 3
-            LazyRow(contentPadding = PaddingValues(horizontal = margin), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(related, key = { it.id }) { album ->
-                    CollectionTile(album.title, album.artist, album.artwork, Modifier.width(albumWidth), foreground = foreground) {
-                        openAlbum(album)
-                    }
-                }
+            if (artistAlbums.isNotEmpty()) item("artist_albums") {
+                ArtistReleaseStrip(
+                    title = tr("albums", "专辑"),
+                    albums = artistAlbums,
+                    albumWidth = albumWidth,
+                    margin = margin,
+                    foreground = foreground,
+                    onHeaderClick = { open("artistAlbums:$destinationId") },
+                    onAlbumClick = ::openAlbum,
+                )
+            }
+            if (artistSingles.isNotEmpty()) item("artist_singles") {
+                ArtistReleaseStrip(
+                    title = tr("singles_and_eps", "单曲与EP"),
+                    albums = artistSingles,
+                    albumWidth = albumWidth,
+                    margin = margin,
+                    foreground = foreground,
+                    onHeaderClick = { open("artistSingles:$destinationId") },
+                    onAlbumClick = ::openAlbum,
+                )
             }
         }
         if (!artist && related.isNotEmpty()) item("related_albums") {
@@ -699,8 +764,125 @@ internal fun CatalogDetailPage(
             }
         }
     }
-    WindowDialog(descriptionOpen, title = collection.title, summary = info?.description?.takeIf { it.isNotBlank() } ?: tr("artist_info_unavailable", "暂无艺术家简介"), onDismissRequest = { descriptionOpen = false }) {
-        GlassDialogButton({ descriptionOpen = false }, Modifier.fillMaxWidth()) { Text(tr("done", "完成")) }
+}
+
+internal fun resolveArtistSubtitle(
+    aliases: List<String>,
+    identity: String,
+    fallbackRole: String,
+): String {
+    val joinedAliases = aliases.map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(" · ")
+    if (joinedAliases.isNotEmpty()) return joinedAliases
+    val trimmedIdentity = identity.trim()
+    if (trimmedIdentity.isNotEmpty()) return trimmedIdentity
+    return fallbackRole
+}
+
+internal fun resolveArtistCounts(
+    info: CatalogInfo?,
+    cloud: CloudPlaylistContent?,
+    tracks: List<Song>,
+): Pair<Int, Int> {
+    val songCount = maxOf(info?.artistSongCount ?: 0, cloud?.total ?: 0, tracks.size)
+    val localAlbumCount = if (cloud == null) {
+        tracks.map { "${it.volume}:${it.albumId}:${it.album}" }.distinct().size
+    } else {
+        0
+    }
+    val albumCount = maxOf(
+        info?.artistAlbumCount ?: 0,
+        info?.albums?.size ?: 0,
+        cloud?.albums?.size ?: 0,
+        localAlbumCount,
+    )
+    return songCount to albumCount
+}
+
+internal fun sanitizeArtworkFileName(name: String, fallback: String): String =
+    name.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { fallback }
+
+@Composable
+private fun CatalogInfoArtworkCard(
+    artwork: String,
+    downloadDescription: String,
+    showDownloadButton: Boolean,
+    topPadding: Dp,
+    onDownloadClick: () -> Unit,
+) {
+    Box(Modifier.fillMaxWidth().padding(top = topPadding)) {
+        // Sample only the cover, never the parent content layer containing this button.
+        // This avoids a backdrop read/write cycle inside the scrolling page.
+        val coverBackdrop = rememberLayerBackdrop { drawContent() }
+        Artwork(
+            artwork,
+            Modifier.fillMaxWidth().aspectRatio(1f)
+                .clip(RoundedCornerShape(20.dp)).layerBackdrop(coverBackdrop),
+        )
+        if (showDownloadButton) {
+            Box(Modifier.align(Alignment.BottomEnd).padding(14.dp)) {
+                GlassToolbarIconButton(
+                    icon = MiuixIcons.Regular.Download,
+                    description = downloadDescription,
+                    backdrop = coverBackdrop,
+                    collapsedFraction = 1f,
+                    containerPadding = PaddingValues(0.dp),
+                    surfaceAlpha = .24f,
+                    onClick = onDownloadClick,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatalogInfoMetadataField(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    val foreground = Color.White
+    val muted = foreground.copy(alpha = .72f)
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(value, color = foreground, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = muted, fontSize = 14.sp)
+    }
+}
+
+@Composable
+private fun CatalogArtworkDownloadDialog(
+    visible: Boolean,
+    title: String,
+    summary: String,
+    artworkUrl: String,
+    fileBaseName: String,
+    downloadTitle: String,
+    downloadDescription: String,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    WindowDialog(
+        visible,
+        title = title,
+        titleTextAlign = androidx.compose.ui.text.style.TextAlign.Start,
+        summary = summary,
+        summaryTextAlign = androidx.compose.ui.text.style.TextAlign.Start,
+        onDismissRequest = onDismiss,
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("cancel", "取消")) }
+            GlassDialogButton({
+                onDismiss()
+                if (artworkUrl.startsWith("http://") || artworkUrl.startsWith("https://")) {
+                    runCatching {
+                        val request = android.app.DownloadManager.Request(android.net.Uri.parse(artworkUrl))
+                            .setTitle(downloadTitle).setDescription(downloadDescription)
+                            .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                            .setDestinationInExternalFilesDir(context, android.os.Environment.DIRECTORY_PICTURES, "Aura Player/$fileBaseName.jpg")
+                        context.getSystemService(android.app.DownloadManager::class.java).enqueue(request)
+                    }
+                }
+            }, Modifier.weight(1f), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("download", "下载")) }
+        }
     }
 }
 
@@ -708,34 +890,20 @@ internal fun CatalogDetailPage(
 internal fun AlbumInfoPage(model: AuraViewModel, padding: PaddingValues, collection: MusicCollection, cloud: CloudPlaylistContent?) {
     val tracks = cloud?.songs ?: collection.songs
     val info = cloud?.catalog
-    val albumArtist = remember(info?.artist, collection.subtitle, tracks) {
-        resolveAlbumArtist(info?.artist, collection.subtitle, tracks)
-    }
     val foreground = Color.White
     val muted = foreground.copy(alpha = .72f)
     var confirmDownload by remember(collection.key) { mutableStateOf(false) }
-    val context = LocalContext.current
     val title = collection.title
     val artist = info?.artist?.ifBlank { collection.subtitle } ?: tracks.firstOrNull()?.artist.orEmpty()
     LazyColumn(pageContentModifier(), contentPadding = PaddingValues(bottom = padding.calculateBottomPadding(), start = 28.dp, end = 28.dp)) {
         item {
-            Box(Modifier.fillMaxWidth().padding(top = padding.calculateTopPadding())) {
-                // Sample only the cover, never the parent content layer containing this button.
-                // This avoids a backdrop read/write cycle inside the scrolling page.
-                val coverBackdrop = rememberLayerBackdrop { drawContent() }
-                Artwork(collection.artwork, Modifier.fillMaxWidth().aspectRatio(1f)
-                    .clip(RoundedCornerShape(20.dp)).layerBackdrop(coverBackdrop))
-                Box(Modifier.align(Alignment.BottomEnd).padding(14.dp)) {
-                    GlassToolbarIconButton(
-                        icon = MiuixIcons.Regular.Download,
-                        description = tr("download_album_artwork", "下载专辑封面"),
-                        backdrop = coverBackdrop,
-                        collapsedFraction = 1f,
-                        containerPadding = PaddingValues(0.dp),
-                        surfaceAlpha = .24f,
-                    ) { confirmDownload = true }
-                }
-            }
+            CatalogInfoArtworkCard(
+                artwork = collection.artwork,
+                downloadDescription = tr("download_album_artwork", "下载专辑封面"),
+                showDownloadButton = true,
+                topPadding = padding.calculateTopPadding(),
+                onDownloadClick = { confirmDownload = true },
+            )
         }
         item {
             Column(Modifier.fillMaxWidth().padding(top = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -743,16 +911,14 @@ internal fun AlbumInfoPage(model: AuraViewModel, padding: PaddingValues, collect
                 Text(artist, color = muted, style = MiuixTheme.textStyles.body1)
                 Spacer(Modifier.height(16.dp))
                 info?.published?.takeIf { it > 0 }?.let {
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(dateText(it), color = foreground, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                        Text(tr("release_time", "发行时间"), color = muted, fontSize = 14.sp)
-                    }
+                    CatalogInfoMetadataField(label = tr("release_time", "发行时间"), value = dateText(it))
                 }
                 info?.company?.takeIf { it.isNotBlank() }?.let {
-                    Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(it, color = foreground, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                        Text(tr("record_label", "发行公司"), color = muted, fontSize = 14.sp)
-                    }
+                    CatalogInfoMetadataField(
+                        label = tr("record_label", "发行公司"),
+                        value = it,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
                 }
                 HorizontalDivider(Modifier.padding(top = 22.dp), color = foreground.copy(alpha = .38f))
                 info?.description?.takeIf { it.isNotBlank() }?.let {
@@ -762,27 +928,99 @@ internal fun AlbumInfoPage(model: AuraViewModel, padding: PaddingValues, collect
             }
         }
     }
-    WindowDialog(confirmDownload, title = tr("download_album_artwork", "即将下载专辑封面"),
-        titleTextAlign = androidx.compose.ui.text.style.TextAlign.Start,
-        summary = "$title · $artist", summaryTextAlign = androidx.compose.ui.text.style.TextAlign.Start,
-        onDismissRequest = { confirmDownload = false }) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            GlassDialogButton({ confirmDownload = false }, Modifier.weight(1f)) { Text(tr("cancel", "取消")) }
-            GlassDialogButton({
-                confirmDownload = false
-                val url = collection.artwork
-                if (url.startsWith("http://") || url.startsWith("https://")) {
-                    runCatching {
-                        val request = android.app.DownloadManager.Request(android.net.Uri.parse(url))
-                            .setTitle(title).setDescription(artist)
-                            .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                            .setDestinationInExternalFilesDir(context, android.os.Environment.DIRECTORY_PICTURES, "Aura Player/$title.jpg")
-                        context.getSystemService(android.app.DownloadManager::class.java).enqueue(request)
+    CatalogArtworkDownloadDialog(
+        visible = confirmDownload,
+        title = tr("download_album_artwork", "即将下载专辑封面"),
+        summary = "$title · $artist",
+        artworkUrl = collection.artwork,
+        fileBaseName = sanitizeArtworkFileName(title, "album"),
+        downloadTitle = title,
+        downloadDescription = artist,
+        onDismiss = { confirmDownload = false },
+    )
+}
+
+@Composable
+internal fun ArtistInfoPage(padding: PaddingValues, collection: MusicCollection, cloud: CloudPlaylistContent?) {
+    val tracks = cloud?.songs ?: collection.songs
+    val info = cloud?.catalog
+    val foreground = Color.White
+    val muted = foreground.copy(alpha = .72f)
+    var confirmDownload by remember(collection.key) { mutableStateOf(false) }
+    val title = collection.title
+    val aliases = remember(info?.artistAliases, title) {
+        info?.artistAliases.orEmpty().filterNot { it.equals(title.trim(), ignoreCase = true) }
+    }
+    val identity = info?.artistIdentity?.trim().orEmpty()
+    val roleLabel = tr("artist", "艺术家")
+    val subtitle = remember(aliases, identity, roleLabel) {
+        resolveArtistSubtitle(aliases, identity, roleLabel)
+    }
+    val (songCount, albumCount) = remember(info, cloud, tracks) {
+        resolveArtistCounts(info, cloud, tracks)
+    }
+    val canDownloadArtwork = collection.artwork.startsWith("http://") || collection.artwork.startsWith("https://")
+    val description = info?.description?.trim().orEmpty()
+    LazyColumn(pageContentModifier(), contentPadding = PaddingValues(bottom = padding.calculateBottomPadding(), start = 28.dp, end = 28.dp)) {
+        item {
+            CatalogInfoArtworkCard(
+                artwork = collection.artwork,
+                downloadDescription = tr("download_artist_artwork", "下载艺术家图片"),
+                showDownloadButton = canDownloadArtwork,
+                topPadding = padding.calculateTopPadding(),
+                onDownloadClick = { confirmDownload = true },
+            )
+        }
+        item {
+            Column(Modifier.fillMaxWidth().padding(top = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(title, color = foreground, style = MiuixTheme.textStyles.title1, fontWeight = FontWeight.Bold)
+                Text(subtitle, color = muted, style = MiuixTheme.textStyles.body1)
+                Spacer(Modifier.height(16.dp))
+                if (identity.isNotEmpty() && aliases.isNotEmpty()) {
+                    CatalogInfoMetadataField(
+                        label = tr("artist_identity", "艺人身份"),
+                        value = identity,
+                    )
+                }
+                if (songCount > 0 || albumCount > 0) {
+                    Row(
+                        modifier = Modifier.padding(top = if (identity.isNotEmpty() && aliases.isNotEmpty()) 12.dp else 0.dp),
+                        horizontalArrangement = Arrangement.spacedBy(32.dp),
+                    ) {
+                        if (songCount > 0) {
+                            CatalogInfoMetadataField(label = tr("song", "歌曲"), value = songCount.toString())
+                        }
+                        if (albumCount > 0) {
+                            CatalogInfoMetadataField(label = tr("albums", "专辑"), value = albumCount.toString())
+                        }
                     }
                 }
-            }, Modifier.weight(1f), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("download", "下载")) }
+                HorizontalDivider(Modifier.padding(top = 22.dp), color = foreground.copy(alpha = .38f))
+                val bioText = when {
+                    description.isNotEmpty() -> description
+                    cloud?.loading == true && info == null -> tr("loading", "加载中…")
+                    else -> tr("artist_info_unavailable", "暂无艺术家简介")
+                }
+                Text(
+                    text = bioText,
+                    color = if (description.isNotEmpty()) foreground else muted,
+                    fontSize = 15.sp,
+                    lineHeight = 25.sp,
+                    modifier = Modifier.padding(top = 16.dp),
+                )
+            }
         }
     }
+    CatalogArtworkDownloadDialog(
+        visible = confirmDownload,
+        title = tr("download_artist_artwork", "即将下载艺术家图片"),
+        summary = if (subtitle != roleLabel) "$title · $subtitle" else title,
+        artworkUrl = collection.artwork,
+        fileBaseName = sanitizeArtworkFileName(title, "artist"),
+        downloadTitle = title,
+        downloadDescription = subtitle,
+        onDismiss = { confirmDownload = false },
+    )
 }
 private fun dateText(value: Long) = java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(java.util.Date(value))
 
@@ -797,31 +1035,100 @@ private fun CatalogSectionLink(title: String, margin: Dp, foreground: Color, onC
 }
 
 @Composable
-internal fun ArtistContentsPage(model: AuraViewModel, padding: PaddingValues, collection: MusicCollection, cloud: CloudPlaylistContent?, albums: Boolean) {
-    if (!albums) {
+private fun ArtistReleaseStrip(
+    title: String,
+    albums: List<CatalogAlbum>,
+    albumWidth: Dp,
+    margin: Dp,
+    foreground: Color,
+    onHeaderClick: () -> Unit,
+    onAlbumClick: (CatalogAlbum) -> Unit,
+) {
+    CatalogSectionLink(title, margin, foreground, onHeaderClick)
+    LazyRow(contentPadding = PaddingValues(horizontal = margin), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(albums, key = { it.id }) { album ->
+            CollectionTile(album.title, album.artist, album.artwork, Modifier.width(albumWidth), foreground = foreground) {
+                onAlbumClick(album)
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ArtistContentsPage(
+    model: AuraViewModel,
+    padding: PaddingValues,
+    collection: MusicCollection,
+    cloud: CloudPlaylistContent?,
+    mode: ArtistContentMode,
+) {
+    val listState = rememberLazyListState()
+    if (mode == ArtistContentMode.SONGS) {
         val tracks = cloud?.songs ?: collection.songs
-        LazyColumn(pageContentModifier(), contentPadding = padding) {
+        var wasEmpty by remember(collection.key) { mutableStateOf(tracks.isEmpty()) }
+        LaunchedEffect(tracks.isEmpty()) {
+            if (wasEmpty && tracks.isNotEmpty() && listState.firstVisibleItemIndex > 0) {
+                listState.scrollToItem(0)
+            }
+            wasEmpty = tracks.isEmpty()
+        }
+        LazyColumn(pageContentModifier(), state = listState, contentPadding = padding) {
             itemsIndexed(tracks, key = { _, it -> it.key }) { index, song -> SongRow(song, model, { model.playCollection(tracks, index, cloud) }) }
-            if (cloud != null && (cloud.loading || cloud.failed || cloud.hasMore)) item("more") {
-                CloudPagingFooter(cloud.loading, cloud.failed) { model.loadMoreCloudSongsFor(cloud) }
+            if (cloud != null && (cloud.loading || cloud.failed || cloud.hasMore)) {
+                item(if (tracks.isEmpty()) "initial_more" else "more") {
+                    CloudPagingFooter(cloud.loading, cloud.failed) { model.loadMoreCloudSongsFor(cloud) }
+                }
             }
         }
     } else {
-        val rows = cloud?.albums ?: collection.songs.groupBy { "${it.volume}:${it.albumId}:${it.album}" }.values.map {
-            val song = it.first(); CatalogAlbum(song.albumId, song.album, song.artwork, song.artistId, song.artist, count = it.size) }
-        LaunchedEffect(cloud) { if (cloud != null && cloud.albums.isEmpty()) model.loadMoreArtistAlbums(cloud) }
-        LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        val allRows = cloud?.albums ?: collection.songs.groupBy { "${it.volume}:${it.albumId}:${it.album}" }.values.map {
+            val song = it.first()
+            CatalogAlbum(song.albumId, song.album, song.artwork, song.artistId, song.artist, count = it.size)
+        }
+        val rows = remember(allRows, mode) {
+            when (mode) {
+                ArtistContentMode.ALBUMS -> allRows.filterNot(::isArtistSingleOrEp)
+                ArtistContentMode.SINGLES_EPS -> allRows.filter(::isArtistSingleOrEp)
+                ArtistContentMode.SONGS -> allRows
+            }
+        }
+        LaunchedEffect(cloud, mode, cloud?.albums?.size, cloud?.albumsHasMore, cloud?.albumsLoading, cloud?.albumsFailed, rows.size) {
+            if (cloud != null && (cloud.albums.isEmpty() || rows.isEmpty()) &&
+                cloud.albumsHasMore && !cloud.albumsLoading && !cloud.albumsFailed
+            ) {
+                model.loadMoreArtistAlbums(cloud)
+            }
+        }
+        var wasEmpty by remember(collection.key, mode) { mutableStateOf(rows.isEmpty()) }
+        LaunchedEffect(rows.isEmpty()) {
+            if (wasEmpty && rows.isNotEmpty() && listState.firstVisibleItemIndex > 0) {
+                listState.scrollToItem(0)
+            }
+            wasEmpty = rows.isEmpty()
+        }
+        LazyColumn(pageContentModifier(), state = listState, contentPadding = padding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
             items(rows.chunked(2), key = { it.first().id }) { pair ->
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    pair.forEach { album -> CollectionTile(album.title, album.artist, album.artwork, Modifier.weight(1f)) {
-                        if (cloud != null) model.openCatalogAlbum(album)
-                        else collection.songs.firstOrNull { it.albumId == album.id }?.let(model::openSongAlbum)
-                    } }
+                    pair.forEach { album ->
+                        CollectionTile(album.title, album.artist, album.artwork, Modifier.weight(1f)) {
+                            if (cloud != null) model.openCatalogAlbum(album)
+                            else collection.songs.firstOrNull { it.albumId == album.id }?.let(model::openSongAlbum)
+                        }
+                    }
                     if (pair.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
-            if (cloud != null && (cloud.albumsLoading || cloud.albumsFailed || cloud.albumsHasMore)) item("more") {
-                CloudPagingFooter(cloud.albumsLoading, cloud.albumsFailed) { model.loadMoreArtistAlbums(cloud) }
+            if (cloud != null && (cloud.albumsLoading || cloud.albumsFailed || cloud.albumsHasMore)) {
+                item(if (rows.isEmpty()) "initial_more" else "more") {
+                    CloudPagingFooter(cloud.albumsLoading, cloud.albumsFailed) { model.loadMoreArtistAlbums(cloud) }
+                }
+            } else if (rows.isEmpty()) {
+                item("empty") {
+                    Text(
+                        tr("no_collections", "暂无内容"),
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
             }
         }
     }

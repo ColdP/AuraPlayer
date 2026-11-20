@@ -26,7 +26,13 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** One recipe for the real mini player and the material settings preview. */
 @Composable
-internal fun Modifier.miniPlayerMaterial(backdrop: Backdrop, style: String, shape: Shape, expansion: Float = 0f): Modifier {
+internal fun Modifier.miniPlayerMaterial(
+    backdrop: Backdrop,
+    style: String,
+    shape: Shape,
+    expansion: Float = 0f,
+    settledBaseColor: Color? = null,
+): Modifier {
     val dark = MiuixTheme.colorScheme.surface.luminance() < .5f
     val chromeStyle = btm.m.auraplayer.ui.resolveBottomBarChromeUiStyle(style)
     if (chromeStyle == btm.m.auraplayer.ui.AppUiStyle.MATERIAL) {
@@ -72,6 +78,16 @@ internal fun Modifier.miniPlayerMaterial(backdrop: Backdrop, style: String, shap
             )
             .background(solidContainer, shape)
     }
+    // Skip expensive full-screen backdrop blur/refraction once the expanding container
+    // has transitioned to the player's base surface.
+    val progress = expansion.coerceIn(0f, 1f)
+    if (progress >= .24f && settledBaseColor != null) {
+        return background(settledBaseColor, shape)
+    }
+    val isMorphing = progress > .001f
+    val glassFade = (1f - progress / .24f).coerceIn(0f, 1f)
+    val lensFade = (1f - progress / .12f).coerceIn(0f, 1f)
+    val backingAlpha = if (settledBaseColor != null) (progress / .24f).coerceIn(0f, 1f) else 0f
     val material = rememberModuleNavigationMaterial(style)
     val liquid = style == "liquid_glass"
     val harmony = style == "harmony_os_floating"
@@ -81,9 +97,31 @@ internal fun Modifier.miniPlayerMaterial(backdrop: Backdrop, style: String, shap
     return drawBackdrop(backdrop = backdrop, shape = { shape }, effects = {
         vibrancy()
         blur(playerMiniBlurRadius(style, material.blur).toPx())
-        if (liquid) lens(24.dp.toPx() * material.thickness / 100f, 24.dp.toPx() * material.refraction / 100f, chromaticAberration = material.dispersion ?: false)
-        else lens(16.dp.toPx() * material.thickness / 100f, 32.dp.toPx() * material.refraction / 100f, depthEffect = true, chromaticAberration = material.dispersion ?: false)
-    }, highlight = { Highlight.Default.copy(alpha = material.light((if (dark) .78f else .96f) * if (harmony) .72f else 1f) * (1f - expansion)) },
-        shadow = { Shadow.Default.copy(radius = 6.dp, alpha = .35f * (1f - expansion)) },
-        onDrawSurface = { drawRect(tint.copy(alpha = material.alpha(tint.alpha))) })
+        if (lensFade > .01f) {
+            val chromatic = !isMorphing && (material.dispersion ?: false)
+            if (liquid) {
+                lens(
+                    24.dp.toPx() * material.thickness / 100f * lensFade,
+                    24.dp.toPx() * material.refraction / 100f * lensFade,
+                    chromaticAberration = chromatic,
+                )
+            } else {
+                lens(
+                    16.dp.toPx() * material.thickness / 100f * lensFade,
+                    32.dp.toPx() * material.refraction / 100f * lensFade,
+                    depthEffect = !isMorphing,
+                    chromaticAberration = chromatic,
+                )
+            }
+        }
+    }, highlight = if (glassFade > .01f) ({
+        Highlight.Default.copy(alpha = material.light((if (dark) .78f else .96f) * if (harmony) .72f else 1f) * glassFade)
+    }) else null,
+        shadow = if (glassFade > .01f) ({
+            Shadow.Default.copy(radius = 6.dp, alpha = .35f * glassFade)
+        }) else null,
+        onDrawSurface = {
+            if (glassFade > .001f) drawRect(tint.copy(alpha = material.alpha(tint.alpha) * glassFade))
+            if (settledBaseColor != null && backingAlpha > .001f) drawRect(settledBaseColor.copy(alpha = backingAlpha))
+        })
 }

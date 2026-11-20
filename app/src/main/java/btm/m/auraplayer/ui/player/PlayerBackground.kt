@@ -259,13 +259,18 @@ internal fun rememberPlayerExpressiveColors(seed: Int, isDark: Boolean): PlayerE
 }
 
 @Composable
-internal fun PlayerAmbientBackground(palette: CorePalette, modifier: Modifier = Modifier, animate: Boolean = true) {
-    val primary by animateColorAsState(Color(palette.a1.tone(70)), tween(1000), label = "ambientMonetPrimary")
-    val secondary by animateColorAsState(Color(palette.a2.tone(70)), tween(1000), label = "ambientMonetSecondary")
-    val tertiary by animateColorAsState(Color(palette.a3.tone(70)), tween(1000), label = "ambientMonetTertiary")
-    val base by animateColorAsState(Color(palette.n1.tone(8)), tween(1000), label = "ambientMonetBase")
+internal fun PlayerAmbientBackground(palette: CorePalette, modifier: Modifier = Modifier, animate: Boolean = true, visible: Boolean = true) {
+    val colorSpec: FiniteAnimationSpec<Color> = if (visible) tween(1000) else snap()
+    val primary by animateColorAsState(Color(palette.a1.tone(70)), colorSpec, label = "ambientMonetPrimary")
+    val secondary by animateColorAsState(Color(palette.a2.tone(70)), colorSpec, label = "ambientMonetSecondary")
+    val tertiary by animateColorAsState(Color(palette.a3.tone(70)), colorSpec, label = "ambientMonetTertiary")
+    val base by animateColorAsState(Color(palette.n1.tone(8)), colorSpec, label = "ambientMonetBase")
     var phase by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(animate) {
+    LaunchedEffect(animate, visible) {
+        if (!visible) {
+            phase = 0f
+            return@LaunchedEffect
+        }
         if (!animate) return@LaunchedEffect
         var last = withFrameNanos { it }
         while (true) {

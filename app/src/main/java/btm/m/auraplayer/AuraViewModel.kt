@@ -26,7 +26,17 @@ import kotlinx.coroutines.flow.*
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 
+internal const val HEARTBEAT_PLAYBACK_MODE = 3
+
 class AuraViewModel(application: Application) : AndroidViewModel(application) {
+    private data class HeartbeatQueue(
+        val items: List<MediaItem>, val index: Int, val positionMs: Long, val content: CloudPlaylistContent?,
+    )
+
+    private companion object {
+        var originalHeartbeatQueue: HeartbeatQueue? = null
+    }
+
     val app = application as AuraApplication
     val settings get() = app.settings
     val history get() = app.history
@@ -57,9 +67,17 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var cloudHomeLoading by mutableStateOf(false); private set
     var cloudHomeFailed by mutableStateOf(false); private set
     var cloudRecentSongs by mutableStateOf<List<Song>>(emptyList()); private set
+    var cloudDailySongs by mutableStateOf<List<Song>>(emptyList()); private set
     var cloudPublicBanners by mutableStateOf<List<CloudHomeItem>>(emptyList()); private set
+    var heartbeatLoading by mutableStateOf(false); private set
     var listeningRankWeek by mutableStateOf(false); private set
     private var cloudHomeJob: Job? = null
+    private var cloudHomePlayJob: Job? = null
+    private var dailySongsJob: Deferred<List<Song>?>? = null
+    private var dailySongsUserId: Long? = null
+    private var cloudHomeUserId: Long? = null
+    private var rankPreviewJob: Job? = null
+    private var heartbeatJob: Job? = null
     private var cloudPlaylistOffset = 0
     private var cloudPlaylistRetryReset = false
     private var cloudPlaylistRetryRefresh = false
@@ -142,6 +160,8 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var cloudLikesReady by mutableStateOf(false); private set
     private var likesJob: Job? = null
     private val liking = mutableSetOf<Long>()
+    var followedArtistStates by mutableStateOf<Map<Long, Boolean>>(emptyMap()); private set
+    private val followingArtists = mutableSetOf<Long>()
     var subscribedAlbums by mutableStateOf<List<CatalogAlbum>>(emptyList()); private set
     var subscribedAlbumsLoading by mutableStateOf(false); private set
     var subscribedAlbumsFailed by mutableStateOf(false); private set
@@ -322,6 +342,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     /** Pure local mode: stop every cloud job, drop cloud queue entries and forget in-memory cloud state. */
     private fun shutdownCloud() {
+        leaveHeartbeat()
         cloudGeneration++
         cloudJob?.cancel(); qqGeneration++; qqAccountJob?.cancel(); qqJob?.cancel(); qqLoading = false; qqBusy = false
         queries.value.takeIf { it.cloud }?.let { searchCloud = false; submitSearch() }
@@ -353,7 +374,12 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             }
             queue = (0 until player.mediaItemCount).map { songFor(player.getMediaItemAt(it)) }
             queueIndex = player.currentMediaItemIndex
-            playbackMode = if (player.repeatMode == Player.REPEAT_MODE_ONE) 2 else if (player.shuffleModeEnabled) 1 else 0
+            playbackMode = when {
+                originalHeartbeatQueue != null -> HEARTBEAT_PLAYBACK_MODE
+                player.repeatMode == Player.REPEAT_MODE_ONE -> 2
+                player.shuffleModeEnabled -> 1
+                else -> 0
+            }
             duration = player.duration.takeIf { it > 0 } ?: current?.duration ?: 0
             position = player.currentPosition.coerceAtLeast(0)
             audioFormat = player.currentTracks.groups.firstOrNull { it.type == androidx.media3.common.C.TRACK_TYPE_AUDIO && it.isSelected }
@@ -364,7 +390,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             playbackRequested = player.playWhenReady && player.playbackState != Player.STATE_ENDED
             buffering = player.playbackState == Player.STATE_BUFFERING
             playbackSpeed = player.playbackParameters.speed
-            cloudQueue?.takeIf { !it.failed && player.currentMediaItemIndex >= player.mediaItemCount - 5 }
+            cloudQueue?.takeIf { originalHeartbeatQueue == null && !it.failed && player.currentMediaItemIndex >= player.mediaItemCount - 5 }
                 ?.let { loadCloudSongs(it) }
         }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -481,13 +507,14 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         val before = settings.value
         settings.update(transform)
         val after = settings.value
+        if (before.heartbeatEnabled && !after.heartbeatEnabled) leaveHeartbeat()
         if (!before.cloudDisabled && after.cloudDisabled) shutdownCloud()
         else if (before.cloudDisabled && !after.cloudDisabled) { restoreAccount(); refreshQq() }
         if (before.cloudSearchSource != after.cloudSearchSource && searchCloud) {
             if (after.cloudSearchSource == "qq" && searchCategory !in listOf(SearchCategory.ALL, SearchCategory.SONG)) searchCategory = SearchCategory.ALL
             submitSearch()
         }
-        if (before.whitelist != after.whitelist || before.blacklist != after.blacklist ||
+        if (before.whitelist != after.whitelist || before.blacklist != after.blacklist || before.filenameBlockRules != after.filenameBlockRules ||
             before.durationFilter != after.durationFilter || before.minimumSeconds != after.minimumSeconds) refreshLibrary(debounce = true)
     }
     fun refreshLibrary(debounce: Boolean = false, onComplete: ((Int) -> Unit)? = null) {
@@ -590,6 +617,9 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     fun play(queue: List<Song>, start: Int = 0, shuffle: Boolean = false) {
         if (queue.isEmpty()) return
         val player = controller ?: run { error = tr("player_connecting", "播放服务正在连接，请稍后重试"); return }
+        cancelHeartbeat()
+        originalHeartbeatQueue = null
+        if (playbackMode == HEARTBEAT_PLAYBACK_MODE) playbackMode = 0
         cloudQueue = null
         val ordered = if (shuffle) queue.shuffled() else queue
         knownSongs.putAll(ordered.associateBy { it.key })
@@ -678,13 +708,22 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     fun moveQueue(from: Int, to: Int) { controller?.let {
         if (from in 0 until it.mediaItemCount && to in 0 until it.mediaItemCount && from != to) it.moveMediaItem(from, to)
     } }
-    fun cyclePlaybackMode() { controller?.let {
-        when (playbackMode) {
-            0 -> { it.repeatMode = Player.REPEAT_MODE_ALL; it.shuffleModeEnabled = true }
-            1 -> { it.shuffleModeEnabled = false; it.repeatMode = Player.REPEAT_MODE_ONE }
-            else -> { it.shuffleModeEnabled = false; it.repeatMode = Player.REPEAT_MODE_ALL }
+    fun cyclePlaybackMode() {
+        val player = controller ?: return
+        when {
+            originalHeartbeatQueue != null -> leaveHeartbeat()
+            heartbeatLoading -> cancelHeartbeat().also { setListRepeat(player) }
+            playbackMode == 0 -> { player.repeatMode = Player.REPEAT_MODE_ALL; player.shuffleModeEnabled = true }
+            playbackMode == 1 -> { player.shuffleModeEnabled = false; player.repeatMode = Player.REPEAT_MODE_ONE }
+            cloudEnabled && settings.value.heartbeatEnabled && account != null && current?.netease == true -> enterHeartbeat(player)
+            else -> setListRepeat(player)
         }
-    } }
+    }
+
+    private fun setListRepeat(player: Player) {
+        player.shuffleModeEnabled = false
+        player.repeatMode = Player.REPEAT_MODE_ALL
+    }
     fun refreshQualities() {
         val song = current?.takeIf { it.netease } ?: return
         qualityJob?.cancel()
@@ -869,6 +908,63 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             "song" -> viewModelScope.launch { runCatching { app.api.songDetail(item.actionId) }.getOrNull()?.let { play(listOf(it)) } }
         }
     }
+    fun playCloudHomeItem(item: CloudHomeItem) {
+        if (!cloudEnabled) return
+        when (item.actionType.ifBlank { item.kind }) {
+            "playlist" -> {
+                val playlist = CloudPlaylist(item.actionId, item.title, 0, item.artwork)
+                val key = contentKey(playlist)
+                val cached = cloudContents[key]?.takeIf {
+                    it.songs.isNotEmpty() && !(it.loadedAt > 0 && System.currentTimeMillis() - it.loadedAt > CloudMetadataCache.FRESH_MS)
+                }
+                if (cached != null) {
+                    playCollection(cached.songs, 0, cached)
+                    return
+                }
+                val content = CloudPlaylistContent(playlist)
+                cloudContents[key] = content
+                val generation = cloudGeneration
+                cloudHomePlayJob?.cancel()
+                cloudHomePlayJob = viewModelScope.launch {
+                    try {
+                        val page = app.api.playlistSongs(playlist.id)
+                        ensureActive()
+                        if (generation != cloudGeneration) return@launch
+                        content.songs = page.items
+                        content.offset = page.nextOffset
+                        content.loadedAt = System.currentTimeMillis()
+                        content.hasMore = page.hasMore
+                        page.total?.let { content.total = it }
+                        if (page.total == null) content.total = maxOf(content.total, content.songs.size)
+                        knownSongs.putAll(page.items.associateBy { it.key })
+                        if (page.items.isNotEmpty()) playCollection(page.items, 0, content)
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { if (generation == cloudGeneration) cloudFailure(e) }
+                }
+            }
+            "album" -> {
+                val generation = cloudGeneration
+                cloudHomePlayJob?.cancel()
+                cloudHomePlayJob = viewModelScope.launch {
+                    try {
+                        val catalog = app.api.albumPage(item.actionId)
+                        ensureActive()
+                        if (generation == cloudGeneration && catalog.page.items.isNotEmpty()) play(catalog.page.items, 0)
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { if (generation == cloudGeneration) cloudFailure(e) }
+                }
+            }
+            "song" -> {
+                val generation = cloudGeneration
+                cloudHomePlayJob?.cancel()
+                cloudHomePlayJob = viewModelScope.launch {
+                    runCatching { app.api.songDetail(item.actionId) }.getOrNull()?.let {
+                        if (generation == cloudGeneration) play(listOf(it))
+                    }
+                }
+            }
+        }
+    }
     fun loadMoreCloudSongs() { cloudCollection?.let { loadCloudSongs(it) } }
     fun loadMoreCloudSongsFor(content: CloudPlaylistContent) { loadCloudSongs(content) }
     fun refreshCloudSongs() {
@@ -881,8 +977,9 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         loadCloudSongs(content, refresh = true)
     }
     private fun loadCloudSongs(content: CloudPlaylistContent, refresh: Boolean = false) {
-        if (!cloudEnabled || content.loading || !content.hasMore || content.source == "playlist" && account == null && content.playlist.provider != PROVIDER_QQ) return
+        if (!cloudEnabled || content.loading || !content.hasMore) return
         val generation = cloudGeneration
+        val rankType = if (listeningRankWeek) 1 else 0
         content.loading = true; content.failed = false
         content.job = viewModelScope.launch {
             try {
@@ -892,13 +989,14 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                     else -> null
                 }
                 val page = catalog?.page ?: when (content.source) {
-                    "rank" -> app.api.listeningRank(content.playlist.id, if (listeningRankWeek) 1 else 0).let { CloudPage(it, it.size, false, it.size) }
+                    "rank" -> app.api.listeningRank(content.playlist.id, rankType).let { CloudPage(it, it.size, false, it.size) }
                     "radio" -> app.api.radioPrograms(content.playlist.id, content.offset)
                     else -> if (content.playlist.provider == PROVIDER_QQ) app.qq.playlistSongs(content.playlist.id)
                         else app.api.playlistSongs(content.playlist.id, content.offset, refresh = refresh)
                 }
                 ensureActive()
                 if (generation != cloudGeneration) return@launch
+                if (content.source == "rank" && rankType == 0) cloudRecentSongs = page.items
                 if (catalog != null) collectionDestinations.values.filter { it.cloud === content }.forEach { destination ->
                     destination.collection = destination.collection.copy(
                         title = catalog.title.ifBlank { destination.collection.title }, artwork = catalog.artwork.ifBlank { destination.collection.artwork })
@@ -914,7 +1012,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 page.total?.let { content.total = it }
                 if (page.total == null) content.total = maxOf(content.total, content.songs.size)
                 knownSongs.putAll(newSongs.associateBy { it.key })
-                if (cloudQueue === content && newSongs.isNotEmpty()) {
+                if (originalHeartbeatQueue == null && cloudQueue === content && newSongs.isNotEmpty()) {
                     controller?.addMediaItems(newSongs.map(::mediaItem))
                 }
             } catch (e: CancellationException) { throw e }
@@ -1024,6 +1122,49 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             finally { liking.remove(song.id) }
         }
     }
+    fun isArtistFollowed(artistId: Long): Boolean? = followedArtistStates[artistId]
+    suspend fun refreshArtistFollowed(artistId: Long): Boolean? {
+        val user = account ?: return null
+        if (!cloudEnabled || artistId <= 0L) return null
+        val generation = cloudGeneration
+        return try {
+            val followed = app.api.artistFollowed(artistId)
+            if (generation == cloudGeneration && account?.userId == user.userId) {
+                followedArtistStates = followedArtistStates + (artistId to followed)
+                followed
+            } else {
+                null
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
+    fun toggleArtistFollow(artistId: Long, targetFollow: Boolean, onResult: (Boolean) -> Unit = {}) {
+        val user = account ?: run { onResult(false); return }
+        if (!cloudEnabled || artistId <= 0L) { onResult(false); return }
+        if (!followingArtists.add(artistId)) return
+        val generation = cloudGeneration
+        viewModelScope.launch {
+            try {
+                app.api.followArtist(artistId, targetFollow)
+                if (generation != cloudGeneration || account?.userId != user.userId) {
+                    onResult(false)
+                    return@launch
+                }
+                followedArtistStates = followedArtistStates + (artistId to targetFollow)
+                onResult(true)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (generation == cloudGeneration) cloudFailure(e)
+                onResult(false)
+            } finally {
+                followingArtists.remove(artistId)
+            }
+        }
+    }
     fun addSongToCloudPlaylist(playlist: CloudPlaylist, song: Song, complete: (Boolean) -> Unit = {}) {
         val user = account ?: run { complete(false); return }
         if (!song.netease || playlist.creatorId != user.userId || playlist.specialType == 5) { complete(false); return }
@@ -1047,16 +1188,80 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     fun openListeningRank() {
         val user = account ?: return
         listeningRankWeek = false
-        val content = CloudPlaylistContent(CloudPlaylist(user.userId, tr("listening_rank", "听歌排行"), 0, current?.artwork.orEmpty()), "rank")
+        val content = CloudPlaylistContent(CloudPlaylist(user.userId, tr("listening_rank", "听歌排行"), 0, ""), "rank")
         pushCollection(MusicCollection("cloud:rank:${user.userId}", content.playlist.name, "", emptyList(), content.playlist.artwork), content)
         loadCloudSongs(content)
     }
     fun changeListeningRankPeriod(week: Boolean) {
         if (listeningRankWeek == week) return
+        val old = cloudCollection?.takeIf { it.source == "rank" } ?: return
         listeningRankWeek = week
-        val content = cloudCollection?.takeIf { it.source == "rank" } ?: return
-        content.songs = emptyList(); content.offset = 0; content.hasMore = true; content.loading = false; content.failed = false
-        loadCloudSongs(content, refresh = true)
+        old.job?.cancel()
+        val content = CloudPlaylistContent(old.playlist, old.source)
+        cloudCollection = content
+        collectionDestinations[activeCollectionId]?.cloud = content
+        loadCloudSongs(content)
+    }
+    private fun cancelHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = null
+        heartbeatLoading = false
+    }
+    private fun enterHeartbeat(player: MediaController) {
+        val user = account ?: return
+        val startingItem = player.currentMediaItem ?: return
+        val generation = cloudGeneration
+        heartbeatLoading = true
+        heartbeatJob = viewModelScope.launch {
+            try {
+                var liked = cloudPlaylists.firstOrNull { it.specialType == 5 && it.creatorId == user.userId }
+                if (liked == null) liked = app.api.playlists(user.userId).items.firstOrNull { it.specialType == 5 && it.creatorId == user.userId }
+                val likedIds = if (liked != null) app.api.likedSongIds(user.userId) else emptySet()
+                val seed = current?.id?.takeIf { it in likedIds } ?: likedIds.randomOrNull()
+                if (liked == null || seed == null) {
+                    error = tr("heartbeat_needs_likes", "先收藏几首喜欢的音乐，再试试心动模式")
+                    setListRepeat(player)
+                    return@launch
+                }
+                val tracks = app.api.heartbeatSongs(liked.id, seed)
+                ensureActive()
+                if (generation != cloudGeneration || originalHeartbeatQueue != null || !settings.value.heartbeatEnabled ||
+                    player.currentMediaItem != startingItem || player.repeatMode != Player.REPEAT_MODE_ONE) return@launch
+                if (tracks.isEmpty()) {
+                    error = tr("heartbeat_empty", "暂时没有心动推荐")
+                    setListRepeat(player)
+                    return@launch
+                }
+                originalHeartbeatQueue = HeartbeatQueue(List(player.mediaItemCount, player::getMediaItemAt),
+                    player.currentMediaItemIndex, player.currentPosition.coerceAtLeast(0), cloudQueue)
+                cloudQueue = null
+                playbackMode = HEARTBEAT_PLAYBACK_MODE
+                setListRepeat(player)
+                knownSongs.putAll(tracks.associateBy { it.key })
+                player.setMediaItems(tracks.map(::mediaItem), 0, 0L)
+                player.prepare()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (generation == cloudGeneration) { setListRepeat(player); cloudFailure(e) }
+            }
+            finally {
+                if (generation == cloudGeneration && isActive) { heartbeatJob = null; heartbeatLoading = false }
+            }
+        }
+    }
+    private fun leaveHeartbeat() {
+        cancelHeartbeat()
+        val original = originalHeartbeatQueue ?: return
+        val player = controller ?: return
+        originalHeartbeatQueue = null
+        val content = original.content ?: cloudQueue
+        cloudQueue = content
+        playbackMode = 0
+        setListRepeat(player)
+        val savedIds = original.items.mapTo(hashSetOf()) { it.mediaId }
+        val loadedWhileAway = content?.songs.orEmpty().filter { it.key !in savedIds }.map(::mediaItem)
+        player.setMediaItems(original.items + loadedWhileAway, original.index, original.positionMs)
+        player.prepare()
     }
     fun openCatalogAlbum(album: CatalogAlbum) = openSongAlbum(Song(0, "", album.artist, album.title, album.id, album.artistId, uri = "", artwork = album.artwork, cloud = true))
     fun loadMoreSubscribedAlbums(reset: Boolean = false) {
@@ -1125,9 +1330,12 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     private fun resetCloudPaging() {
         likesJob?.cancel(); subscribedAlbumJob?.cancel()
-        cloudHomeJob?.cancel()
+        cloudHomeJob?.cancel(); cloudHomePlayJob?.cancel(); dailySongsJob?.cancel(); rankPreviewJob?.cancel(); leaveHeartbeat()
+        dailySongsJob = null; dailySongsUserId = null
+        cloudHomeLoading = false
         cloudLikedIds = emptySet(); cloudLikesReady = false; liking.clear()
-        cloudHomeItems = emptyList(); cloudRecommendedPlaylists = emptyList(); cloudFollowedAlbums = emptyList(); cloudRecentSongs = emptyList(); cloudPublicBanners = emptyList(); cloudHomeFailed = false
+        followedArtistStates = emptyMap(); followingArtists.clear()
+        cloudHomeItems = emptyList(); cloudRecommendedPlaylists = emptyList(); cloudFollowedAlbums = emptyList(); cloudRecentSongs = emptyList(); cloudDailySongs = emptyList(); cloudPublicBanners = emptyList(); cloudHomeFailed = false
         subscribedAlbums = emptyList(); subscribedAlbumOffset = 0; subscribedAlbumsLoading = false
         subscribedAlbumsHasMore = false; subscribedAlbumsFailed = false
         collectionDestinations.values.forEach { it.cloud?.albumsJob?.cancel() }
@@ -1173,29 +1381,70 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun refreshCloudHome() {
         if (!cloudEnabled) return
-        val user = account ?: return
-        if (cloudHomeLoading) return
+        val user = account
+        if (cloudHomeLoading && cloudHomeUserId == user?.userId) return
+        cloudHomeUserId = user?.userId
         cloudHomeLoading = true; cloudHomeFailed = false
+        refreshListeningRankPreview()
         val generation = cloudGeneration
         cloudHomeJob?.cancel()
         cloudHomeJob = viewModelScope.launch {
             try {
-                val home = async { runCatching { app.api.homeItems() }.getOrDefault(emptyList()) }
-                val recommended = async { runCatching { app.api.recommendedPlaylists() }.getOrDefault(emptyList()) }
-                val followed = async { runCatching { app.api.followedArtistAlbums() }.getOrDefault(emptyList()) }
-                val recent = async { runCatching { app.api.listeningRank(user.userId) }.getOrDefault(emptyList()) }
-                val banners = async { runCatching { app.api.publicBanners() }.getOrDefault(emptyList()) }
+                val home = async { cloudSection { app.api.homeItems() } }
+                val recommended = async { cloudSection { app.api.recommendedPlaylists(personalized = user != null) } }
+                val daily = async { if (user != null) fetchCloudDailySongs() else emptyList() }
+                val followed = async { if (user != null) cloudSection { app.api.followedArtistAlbums() } else null }
+                val banners = async { cloudSection { app.api.publicBanners() } }
+                val homeItems = home.await()
+                val recommendations = recommended.await()
+                daily.await()
                 ensureActive()
-                if (generation == cloudGeneration && account?.userId == user.userId) {
-                    cloudHomeItems = home.await()
-                    cloudRecommendedPlaylists = recommended.await()
-                    cloudFollowedAlbums = followed.await()
-                    cloudRecentSongs = recent.await()
+                if (generation == cloudGeneration && account?.userId == user?.userId) {
+                    cloudHomeItems = homeItems.orEmpty()
+                    val playlists = (recommendations.orEmpty() + homeItems.orEmpty().filter { it.kind == "playlist" })
+                        .sortedBy { it.section == "recommended" }.distinctBy { it.id }
+                    cloudRecommendedPlaylists = playlists
                     cloudPublicBanners = banners.await()
+                        .orEmpty()
+                    cloudFollowedAlbums = followed.await().orEmpty()
+                    cloudHomeFailed = homeItems == null && recommendations == null
+                    val covers = playlists.filter { it.section == "radar" }.take(6).map { radar ->
+                        async { radar.id to cloudSection { app.api.playlistSongs(radar.id, limit = 1).items.firstOrNull()?.artwork } }
+                    }.awaitAll().toMap()
+                    ensureActive()
+                    cloudRecommendedPlaylists = playlists.map { item ->
+                        covers[item.id]?.takeIf(String::isNotBlank)?.let { item.copy(artwork = it) } ?: item
+                    }
                 }
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { if (generation == cloudGeneration) cloudHomeFailed = true }
-            finally { if (generation == cloudGeneration) cloudHomeLoading = false }
+            finally { if (generation == cloudGeneration && isActive) cloudHomeLoading = false }
+        }
+    }
+    suspend fun fetchCloudDailySongs(refresh: Boolean = false): List<Song> {
+        val user = account ?: return emptyList()
+        if (!cloudEnabled) return emptyList()
+        if (!refresh && dailySongsUserId == user.userId && cloudDailySongs.isNotEmpty()) return cloudDailySongs
+        val inFlight = if (!refresh && dailySongsUserId == user.userId) dailySongsJob?.takeIf { it.isActive } else null
+        if (inFlight != null) return inFlight.await().orEmpty()
+        val generation = cloudGeneration
+        dailySongsUserId = user.userId
+        val job = viewModelScope.async { cloudSection { app.api.dailySongs(refresh) } }
+        dailySongsJob = job
+        val tracks = job.await()
+        if (generation == cloudGeneration && account?.userId == user.userId && tracks != null) {
+            cloudDailySongs = tracks
+        }
+        return tracks.orEmpty()
+    }
+    fun refreshListeningRankPreview() {
+        val user = account ?: return
+        if (!cloudEnabled || cloudRecentSongs.isNotEmpty() || rankPreviewJob?.isActive == true) return
+        val generation = cloudGeneration
+        rankPreviewJob = viewModelScope.launch {
+            val tracks = cloudSection { app.api.listeningRank(user.userId) }
+            ensureActive()
+            if (generation == cloudGeneration && tracks != null) cloudRecentSongs = tracks
         }
     }
     private fun refreshCloudExtras() {
@@ -1259,7 +1508,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         account = user
         loginMessage = tr("login_success", "登录成功")
         loadCloudPlaylists(reset = true)
-        if (settings.value.homeContent == "cloud") refreshCloudHome()
+        if (settings.value.homeContent == "netease") refreshCloudHome()
         onSuccess()
     }
     fun completeOfficialLogin(sessionCookie: String, onSuccess: () -> Unit = {}) {
@@ -1277,7 +1526,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             account = user
             loginMessage = tr("login_success", "登录成功")
             loadCloudPlaylists(reset = true)
-            if (settings.value.homeContent == "cloud") refreshCloudHome()
+            if (settings.value.homeContent == "netease") refreshCloudHome()
             onSuccess()
         }
     }
@@ -1292,7 +1541,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         account = selected?.toAccount()
         if (selected == null) return
         loadCloudPlaylists(reset = true)
-        if (settings.value.homeContent == "cloud") refreshCloudHome()
+        if (settings.value.homeContent == "netease") refreshCloudHome()
         cloudAction {
             val generation = cloudGeneration
             val refreshed = app.api.account()
@@ -1318,7 +1567,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             account = nextActive?.toAccount()
             if (nextActive != null) {
                 loadCloudPlaylists(reset = true)
-                if (settings.value.homeContent == "cloud") refreshCloudHome()
+                if (settings.value.homeContent == "netease") refreshCloudHome()
             } else {
                 loginMessage = tr("logged_out", "已退出登录")
             }

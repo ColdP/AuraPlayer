@@ -22,6 +22,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.data.LibraryFilter
+import btm.m.auraplayer.data.NAVIGATION_OFFSET_DP_RANGE
+import btm.m.auraplayer.data.homeContentSources
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.roundToInt
@@ -47,6 +49,12 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
                     backdrop = LocalToolbarBackdrop.current) { index -> model.updateSettings { it.copy(navigation = navValues[index]) } }
                 BlurAnimatedVisibility(visible = value.navigation !in setOf("material", "one"), label = "nav-material-setting") {
                     Preference(tr("nav_material_title", "底部导航栏材质参数调整")) { open("navigation_material") }
+                }
+                SliderPreference(tr("nav_vertical_offset", "底部导航栏垂直偏移"), value.navigationOffsetDp.toFloat(),
+                    NAVIGATION_OFFSET_DP_RANGE.first.toFloat()..NAVIGATION_OFFSET_DP_RANGE.last.toFloat(),
+                    "${value.navigationOffsetDp} dp", steps = NAVIGATION_OFFSET_DP_RANGE.last - NAVIGATION_OFFSET_DP_RANGE.first - 1,
+                    defaultValue = 0f, centerValue = 0f) { offset ->
+                    model.updateSettings { it.copy(navigationOffsetDp = offset.roundToInt()) }
                 }
                 GlassDropdownPreference(tr("navigation_labels", "底部导航栏标签显示方式"),
                     listOf(tr("icons_and_text", "图标和文本"), tr("icons_only", "仅图标"), tr("text_only", "仅文本")),
@@ -83,9 +91,9 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
                     checked = value.cloudDisabled, onCheckedChange = { checked -> model.updateSettings { it.copy(cloudDisabled = checked) } })
                 Preference(tr("artist_and_album", "艺术家与专辑")) { open("artist_album_settings") }
                 if (!value.cloudDisabled) GlassDropdownPreference(tr("home_content", "首页内容"),
-                    listOf(tr("home_content_local", "本地"), tr("home_content_cloud", "云端")),
-                    if (value.homeContent == "cloud") 1 else 0, backdrop = LocalToolbarBackdrop.current) { index ->
-                    model.updateSettings { it.copy(homeContent = if (index == 1) "cloud" else "local") }
+                    listOf(tr("home_content_local", "本地"), tr("netease", "网易云音乐"), tr("qq_music", "QQ音乐")),
+                    homeContentSources.indexOf(value.homeContent).coerceAtLeast(0), backdrop = LocalToolbarBackdrop.current) { index ->
+                    model.updateSettings { it.copy(homeContent = homeContentSources[index]) }
                 }
                 GlassDropdownPreference(tr("select_language", "选择语言"), listOf(tr("chinese", "简体中文"), tr("english", "English")),
                     if (value.language == "en") 1 else 0, backdrop = LocalToolbarBackdrop.current) { index ->
@@ -290,6 +298,8 @@ fun LoginPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Un
             SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
                 Preference(tr("downloaded_music", "已下载的音乐"), onClick = { open("downloads") })
                 CloudCachePreference(model)
+                SwitchPreference(tr("heartbeat_mode", "心动模式"), checked = model.settings.value.heartbeatEnabled,
+                    onCheckedChange = { enabled -> model.updateSettings { it.copy(heartbeatEnabled = enabled) } })
             }
         }
         item {

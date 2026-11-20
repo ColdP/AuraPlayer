@@ -30,6 +30,11 @@ internal fun playerMiniBlurRadius(style: String, blurPercent: Int): Dp =
 internal fun playerTransitionBlurRadius(miniBlurRadius: Dp, expansion: Float): Dp =
     miniBlurRadius * .8f * expansion.coerceIn(0f, 1f)
 
+internal fun playerMorphCornerRadius(expansion: Float, miniRadius: Dp, screenRadius: Dp): Dp {
+    val progress = expansion.coerceIn(0f, 1f)
+    return miniRadius * (1f - progress) + screenRadius * progress
+}
+
 internal data class FullscreenPlayerCard(val left: Dp, val top: Dp, val width: Dp, val height: Dp)
 
 /** Landscape 4:3, bottom-centered, with a readable cover area above and bounded tablet width. */

@@ -1,6 +1,10 @@
 package btm.m.auraplayer.ui
 
 import androidx.compose.ui.unit.dp
+import btm.m.auraplayer.data.CatalogAlbum
+import btm.m.auraplayer.data.CatalogInfo
+import btm.m.auraplayer.data.CloudPlaylist
+import btm.m.auraplayer.data.CloudPlaylistContent
 import btm.m.auraplayer.data.Song
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -114,5 +118,60 @@ class CatalogAlbumTrackTest {
         assertEquals(24f, AuraMoreHorizontalIcon.viewportWidth, .001f)
         assertEquals(24f, AuraMoreHorizontalIcon.viewportHeight, .001f)
         assertEquals(3, AuraMoreHorizontalIcon.root.size)
+    }
+
+    @Test
+    fun artistInfoHelpersResolveSubtitleCountsAndSafeFileNames() {
+        assertEquals(
+            "Jay Chou · 周杰倫",
+            resolveArtistSubtitle(listOf("Jay Chou", " 周杰倫 ", "Jay Chou"), "华语歌手", "艺术家"),
+        )
+        assertEquals(
+            "华语歌手",
+            resolveArtistSubtitle(emptyList(), " 华语歌手 ", "艺术家"),
+        )
+        assertEquals(
+            "艺术家",
+            resolveArtistSubtitle(emptyList(), "", "艺术家"),
+        )
+
+        val localTracks = listOf(
+            Song(1, "A", "Artist", "Album 1", albumId = 10, uri = "local:1"),
+            Song(2, "B", "Artist", "Album 1", albumId = 10, uri = "local:2"),
+            Song(3, "C", "Artist", "Album 2", albumId = 20, uri = "local:3"),
+        )
+        assertEquals(3 to 2, resolveArtistCounts(info = null, cloud = null, tracks = localTracks))
+
+        val cloudContent = CloudPlaylistContent(CloudPlaylist(5, "Artist", 60, ""), source = "artist")
+        val cloudInfo = CatalogInfo(
+            artistId = 5,
+            artist = "Artist",
+            artistSongCount = 128,
+            artistAlbumCount = 14,
+            albums = listOf(CatalogAlbum(1, "Album", "", 5, "Artist")),
+        )
+        assertEquals(128 to 14, resolveArtistCounts(cloudInfo, cloudContent, localTracks))
+
+        assertEquals("A_B_C", sanitizeArtworkFileName("A/B:C", "artist"))
+        assertEquals("artist", sanitizeArtworkFileName("   ", "artist"))
+    }
+
+    @Test
+    fun isArtistSingleOrEpSeparatesAlbumsFromSinglesAndEps() {
+        val album = CatalogAlbum(1, "LP", "", 10, "Artist", type = "专辑")
+        val compilation = CatalogAlbum(2, "Best Of", "", 10, "Artist", type = "精选集")
+        val unknown = CatalogAlbum(3, "Local", "", 10, "Artist", type = "")
+        val singleEp = CatalogAlbum(4, "Lead", "", 10, "Artist", type = "EP/Single")
+        val single = CatalogAlbum(5, "Track", "", 10, "Artist", type = "Single")
+        val ep = CatalogAlbum(6, "Mini", "", 10, "Artist", type = "EP")
+        val zhSingle = CatalogAlbum(7, "单曲", "", 10, "Artist", type = "单曲")
+
+        assertFalse(isArtistSingleOrEp(album))
+        assertFalse(isArtistSingleOrEp(compilation))
+        assertFalse(isArtistSingleOrEp(unknown))
+        assertTrue(isArtistSingleOrEp(singleEp))
+        assertTrue(isArtistSingleOrEp(single))
+        assertTrue(isArtistSingleOrEp(ep))
+        assertTrue(isArtistSingleOrEp(zhSingle))
     }
 }

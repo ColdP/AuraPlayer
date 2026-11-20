@@ -35,8 +35,10 @@
             android:supportsPictureInPicture="false"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode|fontScale"
-            android:theme="@style/Theme.Aura" />
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode|fontScale|layoutDirection|colorMode|fontWeightAdjustment"
+            android:theme="@style/Theme.Aura">
+            <meta-data android:name="miui.rear.policy" android:value="1" />
+        </activity>
         <service android:name=".playback.PlaybackService" android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter><action android:name="androidx.media3.session.MediaSessionService" /></intent-filter>

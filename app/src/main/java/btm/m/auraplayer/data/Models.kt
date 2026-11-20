@@ -30,6 +30,7 @@ data class MusicDirectory(val title: String, val collections: List<MusicCollecti
 
 data class CloudPlaylist(val id: Long, val name: String, val count: Int, val artwork: String, val specialType: Int = 0, val creatorId: Long = 0, val provider: String = "")
 data class CloudAccount(val userId: Long, val nickname: String, val avatar: String)
+data class CloudFollow(val userId: Long, val nickname: String, val avatar: String, val signature: String)
 
 /** Server supplied NetEase home recommendation item; never backed by the user's playlists. */
 data class CloudHomeItem(
@@ -44,12 +45,17 @@ data class CloudHomeItem(
     val actionId: Long = id,
 )
 
+internal val SCAN_MINIMUM_SECONDS_RANGE = 0..120
+
 /** Paths are MediaStore RELATIVE_PATH values, including a final slash. */
 object LibraryFilter {
     fun normalize(path: String): String = path.replace('\\', '/').trim('/').let { if (it.isEmpty()) "" else "$it/" }
+    fun acceptsDuration(duration: Long, enabled: Boolean, minimumSeconds: Int): Boolean =
+        !enabled || duration >= minimumSeconds.coerceIn(SCAN_MINIMUM_SECONDS_RANGE) * 1000L
+
     fun accepts(path: String, duration: Long, white: Boolean, blocked: Set<String>, filterDuration: Boolean, minimumSeconds: Int, volume: String = "external_primary"): Boolean {
         val normalized = normalize(path)
-        if (filterDuration && duration < minimumSeconds.coerceIn(0, 60) * 1000L) return false
+        if (!acceptsDuration(duration, filterDuration, minimumSeconds)) return false
         if (white) return normalized.startsWith("Music/", ignoreCase = true)
         return blocked.none { entry ->
             val targetVolume = entry.substringBefore(':', "")

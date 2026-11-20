@@ -5,6 +5,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PlayerLayoutGeometryTest {
+    @Test fun entryAndExitMorphUseThePhysicalScreenCornerAtFullSize() {
+        val miniCorner = 30.dp
+        val screenCorner = 42.dp
+        assertEquals(miniCorner, playerMorphCornerRadius(0f, miniCorner, screenCorner))
+        assertEquals(36.dp, playerMorphCornerRadius(.5f, miniCorner, screenCorner))
+        assertEquals(screenCorner, playerMorphCornerRadius(1f, miniCorner, screenCorner))
+    }
+
     @Test fun transitionBlurStaysBelowUnchangedMiniMaterialForAllNavigationStyles() {
         for ((style, radius) in listOf("liquid_glass" to 3f, "harmony_os_floating" to 5.22f,
                 "hyper_os_floating" to 4.32f)) {

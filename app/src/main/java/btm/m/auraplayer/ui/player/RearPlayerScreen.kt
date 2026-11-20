@@ -434,11 +434,13 @@ fun RearPlayerScreen(
                     val modeIcon = when (model.playbackMode) {
                         1 -> R.drawable.ic_player_shuffle
                         2 -> R.drawable.ic_player_repeat_one
+                        btm.m.auraplayer.HEARTBEAT_PLAYBACK_MODE -> R.drawable.ic_player_heartbeat
                         else -> R.drawable.ic_player_repeat
                     }
                     val modeLabel = when (model.playbackMode) {
                         1 -> tr("shuffle_mode", "随机播放")
                         2 -> tr("repeat_one_mode", "单曲循环")
+                        btm.m.auraplayer.HEARTBEAT_PLAYBACK_MODE -> tr("heartbeat_mode", "心动模式")
                         else -> tr("repeat_all_mode", "列表循环")
                     }
                     val inlineVolumeWidth = (contentWidth * 0.30f).coerceIn(72.dp, 120.dp)
@@ -743,13 +745,13 @@ fun RearPlayerScreen(
                 }
             }
 
+            val coverShape = RoundedCornerShape(coverCorner)
             // Shared seamless Cover (1:1 aspect ratio, moderate corners, clickable to toggle lyrics)
             Box(
                 modifier = Modifier
                     .offset { IntOffset(0, coverY.roundToPx()) }
                     .size(coverSize)
                     .aspectRatio(1f)
-                    .clip(RoundedCornerShape(coverCorner))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -764,6 +766,7 @@ fun RearPlayerScreen(
                     transitionKey = song.id.toString(),
                     animation = resolvedAppearance.coverAnimation,
                     enabled = true,
+                    shape = coverShape,
                 )
             }
 

@@ -3,22 +3,27 @@ package btm.m.auraplayer.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.data.SearchCategory
+import btm.m.auraplayer.data.CloudFollow
+import btm.m.auraplayer.data.cloudSection
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun CloudHubPage(model: AuraViewModel, padding: PaddingValues, login: () -> Unit, loginQq: () -> Unit) {
+internal fun CloudHubPage(model: AuraViewModel, padding: PaddingValues, login: () -> Unit, loginQq: () -> Unit, openFollows: () -> Unit) {
     val user = model.account
     val source = model.settings.value.cloudSource
     val showNetease = source != "qq"
     val showQq = source != "netease"
     LaunchedEffect(showQq, model.app.qqEndpoint) { if (showQq && model.qqPlaylists.isEmpty() && model.qqRecommended.isEmpty()) model.refreshQq() }
+    LaunchedEffect(showNetease, user?.userId) { if (showNetease) model.refreshListeningRankPreview() }
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (showNetease) {
             item("account") {
@@ -31,7 +36,8 @@ internal fun CloudHubPage(model: AuraViewModel, padding: PaddingValues, login: (
             item("rank") {
                 SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
                     ArrowPreference(title = tr("listening_rank", "听歌排行"), onClick = { if (user == null) login() else model.openListeningRank() },
-                        startAction = { Artwork(model.current?.artwork.orEmpty(), Modifier.padding(end = 12.dp).size(48.dp), cornerRadius = ListArtworkCornerRadius) })
+                        startAction = { Artwork(model.cloudRecentSongs.firstOrNull()?.artwork.orEmpty(), Modifier.padding(end = 12.dp).size(48.dp), cornerRadius = ListArtworkCornerRadius) })
+                    ArrowPreference(title = tr("my_follows", "我的关注"), onClick = { if (user == null) login() else openFollows() })
                 }
             }
             item("playlists") {
@@ -64,6 +70,54 @@ internal fun CloudHubPage(model: AuraViewModel, padding: PaddingValues, login: (
             }
         }
         if (showQq) qqSection(model, loginQq)
+    }
+}
+
+@Composable
+internal fun CloudFollowsPage(model: AuraViewModel, padding: PaddingValues) {
+    val user = model.account?.takeIf { model.cloudEnabled } ?: return
+    val follows = remember(user.userId) { mutableStateListOf<CloudFollow>() }
+    var offset by remember(user.userId) { mutableIntStateOf(0) }
+    var hasMore by remember(user.userId) { mutableStateOf(true) }
+    var loading by remember(user.userId) { mutableStateOf(true) }
+    var failed by remember(user.userId) { mutableStateOf(false) }
+    var request by remember(user.userId) { mutableIntStateOf(0) }
+    LaunchedEffect(user.userId, request) {
+        loading = true
+        failed = false
+        val page = cloudSection { model.app.api.follows(user.userId, offset) }
+        if (page == null) failed = true
+        else {
+            val existing = follows.mapTo(hashSetOf()) { it.userId }
+            follows.addAll(page.items.filter { existing.add(it.userId) })
+            offset = page.nextOffset
+            hasMore = page.hasMore
+        }
+        loading = false
+    }
+    val listState = rememberLazyListState()
+    var wasEmpty by remember(user.userId) { mutableStateOf(follows.isEmpty()) }
+    LaunchedEffect(follows.isEmpty()) {
+        if (wasEmpty && follows.isNotEmpty() && listState.firstVisibleItemIndex > 0) {
+            listState.scrollToItem(0)
+        }
+        wasEmpty = follows.isEmpty()
+    }
+    LazyColumn(pageContentModifier(), state = listState, contentPadding = padding, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(follows, key = { it.userId }) { follow ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Artwork(follow.avatar, Modifier.size(46.dp), circular = true)
+                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                    Text(follow.nickname, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    if (follow.signature.isNotBlank()) Text(follow.signature, style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
+            }
+        }
+        if (loading || failed || hasMore) item(if (follows.isEmpty()) "initial_more" else "more") {
+            CloudPagingFooter(loading, failed) { if (!loading) request++ }
+        }
+        else if (follows.isEmpty()) item("empty") { Text(tr("no_follows", "暂无关注"), color = MiuixTheme.colorScheme.onSurfaceVariantSummary) }
     }
 }
 

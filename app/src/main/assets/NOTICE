@@ -29,6 +29,7 @@ OkHttp — https://github.com/square/okhttp, Apache-2.0.
 NeteaseCloudMusicApiEnhanced — MIT
 https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced
 The app ports official request mapping and WEAPI/EAPI encryption to Kotlin/JCA.
+This includes the Heartbeat, daily and discovery recommendations, and user following API mappings.
 Original MIT license: licenses/NeteaseCloudMusicApiEnhanced-MIT.txt.
 Custom API server code remains an optional separate deployment.
 Original server authors and contributors retain their copyrights.

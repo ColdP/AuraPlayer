@@ -28,89 +28,121 @@ object RearScreenLauncher {
         } else {
             component
         }
-        val quotedPackage = shellQuote(packageName)
         val quotedComponent = shellQuote(component)
         val quotedShortComponent = shellQuote(shortComponent)
         val quotedSubscreen = shellQuote(SUBSCREEN_CENTER_PACKAGE)
-        val quotedSubscreenLauncher = shellQuote(SUBSCREEN_LAUNCHER_COMPONENT)
-        val restartBlock = if (restartSubscreenBeforeCast) {
+        val stopSubscreenBlock = if (restartSubscreenBeforeCast) {
             """
                 |subscreen=$quotedSubscreen
-                |subscreen_launcher=$quotedSubscreenLauncher
+                |# Stop the stock rear launcher so it cannot immediately reclaim display $targetDisplayId.
                 |am force-stop "${'$'}subscreen" >/dev/null 2>&1 || true
-                |sleep 0.15
-                |am start --user 0 --display "${'$'}target_display" -f 0x10000000 -n "${'$'}subscreen_launcher" >/dev/null 2>&1 || true
-                |for _s in 1 2 3 4 5 6 7 8 9 10; do
-                |    if pidof "${'$'}subscreen" >/dev/null 2>&1; then
-                |        break
-                |    fi
-                |    sleep 0.08
-                |done
-                |sleep 0.25
             """.trimMargin() + "\n"
         } else {
             ""
         }
         return """
-            |pkg=$quotedPackage
             |component=$quotedComponent
             |short_component=$quotedShortComponent
             |target_display=$targetDisplayId
             |on_target_display() {
-            |    am stack list 2>/dev/null | awk -v disp="displayId=${'$'}target_display" -v comp="${'$'}component" -v short_comp="${'$'}short_component" -v pkg="${'$'}pkg" '
+            |    am stack list 2>/dev/null | awk -v disp="displayId=${'$'}target_display" -v comp="${'$'}component" -v short_comp="${'$'}short_component" '
             |        /RootTask|Stack/ {
             |            in_target = ($0 ~ (disp "([^0-9]|$)"))
             |        }
-            |        in_target && index($0, "visible=true") > 0 && (index($0, comp) > 0 || index($0, short_comp) > 0 || (index($0, pkg) > 0 && index($0, "MainActivity") == 0)) {
+            |        in_target && index($0, "taskId=") > 0 && (index($0, comp) > 0 || index($0, short_comp) > 0) {
             |            found = 1; exit
             |        }
-            |        ($0 ~ (disp "([^0-9]|$)")) && index($0, "visible=true") > 0 && (index($0, comp) > 0 || index($0, short_comp) > 0) {
+            |        ($0 ~ (disp "([^0-9]|$)")) && index($0, "taskId=") > 0 && (index($0, comp) > 0 || index($0, short_comp) > 0) {
             |            found = 1; exit
             |        }
             |        END { exit(found ? 0 : 1) }
             |    '
             |}
             |find_task_id() {
-            |    all="${'$'}(am stack list 2>/dev/null)"
-            |    line="${'$'}(echo "${'$'}all" | grep -F "${'$'}component" | tail -n 1)"
-            |    [ -z "${'$'}line" ] && line="${'$'}(echo "${'$'}all" | grep -F "${'$'}short_component" | tail -n 1)"
-            |    [ -z "${'$'}line" ] && line="${'$'}(echo "${'$'}all" | grep -F "${'$'}pkg" | grep -Fv "MainActivity" | tail -n 1)"
-            |    echo "${'$'}line" | sed -n 's/.*taskId=\([0-9]*\).*/\1/p' | tail -n 1
+            |    am stack list 2>/dev/null | awk -v comp="${'$'}component" -v short_comp="${'$'}short_component" '
+            |        /RootTask|Stack/ {
+            |            cur_root = $0
+            |            if (sub(/.*RootTask id=/, "", cur_root) || sub(/.*Stack id=/, "", cur_root)) {
+            |                sub(/[^0-9].*/, "", cur_root)
+            |            } else {
+            |                cur_root = ""
+            |            }
+            |        }
+            |        index($0, comp) > 0 || index($0, short_comp) > 0 {
+            |            tid = $0
+            |            if (sub(/.*taskId=/, "", tid)) {
+            |                sub(/[^0-9].*/, "", tid)
+            |            } else {
+            |                tid = ""
+            |            }
+            |            if (cur_root != "") res = cur_root
+            |            else if (tid != "") res = tid
+            |        }
+            |        END {
+            |            if (res != "") print res
+            |        }
+            |    '
             |}
-            |""".trimMargin() + "\n" + restartBlock + """
-            |am start --user 0 --display "${'$'}target_display" -f 0x10020000 -n "${'$'}component" >/dev/null 2>&1 || true
-            |sleep 0.18
-            |if on_target_display; then
-            |    echo "OK_DIRECT"
-            |    exit 0
-            |fi
-            |am start --user 0 --display "${'$'}target_display" -f 0x10020000 -n "${'$'}component" >/dev/null 2>&1 || true
-            |sleep 0.18
-            |if on_target_display; then
-            |    echo "OK_DIRECT_RETRY"
-            |    exit 0
-            |fi
-            |am start --user 0 -f 0x10020000 -n "${'$'}component" >/dev/null 2>&1 || true
-            |task_id=""
-            |for _i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-            |    task_id="${'$'}(find_task_id)"
-            |    [ -n "${'$'}task_id" ] && break
-            |    sleep 0.08
-            |done
-            |if [ -n "${'$'}task_id" ]; then
-            |    move_out="${'$'}(service call activity_task 50 i32 "${'$'}task_id" i32 "${'$'}target_display" 2>&1)"
-            |    move_rc=$?
-            |    for _j in 1 2 3 4 5; do
+            |move_task_to_target() {
+            |    tid="$1"
+            |    service call activity_task 50 i32 "${'$'}tid" i32 "${'$'}target_display" >/dev/null 2>&1 || true
+            |    for _j in 1 2 3 4 5 6; do
             |        if on_target_display; then
-            |            echo "OK_MOVED:${'$'}task_id"
-            |            exit 0
+            |            return 0
             |        fi
             |        sleep 0.08
             |    done
-            |    if [ "${'$'}move_rc" -eq 0 ] && ! echo "${'$'}move_out" | grep -Eiq "error|exception|failed"; then
-            |        echo "OK_MOVED_CALL:${'$'}task_id"
+            |    am display move-stack "${'$'}tid" "${'$'}target_display" >/dev/null 2>&1 || true
+            |    for _j in 1 2 3 4 5 6; do
+            |        if on_target_display; then
+            |            return 0
+            |        fi
+            |        sleep 0.08
+            |    done
+            |    return 1
+            |}
+            |""".trimMargin() + "\n" + stopSubscreenBlock + """
+            |existing_id="${'$'}(find_task_id)"
+            |if [ -n "${'$'}existing_id" ] && ! on_target_display; then
+            |    if move_task_to_target "${'$'}existing_id"; then
+            |        am start --user 0 --display "${'$'}target_display" -f 0x10000000 -n "${'$'}component" >/dev/null 2>&1 || true
+            |        if on_target_display; then
+            |            echo "OK_MOVED_EXISTING:${'$'}existing_id"
+            |            exit 0
+            |        fi
+            |    fi
+            |fi
+            |am start --user 0 --display "${'$'}target_display" -f 0x10000000 -n "${'$'}component" >/dev/null 2>&1 || true
+            |for _k in 1 2 3 4 5 6 7 8; do
+            |    if on_target_display; then
+            |        echo "OK_DIRECT"
             |        exit 0
             |    fi
+            |    sleep 0.08
+            |done
+            |am start --user 0 --display "${'$'}target_display" -f 0x10000000 -n "${'$'}component" >/dev/null 2>&1 || true
+            |for _k in 1 2 3 4; do
+            |    if on_target_display; then
+            |        echo "OK_DIRECT_RETRY"
+            |        exit 0
+            |    fi
+            |    sleep 0.08
+            |done
+            |# Fallback: create the task normally, discover its id, then move it to target_display.
+            |am start --user 0 -f 0x10000000 -n "${'$'}component" >/dev/null 2>&1 || true
+            |task_id=""
+            |for _i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do
+            |    if on_target_display; then
+            |        echo "OK_DIRECT_LATE"
+            |        exit 0
+            |    fi
+            |    task_id="${'$'}(find_task_id)"
+            |    [ -n "${'$'}task_id" ] && break
+            |    sleep 0.05
+            |done
+            |if [ -n "${'$'}task_id" ] && move_task_to_target "${'$'}task_id"; then
+            |    echo "OK_MOVED:${'$'}task_id"
+            |    exit 0
             |fi
             |echo "ERR_CAST_FAILED"
             |exit 1

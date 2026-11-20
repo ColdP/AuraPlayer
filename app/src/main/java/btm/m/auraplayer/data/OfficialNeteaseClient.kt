@@ -32,6 +32,14 @@ internal class OfficialNeteaseClient(
                 .put("refresh", false).put("cursor", "-1").put("refreshType", 1), authenticated)
             "recommend/resource" -> call("/api/discovery/recommend/resource", JSONObject()
                 .put("limit", value("limit", "30")).put("offset", value("offset", "0")), authenticated)
+            "recommend/songs" -> call("/api/v3/discovery/recommend/songs", JSONObject()
+                .apply { values["afresh"]?.let { put("afresh", it) } }, authenticated)
+            "personalized/newsong" -> call("/api/personalized/newsong", JSONObject()
+                .put("type", "recommend").put("limit", value("limit", "10")).put("areaId", 0), authenticated)
+            "playmode/intelligence/list" -> call("/api/playmode/intelligence/list", JSONObject()
+                .put("songId", value("id")).put("playlistId", value("pid")).put("type", "fromPlayOne")
+                .put("startMusicId", value("sid", value("id"))).put("count", value("count", "1").toInt()),
+                authenticated, eapi = true, androidClient = true)
             "personalized/playlist" -> call("/api/personalized/playlist", JSONObject().put("limit", value("limit", "30")).put("offset", value("offset", "0")), authenticated = false)
             "login/status" -> call("/api/w/nuser/account/get", JSONObject(), authenticated)
             "user/playlist" -> call("/api/user/playlist", JSONObject().put("uid", value("uid"))
@@ -41,6 +49,8 @@ internal class OfficialNeteaseClient(
             "search" -> call("/api/search/voice/get", JSONObject().put("keyword", value("keywords")).put("scene", "normal")
                 .put("limit", value("limit", "50")).put("offset", value("offset", "0")), authenticated)
             "user/record" -> call("/api/v1/play/record", JSONObject().put("uid", value("uid")).put("type", value("type", "0")), authenticated)
+            "user/follows" -> call("/api/user/getfollows/${value("uid")}", JSONObject()
+                .put("offset", value("offset", "0")).put("limit", value("limit", "30")).put("order", true), authenticated)
             "likelist" -> call("/api/song/like/get", JSONObject().put("uid", value("uid")), authenticated)
             "like" -> call("/api/radio/like", JSONObject().put("trackId", value("id")).put("like", value("like") == "true").put("alg", "itembased").put("time", "3"), authenticated)
             "playlist/tracks" -> {
@@ -57,7 +67,12 @@ internal class OfficialNeteaseClient(
             "dj/program/detail" -> call("/api/dj/program/detail", JSONObject().put("id", value("id")), authenticated)
             "album" -> call("/api/v1/album/${value("id")}", JSONObject(), authenticated)
             "artist/detail" -> call("/api/artist/head/info/get", JSONObject().put("id", value("id")), authenticated)
+            "artist/detail/dynamic" -> call("/api/artist/detail/dynamic", JSONObject().put("id", value("id")), authenticated)
             "artist/album" -> call("/api/artist/albums/${value("id")}", JSONObject().put("limit", value("limit", "12")).put("offset", value("offset", "0")), authenticated)
+            "artist/sub" -> {
+                val action = if (value("t") == "1") "sub" else "unsub"
+                call("/api/artist/$action", JSONObject().put("artistId", value("id")).put("artistIds", "[${value("id")}]"), authenticated)
+            }
             "artist/sublist" -> call("/api/artist/sublist", JSONObject().put("limit", value("limit", "100")).put("offset", value("offset", "0")), authenticated)
             "artist/songs" -> call("/api/v1/artist/songs", JSONObject().put("id", value("id"))
                 .put("private_cloud", "true").put("work_type", 1)

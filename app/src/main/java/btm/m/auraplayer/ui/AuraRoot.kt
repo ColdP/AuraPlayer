@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -213,9 +214,12 @@ private fun AuraShell(model: AuraViewModel) {
             (nowPlayingConfig.theme == btm.m.auraplayer.playback.PlayerTheme.MATERIAL &&
                 nowPlayingConfig.materialBackground == btm.m.auraplayer.playback.MaterialPlayerBackground.MATERIAL)
         )
-    val visibleCollection = pages.lastOrNull()?.takeIf { it.startsWith("collection:") }?.substringAfter(':')?.toLongOrNull()
-        ?.let(model::collectionDestination)?.collection
-    val catalogDark = visibleCollection?.key?.let { it.startsWith("artist:") || it.startsWith("cloud:artist:") } == true
+    val topRoute = pages.lastOrNull()
+    val visibleCollection = topRoute?.takeIf {
+        it.substringBefore(':') in setOf("collection", "albumInfo", "artistInfo")
+    }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)?.collection
+    val catalogDark = topRoute?.substringBefore(':') in setOf("albumInfo", "artistInfo") ||
+        visibleCollection?.key?.let { it.startsWith("artist:") || it.startsWith("cloud:artist:") } == true
     val playerCoveringBars = playerOpen && (!lyricShareTransition.active || lyricShareTransition.progress < .45f)
     SideEffect {
         val activity = context as btm.m.auraplayer.MainActivity
@@ -258,7 +262,7 @@ private fun AuraShell(model: AuraViewModel) {
     LaunchedEffect(collectionIds) {
         for (index in pages.lastIndex downTo 0) {
             val route = pages[index]
-            if (route.substringBefore(':') in setOf("collection", "albumInfo", "artistSongs", "artistAlbums") && route.substringAfter(':').toLongOrNull() !in collectionIds) {
+            if (route.substringBefore(':') in setOf("collection", "albumInfo", "artistInfo", "artistSongs", "artistAlbums", "artistSingles") && route.substringAfter(':').toLongOrNull() !in collectionIds) {
                 pages.removeAt(index); seamless.entries.remove(index)
                 if (index == playerReturnIndex) playerReturnIndex = -1
                 else if (index < playerReturnIndex) playerReturnIndex--
@@ -342,8 +346,8 @@ private fun AuraShell(model: AuraViewModel) {
         LocalSongActions provides { request -> songActions = request; songActionsOpen = true }) {
         // MIUIX PopupLayout(renderInRootScaffold=true) must be hosted outside recorded pages.
         Scaffold(containerColor = Color.Transparent) {
-            val activeShellBlur = searchProgress > .001f || playerExpansion > .001f
-            val bypassShellBackdropLayer = chromeHidden && !activeShellBlur
+            val playerMorphVisible by remember { derivedStateOf { playerExpansion > .001f } }
+            val bypassShellBackdropLayer = chromeHidden && searchProgress <= .001f && !playerMorphVisible
             val usbHudBackdrop = rememberLayerBackdrop { drawRect(surface); drawContent() }
             var usbHudMounted by remember { mutableStateOf(false) }
             Box(Modifier.fillMaxSize().background(surface)) {
@@ -352,7 +356,9 @@ private fun AuraShell(model: AuraViewModel) {
                 // without recording themselves back into their own glass backgrounds.
                 // Pages that hide bottom chrome without active search/player blur bypass the extra
                 // RenderNodeLayer so HWUI platform blur/blend views (e.g. About) sample behind directly.
-                val pageHostModifier = if (bypassShellBackdropLayer) {
+                // Keep the transition BlurEffect on an outer graphicsLayer so per-frame blur updates
+                // do not invalidate the inner layerBackdrop for floating glass controls.
+                val pageBlurModifier = if (bypassShellBackdropLayer) {
                     Modifier.fillMaxSize()
                 } else {
                     Modifier.fillMaxSize().graphicsLayer {
@@ -364,9 +370,15 @@ private fun AuraShell(model: AuraViewModel) {
                         // for each spring/gesture frame. Clamp keeps the screen edges filled.
                         val radius = ((searchProgress * 14f).dp + playerTransitionBlurRadius(miniBlurRadius, playerExpansion)).toPx()
                         renderEffect = if (!covered && radius > .01f) BlurEffect(radius, radius, TileMode.Clamp) else null
-                    }.layerBackdrop(backdrop)
+                    }
                 }
-                Box(pageHostModifier) {
+                val pageBackdropModifier = if (bypassShellBackdropLayer) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier.fillMaxSize().layerBackdrop(backdrop)
+                }
+                Box(pageBlurModifier) {
+                Box(pageBackdropModifier) {
                 Box(Modifier.fillMaxSize().blur(baseBlur.dp)) {
                     AnimatedContent(targetState = selected.intValue, transitionSpec = {
                         val direction = if (targetState >= initialState) 1 else -1
@@ -385,12 +397,15 @@ private fun AuraShell(model: AuraViewModel) {
                                         model.refreshLibrary(); if (tab == 1) model.refreshCloud()
                                     }
                                 }) { padding, _ ->
-                                    val contentPadding = auraContentPadding(padding, if (model.current != null) 184 else 112)
+                                    val chromeSpace = if (model.current != null) 184 else 112
+                                    val contentPadding = auraContentPadding(padding, chromeSpace + settings.navigationOffsetDp.coerceAtLeast(0))
                                     when (tab) {
-                                        0 -> if (settings.homeContent == "cloud" && !settings.cloudDisabled) CloudHomePage(model, contentPadding,
-                                            login = { open("login") }, onRecommended = { open("cloud_recommended") })
-                                            else HomePage(model, contentPadding, requestPermission)
-                                        1 -> CloudHubPage(model, contentPadding, { open("login") }, { open("qq_login") })
+                                        0 -> when (if (settings.cloudDisabled) "local" else settings.homeContent) {
+                                            "netease" -> CloudHomePage(model, contentPadding, { open("login") }, { open("cloud_recommended") })
+                                            "qq" -> QqHomePage(model, contentPadding) { open("qq_login") }
+                                            else -> HomePage(model, contentPadding, requestPermission)
+                                        }
+                                        1 -> CloudHubPage(model, contentPadding, { open("login") }, { open("qq_login") }, { open("cloud_follows") })
                                         2 -> SongsPage(model, contentPadding, requestPermission) { secondary ->
                                             open(when (secondary) { 0 -> "albums"; 1 -> "artists"; else -> "localPlaylists" })
                                         }
@@ -430,11 +445,15 @@ private fun AuraShell(model: AuraViewModel) {
                     }
                 }
                 }
+                }
                 AuraBottomBar(selected, model, backdrop, Modifier.align(Alignment.BottomCenter).graphicsLayer {
-                    val covered = playerExpansion >= 1f
-                    alpha = if (covered) 0f else 1f
-                    val radius = ((searchProgress * 14f).dp + playerTransitionBlurRadius(miniBlurRadius, playerExpansion)).toPx()
+                    val playerHide = ((playerExpansion - 0.08f) / 0.42f).coerceIn(0f, 1f)
+                    val covered = playerHide >= 1f && searchProgress <= .001f
+                    alpha = if (covered) 0f else 1f - playerHide
+                    val radius = (searchProgress * 14f).dp.toPx()
                     renderEffect = if (!covered && radius > .01f) BlurEffect(radius, radius, TileMode.Clamp) else null
+                }.drawWithContent {
+                    if (playerExpansion < 0.50f || searchProgress > .001f) drawContent()
                 },
                     searchVisible, searchProgress, secondaryProgress,
                     { if (searchAnchor.width > 0f) { searchVisible = true; searchOpen = true } },
@@ -510,14 +529,14 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
     }
     val tagEditorExitGuard = LocalTagEditorExitGuard.current
     val destination = route.takeIf { it.startsWith("collection:") }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)
-    val albumInfoDestination = route.takeIf { it.substringBefore(':') in setOf("albumInfo", "artistSongs", "artistAlbums") }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)
+    val albumInfoDestination = route.takeIf { it.substringBefore(':') in setOf("albumInfo", "artistInfo", "artistSongs", "artistAlbums", "artistSingles") }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)
     val page = when {
         route.startsWith("tagEditor:") -> "tagEditor"
         route.startsWith("llm_translation_edit:") -> "llm_translation_edit"
         route.startsWith("song_credits:") -> "song_credits"
         route.startsWith("collection:") -> "collection"
         route.startsWith("spatial_cover_preview:") -> "spatial_cover_preview"
-        route.substringBefore(':') in setOf("albumInfo", "artistSongs", "artistAlbums") -> route.substringBefore(':')
+        route.substringBefore(':') in setOf("albumInfo", "artistInfo", "artistSongs", "artistAlbums", "artistSingles") -> route.substringBefore(':')
         else -> route
     }
     val collection = destination?.collection ?: albumInfoDestination?.collection
@@ -531,12 +550,12 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         enabled = nowPlayingConfig.albumAnimatedCover,
     )
     val artistCatalogMedia = rememberCatalogArtistMedia(
-        collection = if (page == "collection" && catalog && collection.isArtist()) collection else null,
-        needLogo = nowPlayingConfig.artistWordmarkLogo,
+        collection = if (page in setOf("collection", "artistInfo") && catalog && collection.isArtist()) collection else null,
+        needLogo = page == "collection" && nowPlayingConfig.artistWordmarkLogo,
         needArtwork = nowPlayingConfig.appleMusicArtistArtwork,
-        needMotionVideo = nowPlayingConfig.artistAnimatedCover,
+        needMotionVideo = page == "collection" && nowPlayingConfig.artistAnimatedCover,
     )
-    val effectiveCollection = if (collection != null && page == "collection" && collection.isArtist() &&
+    val effectiveCollection = if (collection != null && page in setOf("collection", "artistInfo") && collection.isArtist() &&
         nowPlayingConfig.appleMusicArtistArtwork && !artistCatalogMedia.artworkUrl.isNullOrBlank()
     ) {
         collection.copy(artwork = artistCatalogMedia.artworkUrl)
@@ -548,7 +567,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         albumAnimatedCoverEnabled = nowPlayingConfig.albumAnimatedCover,
         motionVideoPath = catalogMotionPath,
     )
-    val catalogTopBarTint = if (effectiveCollection != null && (page == "albumInfo" || (page == "collection" && (effectiveCollection.isArtist() || immersiveAlbumCatalog)))) {
+    val catalogTopBarTint = if (effectiveCollection != null && (page in setOf("albumInfo", "artistInfo") || (page == "collection" && (effectiveCollection.isArtist() || immersiveAlbumCatalog)))) {
         btm.m.auraplayer.ui.player.rememberCatalogPlayerThemeTokens(
             artwork = effectiveCollection.artwork,
             config = nowPlayingConfig,
@@ -565,6 +584,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "qq_login" -> tr("qq_music", "QQ音乐")
         "switch_user", "qq_switch_user" -> tr("switch_user", "切换账号")
         "cloud_recommended" -> tr("recommended_playlists", "推荐歌单")
+        "cloud_follows" -> tr("my_follows", "我的关注")
         "downloads" -> tr("downloaded_music", "已下载的音乐")
         "audio_effects" -> tr("audio_effects", "音效")
         "effect_library" -> tr("preset_library", "预设库")
@@ -593,9 +613,10 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "albums" -> tr("albums", "专辑")
         "artists" -> tr("artists", "艺术家")
         "collection" -> collection?.title.orEmpty()
-        "albumInfo" -> collection?.title.orEmpty()
+        "albumInfo", "artistInfo" -> collection?.title.orEmpty()
         "artistSongs" -> tr("top_songs", "热门歌曲")
         "artistAlbums" -> tr("albums", "专辑")
+        "artistSingles" -> tr("singles_and_eps", "单曲与EP")
         "directory" -> model.directory?.title.orEmpty()
         else -> legalTitle(page)
     }
@@ -653,8 +674,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         enabled = playlistSearchSupported && (playlistSearchExpanded || playlistSearchQuery.isNotEmpty()),
         onBack = closePlaylistSearch,
     )
-    AppPage(title, back, showLargeTitle = page != "about" && (!catalog || page in setOf("artistSongs", "artistAlbums")),
-        recordCouiBackdrop = playlistSearchSupported,
+    AppPage(title, back, showLargeTitle = page != "about" && (!catalog || page in setOf("artistSongs", "artistAlbums", "artistSingles")),
         header = {
             when (page) {
                 "effect_library" -> SoftGlassHeaderTabs(listOf(tr("builtin_presets", "内置预设"), tr("user_presets", "用户预设")), presetTab) { presetTab = it }
@@ -685,8 +705,8 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         useLegacyTopBarBackdrop = page == "about",
         topBarTint = catalogTopBarTint,
         pageBackground = when {
-            page == "albumInfo" && effectiveCollection != null -> ({ AlbumInfoBackground(effectiveCollection, Modifier.matchParentSize()) })
-            catalog && page !in setOf("artistSongs", "artistAlbums") -> ({
+            page in setOf("albumInfo", "artistInfo") && effectiveCollection != null -> ({ AlbumInfoBackground(effectiveCollection, Modifier.matchParentSize()) })
+            catalog && page !in setOf("artistSongs", "artistAlbums", "artistSingles") -> ({
                 CatalogBackground(
                     collection = effectiveCollection,
                     modifier = Modifier.matchParentSize(),
@@ -697,7 +717,10 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             page == "about" -> ({ AboutMaterialBackground(Modifier.matchParentSize(), model.settings.value.monet) })
             else -> null
         }) { padding, _ ->
-        val contentPadding = auraContentPadding(padding, if (model.current != null && page !in CHROME_HIDDEN_ROUTES) 104 else 28)
+        val chromeSpace = if (model.current != null && page !in CHROME_HIDDEN_ROUTES) {
+            104 + model.settings.value.navigationOffsetDp.coerceAtLeast(0)
+        } else 28
+        val contentPadding = auraContentPadding(padding, chromeSpace)
         when (page) {
             "settings" -> SettingsPage(model, contentPadding, open)
             "theme" -> ThemePage(model, contentPadding)
@@ -707,6 +730,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             "switch_user" -> SwitchUserPage(model, contentPadding)
             "qq_switch_user" -> SwitchUserPage(model, contentPadding, isQq = true)
             "cloud_recommended" -> CloudRecommendedPage(model, contentPadding)
+            "cloud_follows" -> CloudFollowsPage(model, contentPadding)
             "downloads" -> DownloadedMusicPage(model, contentPadding)
             "audio_effects" -> AudioEffectsPage(contentPadding, isActive, open)
             "effect_library" -> PresetLibraryPage(contentPadding, presetTab, open)
@@ -755,9 +779,21 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
                     searchExpanded = playlistSearchExpanded,
                 )
             }
-            "artistSongs", "artistAlbums" -> if (collection != null && albumInfoDestination != null)
-                ArtistContentsPage(model, contentPadding, collection, albumInfoDestination.cloud, page == "artistAlbums")
+            "artistSongs", "artistAlbums", "artistSingles" -> if (collection != null && albumInfoDestination != null) {
+                ArtistContentsPage(
+                    model = model,
+                    padding = contentPadding,
+                    collection = collection,
+                    cloud = albumInfoDestination.cloud,
+                    mode = when (page) {
+                        "artistAlbums" -> ArtistContentMode.ALBUMS
+                        "artistSingles" -> ArtistContentMode.SINGLES_EPS
+                        else -> ArtistContentMode.SONGS
+                    },
+                )
+            }
             "albumInfo" -> if (collection != null && albumInfoDestination != null) AlbumInfoPage(model, contentPadding, collection, albumInfoDestination.cloud)
+            "artistInfo" -> if (effectiveCollection != null && albumInfoDestination != null) ArtistInfoPage(contentPadding, effectiveCollection, albumInfoDestination.cloud)
             "directory" -> DirectoryPage(model, contentPadding)
             else -> LegalPage(page, contentPadding)
         }
@@ -793,7 +829,7 @@ internal fun AuraBottomBar(selected: MutableIntState, model: AuraViewModel, back
     val labels = tabIds.map { allLabels[it] }
     val navSelected = remember { mutableIntStateOf(0) }
     navSelected.intValue = tabIds.indexOf(selected.intValue).coerceAtLeast(0)
-    BoxWithConstraints(modifier.fillMaxWidth().height(100.dp + navInset)) {
+    BoxWithConstraints(Modifier.offset(y = -settings.navigationOffsetDp.dp).then(modifier).fillMaxWidth().height(100.dp + navInset)) {
         val buttonSize = barHeight
         val gap = btm.m.auraplayer.ui.player.PlayerNavigationGeometry.searchGap
         // Reserve the same outer insets and gap as the original; measure the real pill width.
@@ -812,7 +848,9 @@ internal fun AuraBottomBar(selected: MutableIntState, model: AuraViewModel, back
             translationX = shift.toPx()
             translationY = navExit * (barHeight + navInset + 24.dp).toPx() + if (liquid) .44.dp.toPx() else 0f
             alpha = 1f - navExit
-        }.blur((navExit * 10f).dp)) {
+        }.blur(if (navExit < .999f) (navExit * 10f).dp else 0.dp).drawWithContent {
+            if (navExit < .999f) drawContent()
+        }) {
             CustomNavigation(view, tabs = labels.mapIndexed { index, label -> HostTab(label, "aura.${tabIds[index]}") {
                 if (!searchMounted && secondaryProgress < .01f) selected.intValue = tabIds[index]
             } }, selectedIndex = navSelected, blurRadius = if (liquid) 3 else 18, labelMode = settings.labels,

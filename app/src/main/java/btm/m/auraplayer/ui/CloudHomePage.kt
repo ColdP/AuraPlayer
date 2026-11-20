@@ -26,16 +26,24 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import btm.m.auraplayer.AuraViewModel
+import btm.m.auraplayer.R
 import btm.m.auraplayer.data.CatalogAlbum
 import btm.m.auraplayer.data.CloudPlaylist
 import btm.m.auraplayer.data.CloudHomeItem
+import btm.m.auraplayer.data.MusicCollection
 import btm.m.auraplayer.data.Song
+import btm.m.auraplayer.data.cloudSection
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.*
@@ -45,12 +53,29 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun CloudHomePage(model: AuraViewModel, padding: PaddingValues, login: () -> Unit, onRecommended: () -> Unit) {
     val user = model.account
-    LaunchedEffect(user?.userId) { if (user != null) model.refreshCloudHome() }
+    var homeRefresh by remember { mutableIntStateOf(0) }
+    LaunchedEffect(user?.userId, homeRefresh) { model.refreshCloudHome() }
     val recentSongs = model.cloudRecentSongs
     val playlists = model.cloudRecommendedPlaylists.filter { it.section == "recommended" }
     val feature = model.cloudRecommendedPlaylists.filter { it.section == "daily" || it.section == "feature" }
     val radar = model.cloudRecommendedPlaylists.filter { it.section == "radar" }
-    val daily = feature
+    val albums = model.cloudHomeItems.filter { it.kind == "album" }
+    val singles = key(user?.userId) {
+        rememberCloudSingles { refresh ->
+            val daily = if (user != null) model.fetchCloudDailySongs(refresh) else emptyList()
+            val discovery = daily + if (refresh || daily.size < CloudSingleCount) cloudSection { model.app.api.discoverySongs() }.orEmpty() else emptyList()
+            if (discovery.distinctBy { it.key }.size >= CloudSingleCount) discovery
+            else {
+                val fallback = playlists.ifEmpty { cloudSection { model.app.api.recommendedPlaylists(personalized = user != null) }.orEmpty() }
+                discovery + coroutineScope {
+                    (if (refresh) fallback.shuffled() else fallback).take(2).map { playlist ->
+                        async { cloudSection { model.app.api.playlistSongs(playlist.id, limit = CloudSingleCount).items }.orEmpty() }
+                    }.awaitAll().flatten()
+                }
+            }
+        }
+    }
+    val spotlightCards = rememberSpotlightCards(model, user != null, feature, radar)
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item("welcome") {
             Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -65,11 +90,15 @@ internal fun CloudHomePage(model: AuraViewModel, padding: PaddingValues, login: 
             }
             if (user == null) Preference(tr("login_required", "请先登录网易云音乐"), tr("account_manage", "管理账号与连接"), onClick = login)
         }
-        if (daily.isNotEmpty()) item("daily") {
+        if (spotlightCards.isNotEmpty()) item("daily_radar") {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                daily.take(4).forEach { card -> item { CloudFeatureCard(card.title, card.artwork, Modifier.width(142.dp)) { model.openCloudHomeItem(card) } } }
+                items(spotlightCards, key = { it.key }) { card ->
+                    CloudSpotlightTile(card)
+                }
             }
         }
+        item("singles") { CloudSinglesSection(model, singles) }
+        if (model.cloudHomeFailed) item("load_error") { CloudPagingFooter(false, true) { homeRefresh++ } }
         if (recentSongs.isNotEmpty()) item("recent_title") { CloudHomeHeader(tr("recently_listened", "最近常听")) }
         if (recentSongs.isNotEmpty()) item("recent") {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -80,16 +109,98 @@ internal fun CloudHomePage(model: AuraViewModel, padding: PaddingValues, login: 
         }
         if (playlists.isNotEmpty()) item("recommend_title") { CloudHomeHeader(tr("recommended_playlists", "推荐歌单"), arrow = true, onClick = onRecommended) }
         if (playlists.isNotEmpty()) item("recommend") { CloudHomeItemRow(playlists.take(6), model) }
-        if (radar.isNotEmpty()) item("radar_title") { CloudHomeHeader(user?.let { tr("user_radar", "${it.nickname}的雷达歌单") } ?: tr("user_radar_generic", "我的雷达歌单")) }
-        if (radar.isNotEmpty()) item("radar") {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                radar.take(5).forEach { card -> item { CloudFeatureCard(card.title, card.artwork, Modifier.width(142.dp)) { model.openCloudHomeItem(card) } } }
-            }
-        }
         if (model.cloudFollowedAlbums.isNotEmpty()) item("follow_title") { CloudHomeHeader(tr("followed_artist_updates", "你关注的艺人的新动向")) }
         if (model.cloudFollowedAlbums.isNotEmpty()) item("follow") { CloudHomeItemRow(model.cloudFollowedAlbums.take(8), model) }
+        if (albums.isNotEmpty()) item("discover_albums") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                CloudHomeHeader(tr("discover_albums", "发现专辑"))
+                CloudHomeItemRow(albums.take(8), model)
+            }
+        }
         if (model.cloudPublicBanners.isNotEmpty()) item("banners_title") { CloudHomeHeader(tr("netease_banners", "网易云音乐推荐")) }
         if (model.cloudPublicBanners.isNotEmpty()) item("banners") { CloudHomeBannerStack(model.cloudPublicBanners, model) }
+    }
+}
+
+private const val CloudSingleCount = 25
+
+private class CloudSinglesState {
+    var tracks by mutableStateOf<List<Song>>(emptyList())
+    var loading by mutableStateOf(true)
+    var refresh by mutableIntStateOf(0)
+    val scrollState = androidx.compose.foundation.lazy.LazyListState()
+}
+
+@Composable
+private fun rememberCloudSingles(load: suspend (Boolean) -> List<Song>): CloudSinglesState {
+    val state = remember { CloudSinglesState() }
+    val currentLoad by rememberUpdatedState(load)
+    LaunchedEffect(state.refresh) {
+        val refresh = state.refresh
+        state.loading = true
+        try {
+            val previous = state.tracks.mapTo(hashSetOf()) { it.key }
+            val candidates = currentLoad(refresh > 0).distinctBy { it.key }
+            if (candidates.isNotEmpty()) {
+                state.tracks = (if (refresh == 0) candidates else candidates.shuffled().sortedBy { it.key in previous }).take(CloudSingleCount)
+                state.scrollState.requestScrollToItem(0)
+            }
+        } finally { state.loading = false }
+    }
+    return state
+}
+
+@Composable
+private fun CloudSinglesSection(model: AuraViewModel, state: CloudSinglesState) {
+    val tracks = state.tracks
+    val loading = state.loading
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { CloudHomeHeader(tr("recommended_singles", "为你推荐的单曲")) }
+            IconButton(onClick = { if (!loading) state.refresh++ }, modifier = Modifier.size(44.dp)) {
+                Image(MiuixIcons.Regular.Refresh, tr("refresh", "刷新"), Modifier.size(22.dp),
+                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary.copy(alpha = if (loading) .45f else 1f)))
+            }
+        }
+        if (tracks.isNotEmpty()) PopularSongStrip(tracks, model, subtitle = { it.artist }, scrollState = state.scrollState) { model.play(tracks, it) }
+        else Text(if (loading) tr("loading", "加载中…") else tr("no_songs", "暂无歌曲"), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+    }
+}
+
+@Composable
+internal fun QqHomePage(model: AuraViewModel, padding: PaddingValues, login: () -> Unit) {
+    val user = model.qqAccount
+    val recommended = model.qqRecommended
+    LaunchedEffect(model.app.qqEndpoint, user?.userId) { if (recommended.isEmpty()) model.refreshQq() }
+    val singles = if (recommended.isNotEmpty()) key(user?.userId, recommended) {
+        rememberCloudSingles { refresh ->
+            val playlists = (if (refresh) recommended.shuffled() else recommended).take(3)
+            coroutineScope {
+                playlists.map { playlist ->
+                    async { cloudSection { model.app.qq.playlistSongs(playlist.id).items }.orEmpty().take(15) }
+                }.awaitAll().flatten()
+            }
+        }
+    } else null
+    LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        item("qq_welcome") {
+            Preference(user?.nickname ?: tr("qq_music", "QQ音乐"), tr("account_manage", "管理账号与连接"), onClick = login)
+        }
+        if (singles != null) {
+            item("qq_singles") { CloudSinglesSection(model, singles) }
+            item("qq_playlists") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CloudHomeHeader(tr("recommended_playlists", "推荐歌单"))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(recommended.take(12), key = { it.id }) { playlist ->
+                            CloudFeatureCard(playlist.name, playlist.artwork, Modifier.width(142.dp)) { model.openCloudPlaylist(playlist) }
+                        }
+                    }
+                }
+            }
+        } else if (model.qqLoading || model.qqFailed) item("qq_loading") {
+            CloudPagingFooter(model.qqLoading, model.qqFailed, model::refreshQq)
+        }
     }
 }
 
@@ -122,7 +233,7 @@ private fun CloudHomeHeader(title: String, arrow: Boolean = false, onClick: () -
         }
         return
     }
-    Row(Modifier.fillMaxWidth().padding(top = 2.dp).clickable(onClick = onClick), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(top = 2.dp).clickable(enabled = arrow, onClick = onClick), verticalAlignment = Alignment.CenterVertically) {
         Text(title, Modifier.weight(1f), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
         if (arrow) Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary))
     }
@@ -141,6 +252,146 @@ internal fun CloudRecommendedPage(model: AuraViewModel, padding: PaddingValues) 
                     if (item.subtitle.isNotBlank()) Text(item.subtitle, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
                 }
                 Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary))
+            }
+        }
+    }
+}
+
+private data class CloudSpotlightCard(
+    val key: String,
+    val eyebrow: String,
+    val title: String,
+    val artwork: String,
+    val onOpen: () -> Unit,
+    val onPlay: () -> Unit,
+)
+
+@Composable
+private fun rememberSpotlightCards(
+    model: AuraViewModel,
+    loggedIn: Boolean,
+    feature: List<CloudHomeItem>,
+    radar: List<CloudHomeItem>,
+): List<CloudSpotlightCard> {
+    val dailyLabel = tr("daily_recommendation", "每日推荐")
+    val radarLabel = tr("radar_playlist", "雷达歌单")
+    val featuredLabel = tr("featured_playlist", "精选歌单")
+    val todayLabel = tr("today_for_you", "今日精选")
+    val neteaseLabel = tr("netease", "网易云音乐")
+    val dailySongs = model.cloudDailySongs
+    val hasDailyFeature = feature.any { it.section == "daily" }
+
+    return buildList {
+        if (!hasDailyFeature && loggedIn && dailySongs.isNotEmpty()) {
+            val artwork = dailySongs.firstOrNull { it.artwork.isNotBlank() }?.artwork.orEmpty()
+            add(
+                CloudSpotlightCard(
+                    key = "daily-songs",
+                    eyebrow = todayLabel,
+                    title = dailyLabel,
+                    artwork = artwork,
+                    onOpen = { model.openCollection(MusicCollection("cloud:daily", dailyLabel, "", dailySongs, artwork)) },
+                    onPlay = { model.play(dailySongs, 0) },
+                )
+            )
+        }
+        feature.filter { it.section == "daily" }.take(2).forEach { card ->
+            val normalizedTitle = if (card.title.contains("每日推荐") || card.title.equals("Daily 30", ignoreCase = true)) {
+                dailyLabel
+            } else {
+                card.title
+            }
+            add(
+                CloudSpotlightCard(
+                    key = "daily-${card.id}",
+                    eyebrow = todayLabel,
+                    title = normalizedTitle,
+                    artwork = card.artwork,
+                    onOpen = { model.openCloudHomeItem(card) },
+                    onPlay = { model.playCloudHomeItem(card) },
+                )
+            )
+        }
+        radar.take(6).forEach { card ->
+            add(
+                CloudSpotlightCard(
+                    key = "radar-${card.id}",
+                    eyebrow = if (card.title == radarLabel) neteaseLabel else radarLabel,
+                    title = card.title,
+                    artwork = card.artwork,
+                    onOpen = { model.openCloudHomeItem(card) },
+                    onPlay = { model.playCloudHomeItem(card) },
+                )
+            )
+        }
+        feature.filter { it.section != "daily" }.take(2).forEach { card ->
+            add(
+                CloudSpotlightCard(
+                    key = "feature-${card.id}",
+                    eyebrow = if (card.title == featuredLabel) neteaseLabel else featuredLabel,
+                    title = card.title,
+                    artwork = card.artwork,
+                    onOpen = { model.openCloudHomeItem(card) },
+                    onPlay = { model.playCloudHomeItem(card) },
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun CloudSpotlightTile(card: CloudSpotlightCard) {
+    SeamlessCard(
+        modifier = Modifier.width(178.dp),
+        cornerRadius = 20.dp,
+        insideMargin = PaddingValues(10.dp),
+        showIndication = true,
+        onClick = card.onOpen,
+    ) {
+        Artwork(
+            uri = card.artwork,
+            modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+            cornerRadius = 13.dp,
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                Text(
+                    text = card.eyebrow,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = card.title,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .width(44.dp)
+                    .height(30.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(MiuixTheme.colorScheme.primary)
+                    .clickable(onClick = card.onPlay),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.ic_player_play),
+                    contentDescription = tr("play", "播放"),
+                    modifier = Modifier.size(13.dp),
+                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onPrimary),
+                )
             }
         }
     }

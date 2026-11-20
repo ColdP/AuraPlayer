@@ -33,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,9 +46,10 @@ import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.data.MAX_MANUAL_IMPORT_COUNT
 import btm.m.auraplayer.data.ManualAudioDraft
 import btm.m.auraplayer.data.ManualImportStore
+import btm.m.auraplayer.data.SCAN_MINIMUM_SECONDS_RANGE
 import btm.m.auraplayer.data.mergeManualAudioSelection
 import btm.m.auraplayer.data.removeManualAudioSelection
-import kotlin.math.round
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
@@ -62,6 +64,7 @@ internal fun AudioScanGroup(model: AuraViewModel) {
     val manualCount = model.manualImportCount
 
     var showBlacklist by remember { mutableStateOf(false) }
+    var showFilenameBlockRules by rememberSaveable { mutableStateOf(false) }
     var showManualImport by remember { mutableStateOf(false) }
     var showRescanDialog by remember { mutableStateOf(false) }
 
@@ -96,15 +99,24 @@ internal fun AudioScanGroup(model: AuraViewModel) {
     Group(tr("scan", "扫描")) {
         Preference(
             title = tr("blacklist", "黑名单"),
-            summary = tr("blacklist_summary", "黑名单中的文件夹不会在音乐库中显示"),
+            summary = if (settings.whitelist) tr("scan_folder_blacklist_paused", "白名单已开启，文件夹黑名单暂不生效")
+                else tr("blacklist_summary", "黑名单中的文件夹不会在音乐库中显示"),
         ) { showBlacklist = true }
+        val filenameRuleCount = settings.filenameBlockRules.count
+        Preference(
+            title = tr("scan_filename_block", "文件名屏蔽"),
+            summary = when {
+                filenameRuleCount == 0 -> tr("scan_filename_no_rules", "暂无规则")
+                !settings.filenameBlockRules.enabled -> tr("scan_filename_rules_paused", "%d 条规则 · 已暂停").format(filenameRuleCount)
+                else -> tr("scan_filename_rules_active", "%d 条规则 · 已启用").format(filenameRuleCount)
+            },
+        ) { showFilenameBlockRules = true }
         SwitchPreference(
             title = tr("whitelist", "白名单"),
             summary = tr("whitelist_summary", "只显示 Music 目录中的音乐"),
             checked = settings.whitelist,
         ) {
             model.updateSettings { current -> current.copy(whitelist = it) }
-            model.refreshLibrary(debounce = false)
         }
         SwitchPreference(
             title = tr("filter_duration", "筛选歌曲时长"),
@@ -112,20 +124,19 @@ internal fun AudioScanGroup(model: AuraViewModel) {
             checked = settings.durationFilter,
         ) {
             model.updateSettings { current -> current.copy(durationFilter = it) }
-            model.refreshLibrary(debounce = false)
         }
         BlurAnimatedVisibility(settings.durationFilter, label = "duration_filter") {
             EditableSliderPreference(
                 value = settings.minimumSeconds.toFloat(),
                 onValueChange = { value ->
-                    val seconds = round(value).toInt().coerceIn(5, 120)
+                    val seconds = value.roundToInt().coerceIn(SCAN_MINIMUM_SECONDS_RANGE)
                     model.updateSettings { current -> current.copy(minimumSeconds = seconds) }
                 },
                 onValueChangeFinished = { model.refreshLibrary(debounce = false) },
                 title = tr("minimum_duration", "最短歌曲时长"),
                 valueText = tr("seconds_value", "%d 秒").format(settings.minimumSeconds),
-                valueRange = 5f..120f,
-                steps = 114,
+                valueRange = SCAN_MINIMUM_SECONDS_RANGE.first.toFloat()..SCAN_MINIMUM_SECONDS_RANGE.last.toFloat(),
+                steps = SCAN_MINIMUM_SECONDS_RANGE.last - SCAN_MINIMUM_SECONDS_RANGE.first - 1,
                 defaultValue = 15f,
             )
         }
@@ -143,6 +154,12 @@ internal fun AudioScanGroup(model: AuraViewModel) {
 
     if (showBlacklist) {
         BlacklistDialog(model) { showBlacklist = false }
+    }
+    if (showFilenameBlockRules) {
+        FilenameBlockRulesDialog(settings.filenameBlockRules, onSave = { rules ->
+            model.updateSettings { it.copy(filenameBlockRules = rules) }
+            showFilenameBlockRules = false
+        }, onDismiss = { showFilenameBlockRules = false })
     }
     ManualImportSongsDialog(
         show = showManualImport,

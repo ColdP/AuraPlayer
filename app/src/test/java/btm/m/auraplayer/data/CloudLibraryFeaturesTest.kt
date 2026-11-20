@@ -78,6 +78,46 @@ class CloudLibraryFeaturesTest {
     @Test fun rankPreservesServerOrderAndTrackMetadata() = withApi { server, api ->
         server.reply("""{"code":200,"allData":[{"playCount":99,"song":{"id":2,"name":"First"}},{"playCount":9,"song":{"id":1,"name":"Second"}}]}""")
         assertEquals(listOf(2L, 1L), api.listeningRank(42).map { it.id })
+        server.reply("""{"code":200,"weekData":[{"song":{"id":3,"name":"Weekly","al":{"picUrl":"weekly-cover"}}}],"allData":[{"song":{"id":8}}]}""")
+        assertEquals("weekly-cover", api.listeningRank(42, type = 1).single().artwork)
+    }
+    @Test fun heartbeatMapsLikedPlaylistAndReadsSongDetailsInRecommendationOrder() = withApi { server, api ->
+        server.reply("""{"code":200,"data":[{"id":2},{"songInfo":{"id":1}},{"id":2},{}]}""")
+        server.reply("""{"code":200,"songs":[{"id":1,"name":"Second"},{"id":2,"name":"First"}]}""")
+        assertEquals(listOf(2L, 1L), api.heartbeatSongs(10, 42).map { it.id })
+        val intelligence = server.takeRequest()
+        assertEquals("/playmode/intelligence/list", intelligence.path)
+        assertTrue(intelligence.body.readUtf8().contains("id=42&pid=10&count=30"))
+        val details = server.takeRequest()
+        assertEquals("/song/detail", details.path)
+        assertTrue(details.body.readUtf8().contains("ids=2%2C1"))
+    }
+    @Test fun recommendationRoutesHandleDailyAndDiscoveryShapes() = withApi { server, api ->
+        server.reply("""{"code":200,"data":{"dailySongs":[{"id":42,"name":"Daily"},{"id":42}]}}""")
+        assertEquals("Daily", api.dailySongs(refresh = true).single().title)
+        val daily = server.takeRequest()
+        assertEquals("/recommend/songs", daily.path)
+        assertTrue(daily.body.readUtf8().contains("afresh=true"))
+        server.reply("""{"code":200,"result":[{"id":8,"song":{"id":11,"name":"Discovery"}}]}""")
+        assertEquals(11L, api.discoverySongs().single().id)
+        val discovery = server.takeRequest()
+        assertEquals("/personalized/newsong", discovery.path)
+        assertFalse(discovery.body.readUtf8().contains("cookie="))
+    }
+    @Test fun followsUseTheRequestedUserAndAdvanceThroughRawRows() = withApi { server, api ->
+        server.reply("""{"code":200,"follow":[{"userId":52,"nickname":"Listener","avatarUrl":"portrait","signature":null},{}],"more":true}""")
+        val page = api.follows(42, offset = 30)
+        assertEquals(CloudFollow(52, "Listener", "portrait", ""), page.items.single())
+        assertEquals(32, page.nextOffset)
+        assertTrue(page.hasMore)
+        val follows = server.takeRequest()
+        assertEquals("/user/follows", follows.path)
+        assertTrue(follows.body.readUtf8().contains("uid=42&offset=30"))
+    }
+    @Test fun oldCloudHomePreferenceStillOpensNetease() {
+        assertEquals("netease", normalizeHomeContent("cloud"))
+        assertEquals("qq", normalizeHomeContent("qq"))
+        assertEquals("local", normalizeHomeContent(null))
     }
     @Test fun localSearchSeparatesEntitiesWithoutCloudResults() {
         val songs = listOf(Song(1, "First", "Singer", "Album", 10, 20, uri = "one"), Song(2, "Second", "Singer", "Album", 10, 20, uri = "two"))

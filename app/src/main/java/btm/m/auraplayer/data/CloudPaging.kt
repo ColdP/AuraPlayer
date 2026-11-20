@@ -25,9 +25,11 @@ class CloudPlaylistContent(val playlist: CloudPlaylist, val source: String = "pl
 }
 
 data class CatalogAlbum(val id: Long, val title: String, val artwork: String, val artistId: Long,
-                        val artist: String, val published: Long = 0, val count: Int = 0)
+                        val artist: String, val published: Long = 0, val count: Int = 0, val type: String = "")
 data class CatalogInfo(val artistId: Long = 0, val artist: String = "", val published: Long = 0,
-                       val company: String = "", val description: String = "", val albums: List<CatalogAlbum> = emptyList())
+                       val company: String = "", val description: String = "", val albums: List<CatalogAlbum> = emptyList(),
+                       val artistAliases: List<String> = emptyList(), val artistIdentity: String = "",
+                       val artistSongCount: Int = 0, val artistAlbumCount: Int = 0)
 data class CloudCatalogPage(val title: String, val artwork: String, val page: CloudPage<Song>, val info: CatalogInfo? = null)
 
 /** Each detail route retains its own content and scroll composition while another route covers it. */

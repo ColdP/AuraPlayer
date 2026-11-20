@@ -54,7 +54,10 @@ class MediaLibrary(private val context: Context) {
             ""
         }
 
-        val discoveredDocs = if (treeId.isNotBlank()) collectSafAudioDocs(treeUri, treeId, relativePrefix) else emptyList()
+        val filenameMatcher = settings.filenameBlockRules.compile()
+        val discoveredDocs = if (treeId.isNotBlank()) {
+            collectSafAudioDocs(treeUri, treeId, relativePrefix).filterNot { filenameMatcher.blocks(it.displayName) }
+        } else emptyList()
         if (volume == MediaStore.VOLUME_EXTERNAL_PRIMARY) {
             val scanPaths = discoveredDocs.mapNotNull { doc ->
                 doc.externalRelativePath.takeIf { it.isNotBlank() }?.let { rel ->
@@ -69,6 +72,7 @@ class MediaLibrary(private val context: Context) {
         val mediaStoreMatches = if (volume.isNotEmpty()) {
             queryMediaStore(
                 settings = settings,
+                filenameMatcher = filenameMatcher,
                 targetVolume = volume,
                 relativePrefix = relativePrefix,
             )
@@ -95,7 +99,7 @@ class MediaLibrary(private val context: Context) {
 
             val extracted = extractSafAudioSong(doc, normFolder, volume.ifBlank { MediaStore.VOLUME_EXTERNAL_PRIMARY }, nowSec)
                 ?: continue
-            if (settings.durationFilter && extracted.duration < settings.minimumSeconds.coerceIn(0, 60) * 1000L) {
+            if (!LibraryFilter.acceptsDuration(extracted.duration, settings.durationFilter, settings.minimumSeconds)) {
                 continue
             }
             val sig = "$normFolder|${extracted.title}|${extracted.duration}"
@@ -115,13 +119,14 @@ class MediaLibrary(private val context: Context) {
 
     private suspend fun queryMediaStore(
         settings: Appearance,
+        filenameMatcher: FilenameBlockMatcher = settings.filenameBlockRules.compile(),
         targetVolume: String? = null,
         relativePrefix: String? = null,
     ): List<Song> {
         val columns = arrayOf(
             Audio._ID, Audio.TITLE, Audio.ARTIST, Audio.ALBUM, Audio.ALBUM_ID, Audio.ARTIST_ID,
             Audio.DURATION, Audio.RELATIVE_PATH, Audio.DATE_ADDED, Audio.TRACK, Audio.VOLUME_NAME,
-            Audio.YEAR, Audio.DATE_MODIFIED, Audio.COMPOSER, Audio.ALBUM_ARTIST,
+            Audio.YEAR, Audio.DATE_MODIFIED, Audio.COMPOSER, Audio.ALBUM_ARTIST, Audio.DISPLAY_NAME,
         )
         val songs = mutableListOf<Song>()
         val collection = Audio.getContentUri(MediaStore.VOLUME_EXTERNAL)
@@ -146,6 +151,7 @@ class MediaLibrary(private val context: Context) {
                 if (!LibraryFilter.accepts(path, duration, settings.whitelist, settings.blacklist, settings.durationFilter, settings.minimumSeconds, volume)) {
                     continue
                 }
+                if (filenameMatcher.blocks(cursor.getString(ix[15]).orEmpty())) continue
                 val id = cursor.getLong(ix[0])
                 val albumId = cursor.getLong(ix[4])
                 val modified = cursor.getLong(ix[12])
