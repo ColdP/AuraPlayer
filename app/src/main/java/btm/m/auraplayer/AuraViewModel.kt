@@ -1665,10 +1665,10 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             if (generation == cloudGeneration && tracks != null) cloudRankPreviewSongs = tracks
         }
     }
-    suspend fun loadNeteaseListenReport(period: ListenReportPeriod): NeteaseListenReportData? {
+    suspend fun loadNeteaseListenReport(period: ListenReportPeriod, periodOffset: Int = 0): NeteaseListenReportData? {
         val user = account ?: return null
         if (!cloudEnabled) return null
-        return NeteaseListenReportBuilder.load(app.api, app.neteaseListenStore, user.userId, period)
+        return NeteaseListenReportBuilder.load(app.api, app.neteaseListenStore, user.userId, period, periodOffset)
     }
     private fun refreshCloudExtras() {
         val user = account ?: return

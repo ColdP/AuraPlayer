@@ -48,8 +48,62 @@ data class ReportRhythmBucket(
     val isPeak: Boolean = false,
 )
 
+data class ListenReportWindow(
+    val startDate: LocalDate,
+    val endDate: LocalDate,
+    val startMs: Long,
+    val endMs: Long,
+    val normalizedOffset: Int,
+)
+
+internal fun resolveListenReportWindow(
+    period: ListenReportPeriod,
+    periodOffset: Int = 0,
+    nowMs: Long = System.currentTimeMillis(),
+    zone: ZoneId = ZoneId.systemDefault(),
+): ListenReportWindow {
+    val normalizedOffset = periodOffset.coerceAtMost(0)
+    val today = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+    val (startDate, endDate) = when (period) {
+        ListenReportPeriod.DAY -> {
+            val d = today.plusDays(normalizedOffset.toLong())
+            d to d
+        }
+        ListenReportPeriod.WEEK -> {
+            val s = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                .plusWeeks(normalizedOffset.toLong())
+            val e = if (normalizedOffset == 0) today else s.plusDays(6)
+            s to e
+        }
+        ListenReportPeriod.MONTH -> {
+            val s = today.withDayOfMonth(1).plusMonths(normalizedOffset.toLong())
+            val e = if (normalizedOffset == 0) today else s.withDayOfMonth(s.lengthOfMonth())
+            s to e
+        }
+        ListenReportPeriod.YEAR -> {
+            val s = today.withDayOfYear(1).plusYears(normalizedOffset.toLong())
+            val e = if (normalizedOffset == 0) today else s.withDayOfYear(s.lengthOfYear())
+            s to e
+        }
+    }
+    val startMs = startDate.atStartOfDay(zone).toInstant().toEpochMilli()
+    val endMs = if (normalizedOffset == 0) {
+        nowMs
+    } else {
+        endDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L
+    }
+    return ListenReportWindow(
+        startDate = startDate,
+        endDate = endDate,
+        startMs = startMs,
+        endMs = endMs,
+        normalizedOffset = normalizedOffset,
+    )
+}
+
 data class NeteaseListenReportData(
     val period: ListenReportPeriod,
+    val periodOffset: Int = 0,
     val startDate: LocalDate,
     val endDate: LocalDate,
     val totalDurationSec: Long,
@@ -83,33 +137,28 @@ internal object NeteaseListenReportBuilder {
         store: NeteaseListenStore,
         userId: Long,
         period: ListenReportPeriod,
+        periodOffset: Int = 0,
         nowMs: Long = System.currentTimeMillis(),
         zone: ZoneId = ZoneId.systemDefault(),
     ): NeteaseListenReportData = withContext(Dispatchers.IO) {
-        val today = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
-        val startDate = when (period) {
-            ListenReportPeriod.DAY -> today
-            ListenReportPeriod.WEEK -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-            ListenReportPeriod.MONTH -> today.withDayOfMonth(1)
-            ListenReportPeriod.YEAR -> today.withDayOfYear(1)
-        }
-        val startMs = startDate.atStartOfDay(zone).toInstant().toEpochMilli()
-        val localRecords = store.recordsInRange(userId, startMs, nowMs)
+        val window = resolveListenReportWindow(period, periodOffset, nowMs, zone)
+        val isCurrentWindow = window.normalizedOffset == 0
+        val localRecords = store.recordsInRange(userId, window.startMs, window.endMs)
 
         val fetched = coroutineScope {
             val recentJob = async { cloudSection { api.recentPlayEntries(limit = 100) } }
             val todayJob = async {
-                if (period == ListenReportPeriod.DAY) cloudSection { api.listenDataToday() } else null
+                if (isCurrentWindow && period == ListenReportPeriod.DAY) cloudSection { api.listenDataToday() } else null
             }
             val realtimeJob = async {
-                when (period) {
+                if (!isCurrentWindow) null else when (period) {
                     ListenReportPeriod.WEEK -> cloudSection { api.listenDataRealtimeReport("week") }
                     ListenReportPeriod.MONTH -> cloudSection { api.listenDataRealtimeReport("month") }
                     else -> null
                 }
             }
             val reportJob = async {
-                when (period) {
+                if (!isCurrentWindow) null else when (period) {
                     ListenReportPeriod.WEEK -> cloudSection { api.listenDataReport("week") }
                     ListenReportPeriod.MONTH -> cloudSection { api.listenDataReport("month") }
                     ListenReportPeriod.YEAR -> cloudSection { api.listenDataReport("year") }
@@ -117,20 +166,20 @@ internal object NeteaseListenReportBuilder {
                 }
             }
             val songRankJob = async {
-                when (period) {
+                if (!isCurrentWindow) null else when (period) {
                     ListenReportPeriod.WEEK -> cloudSection { api.listenDataSongPlayRank("week") }
                     ListenReportPeriod.MONTH -> cloudSection { api.listenDataSongPlayRank("month") }
                     else -> null
                 }
             }
             val yearJob = async {
-                if (period == ListenReportPeriod.YEAR) cloudSection { api.listenDataYearReport() } else null
+                if (isCurrentWindow && period == ListenReportPeriod.YEAR) cloudSection { api.listenDataYearReport() } else null
             }
             val totalJob = async {
                 if (period == ListenReportPeriod.YEAR) cloudSection { api.listenDataTotal() } else null
             }
             val userRecordJob = async {
-                when (period) {
+                if (!isCurrentWindow) null else when (period) {
                     ListenReportPeriod.WEEK -> cloudSection { api.listeningRank(userId, type = 1) }
                     ListenReportPeriod.YEAR -> cloudSection { api.listeningRank(userId, type = 0) }
                     ListenReportPeriod.DAY, ListenReportPeriod.MONTH -> null
@@ -151,10 +200,11 @@ internal object NeteaseListenReportBuilder {
         buildReport(
             api = api,
             period = period,
-            startDate = startDate,
-            endDate = today,
-            startMs = startMs,
-            endMs = nowMs,
+            periodOffset = window.normalizedOffset,
+            startDate = window.startDate,
+            endDate = window.endDate,
+            startMs = window.startMs,
+            endMs = window.endMs,
             zone = zone,
             localRecords = localRecords,
             official = fetched,
@@ -193,6 +243,7 @@ internal object NeteaseListenReportBuilder {
     private fun buildReport(
         api: NeteaseApi,
         period: ListenReportPeriod,
+        periodOffset: Int = 0,
         startDate: LocalDate,
         endDate: LocalDate,
         startMs: Long,
@@ -399,6 +450,7 @@ internal object NeteaseListenReportBuilder {
 
         return NeteaseListenReportData(
             period = period,
+            periodOffset = periodOffset,
             startDate = startDate,
             endDate = endDate,
             totalDurationSec = mergedDurationSec,

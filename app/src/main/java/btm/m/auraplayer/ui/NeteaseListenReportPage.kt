@@ -25,11 +25,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,12 +60,34 @@ import btm.m.auraplayer.data.ReportRhythmBucket
 import btm.m.auraplayer.data.ReportSongStat
 import btm.m.auraplayer.data.Song
 import btm.m.auraplayer.data.SongArtist
+import btm.m.auraplayer.data.resolveListenReportWindow
+import kotlinx.coroutines.delay
+import top.yukonga.miuix.kmp.basic.PullToRefresh
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.rememberPullToRefreshState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.ChevronBackward
 import top.yukonga.miuix.kmp.icon.extended.ChevronForward
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+
+private const val REPORT_HISTORY_DAYS = 365
+private const val REPORT_HISTORY_WEEKS = 60
+private const val REPORT_HISTORY_MONTHS = 18
+private const val REPORT_HISTORY_YEARS = 5
+
+private data class ReportCacheKey(
+    val period: ListenReportPeriod,
+    val offset: Int,
+)
+
+private fun historyPageCount(period: ListenReportPeriod): Int = when (period) {
+    ListenReportPeriod.DAY -> REPORT_HISTORY_DAYS
+    ListenReportPeriod.WEEK -> REPORT_HISTORY_WEEKS
+    ListenReportPeriod.MONTH -> REPORT_HISTORY_MONTHS
+    ListenReportPeriod.YEAR -> REPORT_HISTORY_YEARS
+}
 
 @Composable
 internal fun NeteaseListenReportPage(
@@ -79,21 +105,67 @@ internal fun NeteaseListenReportPage(
     }
     val user = model.account
     val storeRevision = model.app.neteaseListenStore.revision
-    val cachedReports = remember(user?.userId) { mutableStateMapOf<ListenReportPeriod, NeteaseListenReportData>() }
-    var loading by remember(user?.userId, period) { mutableStateOf(cachedReports[period] == null) }
+    val cachedReports = remember(user?.userId) { mutableStateMapOf<ReportCacheKey, NeteaseListenReportData>() }
+    val loadingKeys = remember(user?.userId) { mutableStateMapOf<ReportCacheKey, Boolean>() }
 
-    LaunchedEffect(user?.userId, period, refreshNonce, storeRevision) {
-        if (user == null) {
-            loading = false
-            return@LaunchedEffect
-        }
-        if (cachedReports[period] == null || refreshNonce > 0) loading = true
+    val dayPager = rememberPagerState(initialPage = REPORT_HISTORY_DAYS - 1) { REPORT_HISTORY_DAYS }
+    val weekPager = rememberPagerState(initialPage = REPORT_HISTORY_WEEKS - 1) { REPORT_HISTORY_WEEKS }
+    val monthPager = rememberPagerState(initialPage = REPORT_HISTORY_MONTHS - 1) { REPORT_HISTORY_MONTHS }
+    val yearPager = rememberPagerState(initialPage = REPORT_HISTORY_YEARS - 1) { REPORT_HISTORY_YEARS }
+    fun pagerFor(target: ListenReportPeriod): PagerState = when (target) {
+        ListenReportPeriod.DAY -> dayPager
+        ListenReportPeriod.WEEK -> weekPager
+        ListenReportPeriod.MONTH -> monthPager
+        ListenReportPeriod.YEAR -> yearPager
+    }
+
+    val pullToRefreshState = rememberPullToRefreshState()
+    var isRefreshing by remember { mutableStateOf(false) }
+    var localRefreshNonce by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(isRefreshing) {
+        if (!isRefreshing) return@LaunchedEffect
+        val start = System.currentTimeMillis()
         try {
-            val loaded = model.loadNeteaseListenReport(period)
-            if (loaded != null) cachedReports[period] = loaded
+            // Reset all periods to today/this-week/this-month/this-year on pull-to-refresh.
+            val activePager = pagerFor(period)
+            val todayPage = historyPageCount(period) - 1
+            if (activePager.currentPage != todayPage) {
+                activePager.animateScrollToPage(todayPage)
+            }
+            ListenReportPeriod.entries.filter { it != period }.forEach { other ->
+                val p = pagerFor(other)
+                val target = historyPageCount(other) - 1
+                if (p.currentPage != target) p.scrollToPage(target)
+            }
+            if (user != null) {
+                val loaded = model.loadNeteaseListenReport(period, 0)
+                if (loaded != null) {
+                    cachedReports[ReportCacheKey(period, 0)] = loaded
+                }
+            }
+            localRefreshNonce++
+            val elapsed = System.currentTimeMillis() - start
+            if (elapsed < 280L) delay(280L - elapsed)
         } finally {
-            loading = false
+            isRefreshing = false
         }
+    }
+
+    LaunchedEffect(refreshNonce) {
+        if (refreshNonce <= 0) return@LaunchedEffect
+        val activePager = pagerFor(period)
+        val todayPage = historyPageCount(period) - 1
+        if (activePager.currentPage != todayPage) {
+            activePager.animateScrollToPage(todayPage)
+        }
+        if (user != null) {
+            val loaded = model.loadNeteaseListenReport(period, 0)
+            if (loaded != null) {
+                cachedReports[ReportCacheKey(period, 0)] = loaded
+            }
+        }
+        localRefreshNonce++
     }
 
     if (user == null) {
@@ -111,119 +183,184 @@ internal fun NeteaseListenReportPage(
         return
     }
 
-    AnimatedContent(
-        targetState = period,
-        transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) },
-        label = "neteaseListenReportPeriod",
-    ) { activePeriod ->
-        val report = cachedReports[activePeriod]
-        LazyColumn(
-            modifier = pageContentModifier(),
-            contentPadding = padding,
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            if (report == null && loading) {
-                item("loading") {
-                    ReportPlaceholderCard(
-                        title = tr("loading", "加载中…"),
-                        subtitle = tr("listening_report_loading", "正在汇总网易云官方与 Aura Player 收听记录"),
-                    )
-                }
-                return@LazyColumn
-            }
-            if (report == null || report.isEmpty) {
-                item("empty") {
-                    ReportPlaceholderCard(
-                        title = tr("listening_report_empty", "本期暂无听歌记录"),
-                        subtitle = tr("listening_report_empty_hint", "在网易云音乐或 Aura Player 中播放歌曲后，报告会自动合并更新"),
-                    )
-                }
-                item("sync_footer_empty") {
-                    ReportSyncFooterCard(
-                        scrobbleEnabled = model.settings.value.neteaseScrobbleEnabled,
-                        auraPlayCount = report?.auraPlayCount ?: 0,
-                        auraSyncedCount = report?.auraSyncedCount ?: 0,
-                    )
-                }
-                return@LazyColumn
-            }
+    PullToRefresh(
+        isRefreshing = isRefreshing,
+        onRefresh = { isRefreshing = true },
+        modifier = Modifier.fillMaxSize(),
+        pullToRefreshState = pullToRefreshState,
+        contentPadding = padding,
+        topAppBarScrollBehavior = LocalPageScroll.current,
+        color = MiuixTheme.colorScheme.primary,
+        refreshTexts = listOf(
+            tr("pull_to_refresh", "下拉刷新"),
+            tr("release_to_refresh", "松开刷新"),
+            tr("refreshing", "正在刷新…"),
+            tr("refresh_completed", "刷新完成"),
+        ),
+    ) {
+        AnimatedContent(
+            targetState = period,
+            transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) },
+            label = "neteaseListenReportPeriod",
+        ) { activePeriod ->
+            val pageCount = historyPageCount(activePeriod)
+            val todayPage = pageCount - 1
+            val pagerState = pagerFor(activePeriod)
 
-            item("hero") {
-                ReportHeroCard(
-                    report = report,
-                    nickname = user.nickname,
-                    avatar = user.avatar,
-                )
-            }
-
-            report.topSong?.let { top ->
-                item("top_song") {
-                    val queue = report.topSongs.map { it.song }
-                    ReportTopTrackCard(
-                        period = report.period,
-                        stat = top,
-                        onPlay = { model.play(queue, 0) },
-                    )
+            HorizontalPager(
+                state = pagerState,
+                beyondViewportPageCount = 1,
+                key = { "${activePeriod.name}:$it" },
+                modifier = Modifier.fillMaxSize(),
+            ) { pageIndex ->
+                val offset = pageIndex - todayPage
+                val cacheKey = ReportCacheKey(activePeriod, offset)
+                val report = cachedReports[cacheKey]
+                val isLoading = loadingKeys[cacheKey] ?: (report == null)
+                val window = remember(activePeriod, offset) {
+                    resolveListenReportWindow(activePeriod, offset)
                 }
-            }
 
-            if (report.rhythmBuckets.isNotEmpty() || (report.period == ListenReportPeriod.YEAR && report.cumulativeDurationSec > 0L)) {
-                item("rhythm") {
-                    ReportRhythmCard(report = report)
+                LaunchedEffect(user.userId, activePeriod, offset, localRefreshNonce, storeRevision) {
+                    if (cachedReports[cacheKey] == null) {
+                        loadingKeys[cacheKey] = true
+                    }
+                    try {
+                        val loaded = model.loadNeteaseListenReport(activePeriod, offset)
+                        if (loaded != null) {
+                            cachedReports[cacheKey] = loaded
+                        }
+                    } finally {
+                        loadingKeys[cacheKey] = false
+                    }
                 }
-            }
 
-            if (report.topSongs.isNotEmpty()) {
-                item("songs_section") {
-                    val queue = report.topSongs.map { it.song }
-                    ReportTopSongsCard(
-                        songs = report.topSongs,
-                        activeSongKey = model.current?.key,
-                        onPlay = { index -> model.play(queue, index) },
-                    )
+                LazyColumn(
+                    modifier = pageContentModifier(),
+                    contentPadding = padding,
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    if (report == null && isLoading) {
+                        item("loading") {
+                            ReportPlaceholderCard(
+                                period = activePeriod,
+                                startDate = window.startDate,
+                                endDate = window.endDate,
+                                title = tr("loading", "加载中…"),
+                                subtitle = tr("listening_report_loading", "正在汇总网易云官方与 Aura Player 收听记录"),
+                            )
+                        }
+                        return@LazyColumn
+                    }
+                    if (report == null || report.isEmpty) {
+                        item("empty") {
+                            ReportPlaceholderCard(
+                                period = activePeriod,
+                                startDate = report?.startDate ?: window.startDate,
+                                endDate = report?.endDate ?: window.endDate,
+                                title = tr("listening_report_empty", "本期暂无听歌记录"),
+                                subtitle = tr("listening_report_empty_hint", "在网易云音乐或 Aura Player 中播放歌曲后，报告会自动合并更新"),
+                            )
+                        }
+                        item("sync_footer_empty") {
+                            ReportSyncFooterCard(
+                                scrobbleEnabled = model.settings.value.neteaseScrobbleEnabled,
+                                auraPlayCount = report?.auraPlayCount ?: 0,
+                                auraSyncedCount = report?.auraSyncedCount ?: 0,
+                            )
+                        }
+                        return@LazyColumn
+                    }
+
+                    item("hero") {
+                        ReportHeroCard(
+                            report = report,
+                            nickname = user.nickname,
+                            avatar = user.avatar,
+                        )
+                    }
+
+                    report.topSong?.let { top ->
+                        item("top_song") {
+                            val queue = report.topSongs.map { it.song }
+                            ReportTopTrackCard(
+                                period = report.period,
+                                stat = top,
+                                onPlay = { model.play(queue, 0) },
+                            )
+                        }
+                    }
+
+                    if (report.rhythmBuckets.isNotEmpty() || (report.period == ListenReportPeriod.YEAR && report.cumulativeDurationSec > 0L)) {
+                        item("rhythm") {
+                            ReportRhythmCard(report = report)
+                        }
+                    }
+
+                    if (report.topSongs.isNotEmpty()) {
+                        item("songs_section") {
+                            val queue = report.topSongs.map { it.song }
+                            ReportTopSongsCard(
+                                songs = report.topSongs,
+                                activeSongKey = model.current?.key,
+                                onPlay = { index -> model.play(queue, index) },
+                            )
+                        }
+                    }
+
+                    if (report.topArtists.isNotEmpty()) {
+                        item("artists_section") {
+                            ReportTopArtistsCard(
+                                artists = report.topArtists,
+                                onOpenArtist = { stat ->
+                                    if (stat.artistId > 0L) {
+                                        model.openSongArtist(
+                                            Song(
+                                                id = 0L,
+                                                title = "",
+                                                artist = stat.name,
+                                                album = "",
+                                                artistId = stat.artistId,
+                                                uri = "",
+                                                cloud = true,
+                                                artists = listOf(SongArtist(stat.artistId, stat.name)),
+                                            ),
+                                            SongArtist(stat.artistId, stat.name),
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                    }
+
+                    item("sync_footer") {
+                        ReportSyncFooterCard(
+                            scrobbleEnabled = model.settings.value.neteaseScrobbleEnabled,
+                            auraPlayCount = report.auraPlayCount,
+                            auraSyncedCount = report.auraSyncedCount,
+                        )
+                    }
                 }
-            }
-
-            if (report.topArtists.isNotEmpty()) {
-                item("artists_section") {
-                    ReportTopArtistsCard(
-                        artists = report.topArtists,
-                        onOpenArtist = { stat ->
-                            if (stat.artistId > 0L) {
-                                model.openSongArtist(
-                                    Song(
-                                        id = 0L,
-                                        title = "",
-                                        artist = stat.name,
-                                        album = "",
-                                        artistId = stat.artistId,
-                                        uri = "",
-                                        cloud = true,
-                                        artists = listOf(SongArtist(stat.artistId, stat.name)),
-                                    ),
-                                    SongArtist(stat.artistId, stat.name),
-                                )
-                            }
-                        },
-                    )
-                }
-            }
-
-            item("sync_footer") {
-                ReportSyncFooterCard(
-                    scrobbleEnabled = model.settings.value.neteaseScrobbleEnabled,
-                    auraPlayCount = report.auraPlayCount,
-                    auraSyncedCount = report.auraSyncedCount,
-                )
             }
         }
     }
 }
 
 @Composable
-private fun ReportPlaceholderCard(title: String, subtitle: String) {
+private fun ReportPlaceholderCard(
+    period: ListenReportPeriod,
+    startDate: LocalDate,
+    endDate: LocalDate,
+    title: String,
+    subtitle: String,
+) {
     SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(24.dp)) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ReportPeriodDateHeader(
+                period = period,
+                startDate = startDate,
+                endDate = endDate,
+            )
             Text(
                 text = title,
                 color = MiuixTheme.colorScheme.onSurface,
@@ -237,6 +374,51 @@ private fun ReportPlaceholderCard(title: String, subtitle: String) {
                 lineHeight = 19.sp,
             )
         }
+    }
+}
+
+@Composable
+private fun ReportPeriodDateHeader(
+    period: ListenReportPeriod,
+    startDate: LocalDate,
+    endDate: LocalDate,
+) {
+    val primary = MiuixTheme.colorScheme.primary
+    val muted = MiuixTheme.colorScheme.onSurfaceVariantSummary
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = periodCaption(period),
+                color = primary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy((-3).dp),
+            ) {
+                Image(
+                    imageVector = MiuixIcons.Regular.ChevronBackward,
+                    contentDescription = null,
+                    modifier = Modifier.size(11.dp),
+                    colorFilter = ColorFilter.tint(primary.copy(alpha = 0.72f)),
+                )
+                Image(
+                    imageVector = MiuixIcons.Regular.ChevronForward,
+                    contentDescription = null,
+                    modifier = Modifier.size(11.dp),
+                    colorFilter = ColorFilter.tint(primary.copy(alpha = 0.72f)),
+                )
+            }
+        }
+        Text(
+            text = formatPeriodRange(period, startDate, endDate),
+            color = muted,
+            fontSize = 12.sp,
+        )
     }
 }
 
@@ -267,19 +449,11 @@ private fun ReportHeroCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = periodCaption(report.period),
-                        color = primary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = formatPeriodRange(report.period, report.startDate, report.endDate),
-                        color = muted,
-                        fontSize = 12.sp,
-                    )
-                }
+                ReportPeriodDateHeader(
+                    period = report.period,
+                    startDate = report.startDate,
+                    endDate = report.endDate,
+                )
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
