@@ -19,13 +19,25 @@ class CloudPlaylistContent(val playlist: CloudPlaylist, val source: String = "pl
     var albumsHasMore by mutableStateOf(true); internal set
     internal var albumsOffset = 0
     internal var albumsJob: Job? = null
+    internal var albumTracksJob: Job? = null
     internal var offset = 0
     internal var loadedAt = 0L
     internal var job: Job? = null
 }
 
-data class CatalogAlbum(val id: Long, val title: String, val artwork: String, val artistId: Long,
-                        val artist: String, val published: Long = 0, val count: Int = 0, val type: String = "")
+data class CatalogAlbum(
+    val id: Long,
+    val title: String,
+    val artwork: String,
+    val artistId: Long,
+    val artist: String,
+    val published: Long = 0,
+    val count: Int = 0,
+    val type: String = "",
+    val subType: String = "",
+    val tracks: List<Song> = emptyList(),
+    val provider: String = "",
+)
 data class CatalogInfo(val artistId: Long = 0, val artist: String = "", val published: Long = 0,
                        val company: String = "", val description: String = "", val albums: List<CatalogAlbum> = emptyList(),
                        val artistAliases: List<String> = emptyList(), val artistIdentity: String = "",

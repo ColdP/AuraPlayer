@@ -196,6 +196,19 @@ fun NowPlayingSettingsPage(padding: PaddingValues, open: (String) -> Unit = {}) 
                     checked = state.landscapeAutoCoverflow,
                 ) { value -> store.update { it.copy(landscapeAutoCoverflow = value) } }
                 SwitchPreference(tr("player_show_volume", "显示音量控件"), checked = state.showVolume) { value -> store.update { it.copy(showVolume = value) } }
+                GlassDropdownPreference(
+                    title = tr("player_hide_status_bar", "隐藏状态栏"),
+                    items = listOf(
+                        tr("status_bar_hide_never", "不隐藏"),
+                        tr("status_bar_hide_always", "全局隐藏"),
+                        tr("status_bar_hide_now_playing", "仅正在播放界面隐藏"),
+                        tr("status_bar_hide_landscape", "仅横屏模式隐藏"),
+                    ),
+                    selectedIndex = state.statusBarHideMode.ordinal,
+                    backdrop = LocalToolbarBackdrop.current,
+                ) { index ->
+                    store.update { it.copy(statusBarHideMode = StatusBarHideMode.entries[index]) }
+                }
             }
         }
         item {

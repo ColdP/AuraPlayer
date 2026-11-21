@@ -27,6 +27,7 @@ import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 
 internal const val HEARTBEAT_PLAYBACK_MODE = 3
+internal const val ROAMING_PLAYBACK_MODE = 4
 
 class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private data class HeartbeatQueue(
@@ -35,6 +36,8 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         var originalHeartbeatQueue: HeartbeatQueue? = null
+        var roamingModeActive: Boolean = false
+        var lastExitedRoamingAtMs: Long = 0L
     }
 
     val app = application as AuraApplication
@@ -42,6 +45,10 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     val history get() = app.history
     val songSort = SongSortSettings(application)
     var sortedSongs by mutableStateOf<List<Song>>(emptyList()); private set
+    var roamingPreviewSong by mutableStateOf<Song?>(null); private set
+    private var roamingBatch: List<Song> = emptyList()
+    private var roamingRefreshJob: Job? = null
+    private var roamingLoadMoreJob: Job? = null
     private var sortJob: Job? = null
     fun sortSongs(order: SongSort) { songSort.update(order); updateSortedSongs() }
     private fun updateSortedSongs() {
@@ -67,6 +74,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var cloudHomeLoading by mutableStateOf(false); private set
     var cloudHomeFailed by mutableStateOf(false); private set
     var cloudRecentSongs by mutableStateOf<List<Song>>(emptyList()); private set
+    var cloudRankPreviewSongs by mutableStateOf<List<Song>>(emptyList()); private set
     var cloudDailySongs by mutableStateOf<List<Song>>(emptyList()); private set
     var cloudPublicBanners by mutableStateOf<List<CloudHomeItem>>(emptyList()); private set
     var heartbeatLoading by mutableStateOf(false); private set
@@ -168,6 +176,10 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var subscribedAlbumsHasMore by mutableStateOf(false); private set
     private var subscribedAlbumOffset = 0
     private var subscribedAlbumJob: Job? = null
+    private val albumTracksCache = object : LinkedHashMap<Long, List<Song>>(128, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, List<Song>>?) = size > 256
+    }
+    private val attemptedAlbumTrackIds = mutableSetOf<Long>()
     private var cloudGeneration = 0
     val cloudEnabled get() = !settings.value.cloudDisabled
     var qqAccount by mutableStateOf<CloudAccount?>(null); private set
@@ -376,6 +388,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             queueIndex = player.currentMediaItemIndex
             playbackMode = when {
                 originalHeartbeatQueue != null -> HEARTBEAT_PLAYBACK_MODE
+                roamingModeActive -> ROAMING_PLAYBACK_MODE
                 player.repeatMode == Player.REPEAT_MODE_ONE -> 2
                 player.shuffleModeEnabled -> 1
                 else -> 0
@@ -390,8 +403,11 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             playbackRequested = player.playWhenReady && player.playbackState != Player.STATE_ENDED
             buffering = player.playbackState == Player.STATE_BUFFERING
             playbackSpeed = player.playbackParameters.speed
-            cloudQueue?.takeIf { originalHeartbeatQueue == null && !it.failed && player.currentMediaItemIndex >= player.mediaItemCount - 5 }
+            cloudQueue?.takeIf { originalHeartbeatQueue == null && !roamingModeActive && !it.failed && player.currentMediaItemIndex >= player.mediaItemCount - 5 }
                 ?.let { loadCloudSongs(it) }
+            if (roamingModeActive && player.currentMediaItemIndex >= player.mediaItemCount - 2) {
+                loadMoreRoamingSongs(player)
+            }
         }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             knownSongs[mediaItem?.mediaId]?.let(history::record)
@@ -614,24 +630,30 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         val collator = java.text.Collator.getInstance()
         return byUri.values.sortedWith { first, second -> collator.compare(first.title, second.title) }
     }
-    fun play(queue: List<Song>, start: Int = 0, shuffle: Boolean = false) {
+    fun play(queue: List<Song>, start: Int = 0, shuffle: Boolean = false, sourceId: Long = 0L) {
         if (queue.isEmpty()) return
         val player = controller ?: run { error = tr("player_connecting", "播放服务正在连接，请稍后重试"); return }
         cancelHeartbeat()
         originalHeartbeatQueue = null
-        if (playbackMode == HEARTBEAT_PLAYBACK_MODE) playbackMode = 0
+        roamingModeActive = false
+        lastExitedRoamingAtMs = 0L
+        roamingRefreshJob?.cancel()
+        roamingLoadMoreJob?.cancel()
+        if (playbackMode == HEARTBEAT_PLAYBACK_MODE || playbackMode == ROAMING_PLAYBACK_MODE) playbackMode = 0
         cloudQueue = null
         val ordered = if (shuffle) queue.shuffled() else queue
         knownSongs.putAll(ordered.associateBy { it.key })
-        val items = ordered.map(::mediaItem)
+        val items = ordered.map { mediaItem(it, sourceId) }
         player.setMediaItems(items, if (shuffle) 0 else start.coerceIn(0, items.lastIndex), 0)
         player.prepare()
         player.play()
     }
-    private fun mediaItem(song: Song) = MediaItem.Builder().setMediaId(song.key).setUri(if (song.cloud) android.net.Uri.parse(song.uri).buildUpon().appendQueryParameter("quality", quality.level).build().toString() else song.uri)
+    private fun mediaItem(song: Song): MediaItem = mediaItem(song, 0L)
+    private fun mediaItem(song: Song, sourceId: Long) = MediaItem.Builder().setMediaId(song.key).setUri(if (song.cloud) android.net.Uri.parse(song.uri).buildUpon().appendQueryParameter("quality", quality.level).build().toString() else song.uri)
         .setMediaMetadata(MediaMetadata.Builder().setTitle(song.title).setArtist(song.artist).setAlbumTitle(song.album)
             .setExtras(android.os.Bundle().apply {
                 putLong("albumId", song.albumId); putLong("artistId", song.artistId)
+                putLong("sourceId", if (sourceId > 0L) sourceId else song.albumId)
                 putString("artists", encodeSongArtists(song.artists))
             })
             .setDurationMs(song.duration).setArtworkUri(song.artwork.takeIf { it.isNotBlank() }?.let(android.net.Uri::parse)).build()).build()
@@ -713,10 +735,28 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         when {
             originalHeartbeatQueue != null -> leaveHeartbeat()
             heartbeatLoading -> cancelHeartbeat().also { setListRepeat(player) }
+            roamingModeActive -> {
+                roamingModeActive = false
+                lastExitedRoamingAtMs = android.os.SystemClock.elapsedRealtime()
+                playbackMode = 0
+                setListRepeat(player)
+            }
             playbackMode == 0 -> { player.repeatMode = Player.REPEAT_MODE_ALL; player.shuffleModeEnabled = true }
             playbackMode == 1 -> { player.shuffleModeEnabled = false; player.repeatMode = Player.REPEAT_MODE_ONE }
-            cloudEnabled && settings.value.heartbeatEnabled && account != null && current?.netease == true -> enterHeartbeat(player)
-            else -> setListRepeat(player)
+            lastExitedRoamingAtMs > 0L && android.os.SystemClock.elapsedRealtime() - lastExitedRoamingAtMs <= 10_000L -> {
+                lastExitedRoamingAtMs = 0L
+                roamingModeActive = true
+                playbackMode = ROAMING_PLAYBACK_MODE
+                setListRepeat(player)
+            }
+            cloudEnabled && settings.value.heartbeatEnabled && account != null && current?.netease == true -> {
+                lastExitedRoamingAtMs = 0L
+                enterHeartbeat(player)
+            }
+            else -> {
+                lastExitedRoamingAtMs = 0L
+                setListRepeat(player)
+            }
         }
     }
 
@@ -816,6 +856,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             ?: collection?.songs?.firstOrNull { it.cloud && it.id == songId }
             ?: cloudCollection?.songs?.firstOrNull { it.cloud && it.id == songId }
             ?: cloudRecentSongs.firstOrNull { it.cloud && it.id == songId }
+            ?: cloudRankPreviewSongs.firstOrNull { it.cloud && it.id == songId }
     }
     suspend fun loadSongCredits(songId: Long, forceRefresh: Boolean = false): SongCreditsData {
         if (!forceRefresh) songCreditsCache[songId]?.let { return it }
@@ -874,8 +915,12 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     fun openCollection(value: MusicCollection) { pushCollection(value, null) }
     fun closeCollection(id: Long) {
         val removed = collectionDestinations.remove(id)
-        removed?.cloud?.albumsJob?.cancel()
-        if (removed?.cloud !== cloudQueue && removed?.cloud?.source != "playlist") removed?.cloud?.job?.cancel()
+        val cloud = removed?.cloud
+        if (cloud != null && collectionDestinations.values.none { it.cloud === cloud }) {
+            cloud.albumsJob?.cancel()
+            cloud.albumTracksJob?.cancel()
+            if (cloud !== cloudQueue && cloud.source != "playlist") cloud.job?.cancel()
+        }
         val previous = collectionDestinations.maxByOrNull { it.key }?.value
         collection = previous?.collection; cloudCollection = previous?.cloud; activeCollectionId = previous?.id ?: 0L
     }
@@ -996,7 +1041,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 ensureActive()
                 if (generation != cloudGeneration) return@launch
-                if (content.source == "rank" && rankType == 0) cloudRecentSongs = page.items
+                if (content.source == "rank" && rankType == 0) cloudRankPreviewSongs = page.items
                 if (catalog != null) collectionDestinations.values.filter { it.cloud === content }.forEach { destination ->
                     destination.collection = destination.collection.copy(
                         title = catalog.title.ifBlank { destination.collection.title }, artwork = catalog.artwork.ifBlank { destination.collection.artwork })
@@ -1012,8 +1057,19 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 page.total?.let { content.total = it }
                 if (page.total == null) content.total = maxOf(content.total, content.songs.size)
                 knownSongs.putAll(newSongs.associateBy { it.key })
+                if (content.source == "album" && page.items.isNotEmpty()) {
+                    albumTracksCache[content.playlist.id] = page.items
+                    val update = mapOf(content.playlist.id to page.items)
+                    collectionDestinations.values.mapNotNull { it.cloud }
+                        .filter { it.source == "artist" }
+                        .distinct()
+                        .forEach { applyAlbumTracksBatch(it, update) }
+                } else if (content.source == "artist" && catalog?.info != null) {
+                    hydrateArtistAlbumTracks(content)
+                }
                 if (originalHeartbeatQueue == null && cloudQueue === content && newSongs.isNotEmpty()) {
-                    controller?.addMediaItems(newSongs.map(::mediaItem))
+                    val srcId = content.playlist.id.takeIf { content.source in setOf("playlist", "album") } ?: 0L
+                    controller?.addMediaItems(newSongs.map { mediaItem(it, srcId) })
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
@@ -1026,7 +1082,8 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun playCollection(tracks: List<Song>, index: Int = 0, content: CloudPlaylistContent? = cloudCollection) {
-        play(tracks, index)
+        val sourceId = content?.playlist?.id?.takeIf { content.source in setOf("playlist", "album") } ?: 0L
+        play(tracks, index, sourceId = sourceId)
         if (controller != null && tracks.isNotEmpty() && content != null) {
             cloudQueue = content
             if (index >= tracks.size - 5) loadCloudSongs(content)
@@ -1263,6 +1320,67 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         player.setMediaItems(original.items + loadedWhileAway, original.index, original.positionMs)
         player.prepare()
     }
+    fun refreshRoamingPreview() {
+        if (!cloudEnabled || account == null) return
+        val generation = cloudGeneration
+        viewModelScope.launch {
+            val songs = cloudSection { app.api.personalFmSongs() }.orEmpty()
+            if (generation != cloudGeneration || songs.isEmpty()) return@launch
+            roamingBatch = songs
+            roamingPreviewSong = songs.firstOrNull()
+        }
+    }
+    fun startRoamingMode() {
+        val player = controller ?: run { error = tr("player_connecting", "播放服务正在连接，请稍后重试"); return }
+        if (!cloudEnabled || account == null) return
+        val generation = cloudGeneration
+        roamingRefreshJob?.cancel()
+        roamingLoadMoreJob?.cancel()
+        viewModelScope.launch {
+            val tracks = roamingBatch.ifEmpty { cloudSection { app.api.personalFmSongs() }.orEmpty() }
+            if (generation != cloudGeneration) return@launch
+            if (tracks.isEmpty()) {
+                error = tr("roaming_empty", "暂时没有漫游推荐")
+                return@launch
+            }
+            cancelHeartbeat()
+            originalHeartbeatQueue = null
+            cloudQueue = null
+            roamingModeActive = true
+            lastExitedRoamingAtMs = 0L
+            playbackMode = ROAMING_PLAYBACK_MODE
+            setListRepeat(player)
+            knownSongs.putAll(tracks.associateBy { it.key })
+            player.setMediaItems(tracks.map(::mediaItem), 0, 0L)
+            player.prepare()
+            player.play()
+            roamingBatch = emptyList()
+            roamingRefreshJob = viewModelScope.launch {
+                delay(30_000L)
+                if (generation == cloudGeneration) {
+                    refreshRoamingPreview()
+                }
+            }
+        }
+    }
+    private fun loadMoreRoamingSongs(player: Player) {
+        if (roamingLoadMoreJob?.isActive == true || !cloudEnabled || account == null) return
+        val generation = cloudGeneration
+        roamingLoadMoreJob = viewModelScope.launch {
+            try {
+                val tracks = cloudSection { app.api.personalFmSongs() }.orEmpty()
+                if (generation != cloudGeneration || !roamingModeActive || tracks.isEmpty()) return@launch
+                val existingIds = (0 until player.mediaItemCount).mapTo(hashSetOf()) { player.getMediaItemAt(it).mediaId }
+                val fresh = tracks.filter { it.key !in existingIds }
+                if (fresh.isNotEmpty()) {
+                    knownSongs.putAll(fresh.associateBy { it.key })
+                    player.addMediaItems(fresh.map(::mediaItem))
+                }
+            } finally {
+                if (generation == cloudGeneration) roamingLoadMoreJob = null
+            }
+        }
+    }
     fun openCatalogAlbum(album: CatalogAlbum) = openSongAlbum(Song(0, "", album.artist, album.title, album.id, album.artistId, uri = "", artwork = album.artwork, cloud = true))
     fun loadMoreSubscribedAlbums(reset: Boolean = false) {
         if (subscribedAlbumsLoading || !reset && !subscribedAlbumsHasMore) return
@@ -1287,11 +1405,102 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         content.albumsJob = viewModelScope.launch {
             try {
                 val page = app.api.artistAlbums(content.playlist.id, content.albumsOffset)
-                content.albums = (content.albums + page.items).distinctBy { it.id }
+                content.albums = applyCachedTracksToAlbums((content.albums + page.items).distinctBy { it.id })
                 content.albumsOffset = page.nextOffset; content.albumsHasMore = page.hasMore
+                hydrateArtistAlbumTracks(content)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { content.albumsFailed = true; cloudFailure(e) }
             finally { content.albumsLoading = false }
+        }
+    }
+
+    private fun applyCachedTracksToAlbums(albums: List<CatalogAlbum>): List<CatalogAlbum> = albums.map { album ->
+        if (album.tracks.isEmpty()) {
+            albumTracksCache[album.id]?.let { tracks ->
+                album.copy(tracks = tracks, count = album.count.takeIf { it > 0 } ?: tracks.size)
+            } ?: album
+        } else {
+            album
+        }
+    }
+
+    private fun applyAlbumTracksBatch(content: CloudPlaylistContent, batch: Map<Long, List<Song>>) {
+        if (batch.isEmpty()) return
+        fun enrich(albums: List<CatalogAlbum>): List<CatalogAlbum>? {
+            var changed = false
+            val updated = albums.map { album ->
+                val tracks = batch[album.id]
+                if (tracks != null && tracks.isNotEmpty() && album.tracks != tracks) {
+                    changed = true
+                    album.copy(tracks = tracks, count = album.count.takeIf { it > 0 } ?: tracks.size)
+                } else {
+                    album
+                }
+            }
+            return if (changed) updated else null
+        }
+        content.catalog?.let { info -> enrich(info.albums)?.let { content.catalog = info.copy(albums = it) } }
+        if (content.albums.isNotEmpty()) enrich(content.albums)?.let { content.albums = it }
+    }
+
+    private fun hydrateArtistAlbumTracks(content: CloudPlaylistContent) {
+        if (!cloudEnabled || content.source != "artist") return
+        content.catalog?.let { info ->
+            val enriched = applyCachedTracksToAlbums(info.albums)
+            if (enriched != info.albums) content.catalog = info.copy(albums = enriched)
+        }
+        if (content.albums.isNotEmpty()) {
+            val enriched = applyCachedTracksToAlbums(content.albums)
+            if (enriched != content.albums) content.albums = enriched
+        }
+        val combined = (content.albums + content.catalog?.albums.orEmpty()).distinctBy { it.id }
+        val indexById = combined.withIndex().associate { it.value.id to it.index }
+        val pending = combined.filter {
+            it.id > 0L &&
+                it.tracks.isEmpty() &&
+                !albumTracksCache.containsKey(it.id) &&
+                it.id !in attemptedAlbumTrackIds
+        }
+        if (pending.isEmpty()) return
+        val prioritized = pending.sortedWith(
+            compareBy<CatalogAlbum>(
+                { it.count != 0 && it.count !in 1..12 },
+                { indexById[it.id] ?: Int.MAX_VALUE },
+            )
+        )
+        content.albumTracksJob?.cancel()
+        val generation = cloudGeneration
+        content.albumTracksJob = viewModelScope.launch {
+            for (chunk in prioritized.chunked(4)) {
+                ensureActive()
+                if (generation != cloudGeneration) return@launch
+                val results = chunk.map { album ->
+                    async(Dispatchers.IO) {
+                        val fetched = try {
+                            if (album.provider == PROVIDER_QQ) app.qq.albumTracks(album.id.toString())
+                            else app.api.albumTracks(album.id)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                        album.id to fetched
+                    }
+                }.awaitAll()
+                ensureActive()
+                if (generation != cloudGeneration) return@launch
+                val batch = mutableMapOf<Long, List<Song>>()
+                for ((albumId, tracks) in results) {
+                    attemptedAlbumTrackIds.add(albumId)
+                    if (tracks.isNotEmpty()) {
+                        albumTracksCache[albumId] = tracks
+                        batch[albumId] = tracks
+                    }
+                }
+                if (batch.isNotEmpty()) {
+                    applyAlbumTracksBatch(content, batch)
+                }
+            }
         }
     }
     fun configureApi(value: String): Boolean = runCatching {
@@ -1335,10 +1544,16 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         cloudHomeLoading = false
         cloudLikedIds = emptySet(); cloudLikesReady = false; liking.clear()
         followedArtistStates = emptyMap(); followingArtists.clear()
-        cloudHomeItems = emptyList(); cloudRecommendedPlaylists = emptyList(); cloudFollowedAlbums = emptyList(); cloudRecentSongs = emptyList(); cloudDailySongs = emptyList(); cloudPublicBanners = emptyList(); cloudHomeFailed = false
+        cloudHomeItems = emptyList(); cloudRecommendedPlaylists = emptyList(); cloudFollowedAlbums = emptyList(); cloudRecentSongs = emptyList(); cloudRankPreviewSongs = emptyList(); cloudDailySongs = emptyList(); cloudPublicBanners = emptyList(); cloudHomeFailed = false
+        roamingPreviewSong = null; roamingBatch = emptyList(); roamingRefreshJob?.cancel(); roamingLoadMoreJob?.cancel()
         subscribedAlbums = emptyList(); subscribedAlbumOffset = 0; subscribedAlbumsLoading = false
         subscribedAlbumsHasMore = false; subscribedAlbumsFailed = false
-        collectionDestinations.values.forEach { it.cloud?.albumsJob?.cancel() }
+        collectionDestinations.values.forEach {
+            it.cloud?.albumsJob?.cancel()
+            it.cloud?.albumTracksJob?.cancel()
+        }
+        albumTracksCache.clear()
+        attemptedAlbumTrackIds.clear()
         cloudPlaylistJob?.cancel()
         cloudContents.values.forEach { it.job?.cancel() }
         val cloudIds = collectionDestinations.filterValues { it.cloud != null }.keys.toList()
@@ -1385,7 +1600,6 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         if (cloudHomeLoading && cloudHomeUserId == user?.userId) return
         cloudHomeUserId = user?.userId
         cloudHomeLoading = true; cloudHomeFailed = false
-        refreshListeningRankPreview()
         val generation = cloudGeneration
         cloudHomeJob?.cancel()
         cloudHomeJob = viewModelScope.launch {
@@ -1393,17 +1607,21 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 val home = async { cloudSection { app.api.homeItems() } }
                 val recommended = async { cloudSection { app.api.recommendedPlaylists(personalized = user != null) } }
                 val daily = async { if (user != null) fetchCloudDailySongs() else emptyList() }
+                val recent = async { if (user != null) cloudSection { app.api.recentSongs(limit = 50) } else null }
                 val followed = async { if (user != null) cloudSection { app.api.followedArtistAlbums() } else null }
                 val banners = async { cloudSection { app.api.publicBanners() } }
                 val homeItems = home.await()
                 val recommendations = recommended.await()
                 daily.await()
+                val recentTracks = recent.await()
                 ensureActive()
                 if (generation == cloudGeneration && account?.userId == user?.userId) {
                     cloudHomeItems = homeItems.orEmpty()
                     val playlists = (recommendations.orEmpty() + homeItems.orEmpty().filter { it.kind == "playlist" })
                         .sortedBy { it.section == "recommended" }.distinctBy { it.id }
                     cloudRecommendedPlaylists = playlists
+                    if (user == null) cloudRecentSongs = emptyList()
+                    else recentTracks?.let { cloudRecentSongs = it }
                     cloudPublicBanners = banners.await()
                         .orEmpty()
                     cloudFollowedAlbums = followed.await().orEmpty()
@@ -1439,13 +1657,18 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun refreshListeningRankPreview() {
         val user = account ?: return
-        if (!cloudEnabled || cloudRecentSongs.isNotEmpty() || rankPreviewJob?.isActive == true) return
+        if (!cloudEnabled || cloudRankPreviewSongs.isNotEmpty() || rankPreviewJob?.isActive == true) return
         val generation = cloudGeneration
         rankPreviewJob = viewModelScope.launch {
             val tracks = cloudSection { app.api.listeningRank(user.userId) }
             ensureActive()
-            if (generation == cloudGeneration && tracks != null) cloudRecentSongs = tracks
+            if (generation == cloudGeneration && tracks != null) cloudRankPreviewSongs = tracks
         }
+    }
+    suspend fun loadNeteaseListenReport(period: ListenReportPeriod): NeteaseListenReportData? {
+        val user = account ?: return null
+        if (!cloudEnabled) return null
+        return NeteaseListenReportBuilder.load(app.api, app.neteaseListenStore, user.userId, period)
     }
     private fun refreshCloudExtras() {
         val user = account ?: return

@@ -63,8 +63,14 @@ class QqMusicApi(
         val detail = runCatching { requestBlocking("user/detail", mapOf("id" to id)) }.getOrNull()
         val creator = detail?.optJSONObject("data")?.optJSONObject("creator")
         val uid = id.toLongOrNull() ?: 0L
-        CloudAccount(uid, creator?.optString("nick")?.takeIf { it.isNotBlank() } ?: "QQ $id",
-            creator?.optString("headpic").orEmpty().https())
+        CloudAccount(
+            uid,
+            creator?.optString("nick")?.takeIf { it.isNotBlank() } ?: "QQ $id",
+            creator?.optString("headpic").orEmpty()
+                .ifBlank { creator?.optString("logo").orEmpty() }
+                .ifBlank { if (uid > 0L) "https://q.qlogo.cn/g?b=qq&nk=$uid&s=640" else "" }
+                .https(),
+        )
     }
 
     /** [offset] is a zero-based page index; the returned nextOffset is the following page index. */
@@ -108,11 +114,82 @@ class QqMusicApi(
         CloudPage(songs, songs.size, false, songs.size)
     }
 
+    suspend fun albumTracks(albumMidOrId: String): List<Song> = withContext(Dispatchers.IO) {
+        if (!usingCustomEndpoint) return@withContext official.albumTracks(albumMidOrId, ::parseSongs)
+        val json = request("album/songs", mapOf("albummid" to albumMidOrId))
+        parseAlbumTracks(json)
+    }
+
+    suspend fun artistAlbums(singerMidOrId: String, offset: Int = 0, pageSize: Int = 30): CloudPage<CatalogAlbum> = withContext(Dispatchers.IO) {
+        if (!usingCustomEndpoint) return@withContext official.artistAlbums(singerMidOrId, offset, pageSize, ::parseAlbums)
+        val page = offset / pageSize.coerceAtLeast(1) + 1
+        val data = request("singer/album", mapOf("singermid" to singerMidOrId, "pageNo" to "$page", "pageSize" to "$pageSize"))
+            .optJSONObject("data")
+        val albums = parseAlbums(data?.optJSONArray("list") ?: JSONArray())
+        val total = data?.optInt("total", 0) ?: 0
+        val hasMore = albums.isNotEmpty() && (if (total > 0) offset + albums.size < total else albums.size >= pageSize)
+        CloudPage(albums, offset + albums.size, hasMore, total.takeIf { it > 0 })
+    }
+
     fun resolveBlocking(songmid: String): String {
         if (!usingCustomEndpoint) return official.resolveBlocking(songmid)
         val response = requestBlocking("song/url", mapOf("id" to songmid, "type" to "128"))
         val url = response.optString("data").takeIf { it.isNotBlank() && it != "null" } ?: throw IOException("UNAVAILABLE_SONG")
         return url.toHttpUrl().newBuilder().scheme("https").build().toString()
+    }
+
+    internal fun parseAlbumTracks(json: JSONObject): List<Song> {
+        val data = json.optJSONObject("req_0")?.optJSONObject("data")
+            ?: json.optJSONObject("data")
+            ?: json
+        val array = data.optJSONArray("songList")
+            ?: data.optJSONArray("songlist")
+            ?: data.optJSONArray("list")
+            ?: data.optJSONArray("songs")
+            ?: JSONArray()
+        return parseSongs(array)
+    }
+
+    internal fun parseAlbums(items: JSONArray, defaultArtistId: Long = 0L): List<CatalogAlbum> = (0 until items.length()).mapNotNull { i ->
+        val album = items.optJSONObject(i) ?: return@mapNotNull null
+        val mid = album.optString("albumMid", album.optString("albummid", album.optString("album_mid", album.optString("mid"))))
+        val rawId = album.optLong("albumID", album.optLong("albumid", album.optLong("albumId", album.optLong("id"))))
+        val id = rawId.takeIf { it > 0L } ?: mid.takeIf { it.isNotBlank() }?.let { it.hashCode().toLong() and 0x7fffffffL } ?: 0L
+        val title = album.optString("albumName", album.optString("albumname", album.optString("album_name", album.optString("name"))))
+        if (id <= 0L && title.isBlank()) return@mapNotNull null
+        val singer = album.optJSONArray("singer")?.optJSONObject(0) ?: album.optJSONObject("singer")
+        val artistId = album.optLong("singerID", album.optLong("singerId", singer?.optLong("id") ?: defaultArtistId))
+        val artist = album.optString("singerName", album.optString("singername", singer?.optString("name").orEmpty()))
+        val artwork = album.optString("albumPic", album.optString("picUrl", album.optString("pic"))).https()
+            .ifBlank { mid.takeIf { it.isNotBlank() }?.let { "https://y.qq.com/music/photo_new/T002R500x500M000$it.jpg" }.orEmpty() }
+        val embeddedTracks = parseAlbumTracks(album)
+        val rawCount = album.optInt("totalNum", album.optInt("song_count", album.optInt("songCount", album.optInt("cur_song_num", album.optInt("size", 0)))))
+        val rawType = album.optString("albumType", album.optString("albumtype", album.optString("album_type", album.optString("type"))))
+            .takeUnless { it.all(Char::isDigit) }.orEmpty()
+        val published = album.optLong("publishTime", 0L).takeIf { it > 0L }
+            ?: parseQqDateMs(album.optString("publishDate", album.optString("pubTime", album.optString("aDate"))))
+        CatalogAlbum(
+            id = id,
+            title = title,
+            artwork = artwork,
+            artistId = artistId,
+            artist = artist,
+            published = published,
+            count = rawCount.takeIf { it > 0 } ?: embeddedTracks.size,
+            type = rawType,
+            tracks = embeddedTracks,
+            provider = PROVIDER_QQ,
+        )
+    }
+
+    private fun parseQqDateMs(raw: String): Long {
+        val text = raw.trim()
+        if (text.isEmpty()) return 0L
+        return runCatching {
+            java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.parse(text)?.time ?: 0L
+        }.getOrDefault(0L)
     }
 
     internal fun parseSongs(array: JSONArray): List<Song> = (0 until array.length()).mapNotNull { i ->

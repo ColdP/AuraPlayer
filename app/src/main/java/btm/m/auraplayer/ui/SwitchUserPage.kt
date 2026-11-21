@@ -95,7 +95,11 @@ fun SwitchUserPage(model: AuraViewModel, padding: PaddingValues, isQq: Boolean =
                                 .padding(20.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Artwork(item.avatar, Modifier.size(60.dp), circular = true)
+                            Artwork(
+                                if (isQq) resolveQqAvatar(item.userId, item.avatar) else item.avatar,
+                                Modifier.size(60.dp),
+                                circular = true,
+                            )
                             Column(Modifier.weight(1f).padding(start = 16.dp)) {
                                 Text(item.nickname)
                                 Text("${if (isQq) "QQ" else "UID"} ${item.userId}", style = MiuixTheme.textStyles.body2)
@@ -142,7 +146,11 @@ fun SwitchUserPage(model: AuraViewModel, padding: PaddingValues, isQq: Boolean =
             horizontalAlignment = Alignment.Start,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Artwork(target.avatar, Modifier.size(56.dp), circular = true)
+            Artwork(
+                if (isQq) resolveQqAvatar(target.userId, target.avatar) else target.avatar,
+                Modifier.size(56.dp),
+                circular = true,
+            )
             Text(
                 text = "${target.nickname} · ${target.userId}",
                 style = MiuixTheme.textStyles.title4,

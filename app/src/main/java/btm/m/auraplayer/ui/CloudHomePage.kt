@@ -24,11 +24,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import btm.m.auraplayer.AuraViewModel
@@ -36,6 +38,9 @@ import btm.m.auraplayer.R
 import btm.m.auraplayer.data.CatalogAlbum
 import btm.m.auraplayer.data.CloudPlaylist
 import btm.m.auraplayer.data.CloudHomeItem
+import btm.m.auraplayer.data.HomeBackgroundStyle
+import btm.m.auraplayer.data.HomeBannerTarget
+import btm.m.auraplayer.data.LocalBannerStyle
 import btm.m.auraplayer.data.MusicCollection
 import btm.m.auraplayer.data.Song
 import btm.m.auraplayer.data.cloudSection
@@ -51,8 +56,26 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** NetEase home arranged as lightweight, horizontally scrolling sections. */
 @Composable
-internal fun CloudHomePage(model: AuraViewModel, padding: PaddingValues, login: () -> Unit, onRecommended: () -> Unit) {
+internal fun CloudHomePage(
+    model: AuraViewModel,
+    padding: PaddingValues,
+    login: () -> Unit,
+    onRecommended: () -> Unit,
+    immersiveTopPadding: Dp = 0.dp,
+    onReport: () -> Unit = {},
+) {
     val user = model.account
+    val settings = model.settings.value
+    val bannerConfig = settings.bannerConfig(HomeBannerTarget.NETEASE)
+    val styleConfig = bannerConfig.styleConfig(bannerConfig.style)
+    val immersiveBanner = (bannerConfig.style == LocalBannerStyle.IMMERSIVE ||
+        bannerConfig.style == LocalBannerStyle.IMMERSIVE_GLASS) && immersiveTopPadding > 0.dp
+    val pageMargin = LocalAuraLayout.current.pageMargin
+    val itemHorizontalPadding = if (immersiveBanner) pageMargin else 0.dp
+    val rowContentPadding = if (immersiveBanner) PaddingValues(horizontal = pageMargin) else PaddingValues(0.dp)
+    val coloredHomeBg = immersiveBanner && styleConfig.backgroundStyle != HomeBackgroundStyle.DEFAULT
+    val isBlurBg = styleConfig.backgroundStyle == HomeBackgroundStyle.COLOR_BLUR
+    val activeBannerTheme = if (coloredHomeBg) rememberHomeBannerTheme(bannerConfig.imagePath) else null
     var homeRefresh by remember { mutableIntStateOf(0) }
     LaunchedEffect(user?.userId, homeRefresh) { model.refreshCloudHome() }
     val recentSongs = model.cloudRecentSongs
@@ -75,54 +98,109 @@ internal fun CloudHomePage(model: AuraViewModel, padding: PaddingValues, login: 
             }
         }
     }
+    LaunchedEffect(user?.userId) {
+        if (user != null && model.roamingPreviewSong == null) {
+            model.refreshRoamingPreview()
+        }
+    }
+    val recommendedKeys = remember(singles.tracks) { singles.tracks.mapTo(hashSetOf()) { it.key } }
+    val recentDisplaySongs = remember(recentSongs, recommendedKeys) {
+        recentSongs.filterNot { it.key in recommendedKeys }.take(CloudRecentCount)
+    }
     val spotlightCards = rememberSpotlightCards(model, user != null, feature, radar)
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item("welcome") {
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(46.dp).clip(RoundedCornerShape(23.dp)).background(MiuixTheme.colorScheme.surfaceContainer)) {
-                    if (user?.avatar?.isNotBlank() == true) Artwork(user.avatar, Modifier.fillMaxSize(), circular = true)
-                    else Image(MiuixIcons.Regular.Music, null, Modifier.align(Alignment.Center).size(25.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary))
-                }
-                Column(Modifier.padding(start = 14.dp)) {
-                    Text(tr("welcome", "欢迎，"), style = MiuixTheme.textStyles.body2)
-                    Text(user?.nickname ?: tr("netease", "网易云音乐"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                HomeProfileHeader(
+                    avatarUri = user?.avatar.orEmpty(),
+                    displayName = user?.nickname ?: tr("netease", "网易云音乐"),
+                    signature = if (user == null) tr("account_manage", "管理账号与连接") else "",
+                    bannerStyle = bannerConfig.style,
+                    bannerUri = bannerConfig.imagePath,
+                    styleConfig = styleConfig,
+                    immersiveTopPadding = immersiveTopPadding,
+                    pageMargin = pageMargin,
+                    motionPlayMode = bannerConfig.motionPlayMode,
+                    onClick = login,
+                )
+                if (user == null) {
+                    Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                        Preference(tr("login_required", "请先登录网易云音乐"), tr("account_manage", "管理账号与连接"), onClick = login)
+                    }
                 }
             }
-            if (user == null) Preference(tr("login_required", "请先登录网易云音乐"), tr("account_manage", "管理账号与连接"), onClick = login)
         }
         if (spotlightCards.isNotEmpty()) item("daily_radar") {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyRow(contentPadding = rowContentPadding, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(spotlightCards, key = { it.key }) { card ->
-                    CloudSpotlightTile(card)
+                    CloudSpotlightTile(card, bannerTheme = activeBannerTheme, isBlurBg = isBlurBg)
                 }
             }
         }
-        item("singles") { CloudSinglesSection(model, singles) }
-        if (model.cloudHomeFailed) item("load_error") { CloudPagingFooter(false, true) { homeRefresh++ } }
-        if (recentSongs.isNotEmpty()) item("recent_title") { CloudHomeHeader(tr("recently_listened", "最近常听")) }
-        if (recentSongs.isNotEmpty()) item("recent") {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(recentSongs.take(7), key = { it.key }) { song ->
-                    CloudRecentCard(song, model)
+        item("singles") { CloudSinglesSection(model, singles, horizontalPadding = itemHorizontalPadding, accentOverride = activeBannerTheme?.takeIf { it.isCustom }?.accent) }
+        if (model.cloudHomeFailed) item("load_error") {
+            Box(Modifier.padding(horizontal = itemHorizontalPadding)) { CloudPagingFooter(false, true) { homeRefresh++ } }
+        }
+        if (recentDisplaySongs.isNotEmpty()) item("recent") {
+            val sectionAccent = activeBannerTheme?.takeIf { it.isCustom }?.accent ?: MiuixTheme.colorScheme.primary
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.fillMaxWidth().padding(horizontal = itemHorizontalPadding)) {
+                    CloudHomeHeader(
+                        title = tr("recently_listened", "最近常听"),
+                        trailing = if (user != null) {
+                            {
+                                ListeningReportCapsuleButton(
+                                    accent = sectionAccent,
+                                    bannerTheme = activeBannerTheme,
+                                    isBlurBg = isBlurBg,
+                                    onClick = onReport,
+                                )
+                            }
+                        } else null,
+                    )
+                }
+                PopularSongStrip(
+                    songs = recentDisplaySongs,
+                    model = model,
+                    margin = itemHorizontalPadding,
+                    accent = sectionAccent,
+                    subtitle = { it.artist },
+                    rowsPerColumn = 3,
+                    columnMajor = true,
+                ) { index ->
+                    model.play(recentDisplaySongs, index)
                 }
             }
         }
-        if (playlists.isNotEmpty()) item("recommend_title") { CloudHomeHeader(tr("recommended_playlists", "推荐歌单"), arrow = true, onClick = onRecommended) }
-        if (playlists.isNotEmpty()) item("recommend") { CloudHomeItemRow(playlists.take(6), model) }
-        if (model.cloudFollowedAlbums.isNotEmpty()) item("follow_title") { CloudHomeHeader(tr("followed_artist_updates", "你关注的艺人的新动向")) }
-        if (model.cloudFollowedAlbums.isNotEmpty()) item("follow") { CloudHomeItemRow(model.cloudFollowedAlbums.take(8), model) }
+        if (playlists.isNotEmpty()) item("recommend_title") {
+            Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                CloudHomeHeader(tr("recommended_playlists", "推荐歌单"), arrow = true, accentOverride = activeBannerTheme?.takeIf { it.isCustom }?.accent, onClick = onRecommended)
+            }
+        }
+        if (playlists.isNotEmpty()) item("recommend") { CloudHomeItemRow(playlists.take(6), model, contentPadding = rowContentPadding) }
+        if (model.cloudFollowedAlbums.isNotEmpty()) item("follow_title") {
+            Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                CloudHomeHeader(tr("followed_artist_updates", "你关注的艺人的新动向"))
+            }
+        }
+        if (model.cloudFollowedAlbums.isNotEmpty()) item("follow") { CloudHomeItemRow(model.cloudFollowedAlbums.take(8), model, contentPadding = rowContentPadding) }
         if (albums.isNotEmpty()) item("discover_albums") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                CloudHomeHeader(tr("discover_albums", "发现专辑"))
-                CloudHomeItemRow(albums.take(8), model)
+                Box(Modifier.padding(horizontal = itemHorizontalPadding)) { CloudHomeHeader(tr("discover_albums", "发现专辑")) }
+                CloudHomeItemRow(albums.take(8), model, contentPadding = rowContentPadding)
             }
         }
-        if (model.cloudPublicBanners.isNotEmpty()) item("banners_title") { CloudHomeHeader(tr("netease_banners", "网易云音乐推荐")) }
-        if (model.cloudPublicBanners.isNotEmpty()) item("banners") { CloudHomeBannerStack(model.cloudPublicBanners, model) }
+        if (model.cloudPublicBanners.isNotEmpty()) item("banners_title") {
+            Box(Modifier.padding(horizontal = itemHorizontalPadding)) { CloudHomeHeader(tr("netease_banners", "网易云音乐推荐")) }
+        }
+        if (model.cloudPublicBanners.isNotEmpty()) item("banners") {
+            Box(Modifier.padding(horizontal = itemHorizontalPadding)) { CloudHomeBannerStack(model.cloudPublicBanners, model) }
+        }
     }
 }
 
 private const val CloudSingleCount = 25
+private const val CloudRecentCount = 9
 
 private class CloudSinglesState {
     var tracks by mutableStateOf<List<Song>>(emptyList())
@@ -151,25 +229,46 @@ private fun rememberCloudSingles(load: suspend (Boolean) -> List<Song>): CloudSi
 }
 
 @Composable
-private fun CloudSinglesSection(model: AuraViewModel, state: CloudSinglesState) {
+private fun CloudSinglesSection(
+    model: AuraViewModel,
+    state: CloudSinglesState,
+    horizontalPadding: Dp = 0.dp,
+    accentOverride: Color? = null,
+) {
     val tracks = state.tracks
     val loading = state.loading
+    val refreshTint = accentOverride ?: MiuixTheme.colorScheme.primary
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = horizontalPadding), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) { CloudHomeHeader(tr("recommended_singles", "为你推荐的单曲")) }
             IconButton(onClick = { if (!loading) state.refresh++ }, modifier = Modifier.size(44.dp)) {
                 Image(MiuixIcons.Regular.Refresh, tr("refresh", "刷新"), Modifier.size(22.dp),
-                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary.copy(alpha = if (loading) .45f else 1f)))
+                    colorFilter = ColorFilter.tint(refreshTint.copy(alpha = if (loading) .45f else 1f)))
             }
         }
-        if (tracks.isNotEmpty()) PopularSongStrip(tracks, model, subtitle = { it.artist }, scrollState = state.scrollState) { model.play(tracks, it) }
-        else Text(if (loading) tr("loading", "加载中…") else tr("no_songs", "暂无歌曲"), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        if (tracks.isNotEmpty()) PopularSongStrip(tracks, model, margin = horizontalPadding, accent = refreshTint, subtitle = { it.artist }, scrollState = state.scrollState) { model.play(tracks, it) }
+        else Text(if (loading) tr("loading", "加载中…") else tr("no_songs", "暂无歌曲"), Modifier.padding(horizontal = horizontalPadding), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
     }
 }
 
 @Composable
-internal fun QqHomePage(model: AuraViewModel, padding: PaddingValues, login: () -> Unit) {
+internal fun QqHomePage(
+    model: AuraViewModel,
+    padding: PaddingValues,
+    login: () -> Unit,
+    immersiveTopPadding: Dp = 0.dp,
+) {
     val user = model.qqAccount
+    val settings = model.settings.value
+    val bannerConfig = settings.bannerConfig(HomeBannerTarget.QQ)
+    val styleConfig = bannerConfig.styleConfig(bannerConfig.style)
+    val immersiveBanner = (bannerConfig.style == LocalBannerStyle.IMMERSIVE ||
+        bannerConfig.style == LocalBannerStyle.IMMERSIVE_GLASS) && immersiveTopPadding > 0.dp
+    val pageMargin = LocalAuraLayout.current.pageMargin
+    val itemHorizontalPadding = if (immersiveBanner) pageMargin else 0.dp
+    val rowContentPadding = if (immersiveBanner) PaddingValues(horizontal = pageMargin) else PaddingValues(0.dp)
+    val coloredQqBg = immersiveBanner && styleConfig.backgroundStyle != HomeBackgroundStyle.DEFAULT
+    val activeBannerTheme = if (coloredQqBg) rememberHomeBannerTheme(bannerConfig.imagePath) else null
     val recommended = model.qqRecommended
     LaunchedEffect(model.app.qqEndpoint, user?.userId) { if (recommended.isEmpty()) model.refreshQq() }
     val singles = if (recommended.isNotEmpty()) key(user?.userId, recommended) {
@@ -184,14 +283,34 @@ internal fun QqHomePage(model: AuraViewModel, padding: PaddingValues, login: () 
     } else null
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item("qq_welcome") {
-            Preference(user?.nickname ?: tr("qq_music", "QQ音乐"), tr("account_manage", "管理账号与连接"), onClick = login)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                HomeProfileHeader(
+                    avatarUri = qqAccountAvatar(user),
+                    displayName = user?.nickname ?: tr("qq_music", "QQ音乐"),
+                    signature = if (user != null && user.userId > 0L) "QQ ${user.userId}" else tr("account_manage", "管理账号与连接"),
+                    bannerStyle = bannerConfig.style,
+                    bannerUri = bannerConfig.imagePath,
+                    styleConfig = styleConfig,
+                    immersiveTopPadding = immersiveTopPadding,
+                    pageMargin = pageMargin,
+                    motionPlayMode = bannerConfig.motionPlayMode,
+                    onClick = login,
+                )
+                if (user == null) {
+                    Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                        Preference(tr("qq_login_required", "请先登录 QQ音乐"), tr("account_manage", "管理账号与连接"), onClick = login)
+                    }
+                }
+            }
         }
         if (singles != null) {
-            item("qq_singles") { CloudSinglesSection(model, singles) }
+            item("qq_singles") { CloudSinglesSection(model, singles, horizontalPadding = itemHorizontalPadding, accentOverride = activeBannerTheme?.takeIf { it.isCustom }?.accent) }
             item("qq_playlists") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    CloudHomeHeader(tr("recommended_playlists", "推荐歌单"))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                        CloudHomeHeader(tr("recommended_playlists", "推荐歌单"))
+                    }
+                    LazyRow(contentPadding = rowContentPadding, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(recommended.take(12), key = { it.id }) { playlist ->
                             CloudFeatureCard(playlist.name, playlist.artwork, Modifier.width(142.dp)) { model.openCloudPlaylist(playlist) }
                         }
@@ -199,43 +318,110 @@ internal fun QqHomePage(model: AuraViewModel, padding: PaddingValues, login: () 
                 }
             }
         } else if (model.qqLoading || model.qqFailed) item("qq_loading") {
-            CloudPagingFooter(model.qqLoading, model.qqFailed, model::refreshQq)
+            Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                CloudPagingFooter(model.qqLoading, model.qqFailed, model::refreshQq)
+            }
         }
     }
 }
 
 @Composable
-private fun CloudHomeHeader(title: String, arrow: Boolean = false, onClick: () -> Unit = {}) {
+private fun ListeningReportCapsuleButton(
+    accent: Color,
+    bannerTheme: HomeBannerTheme?,
+    isBlurBg: Boolean,
+    onClick: () -> Unit,
+) {
+    val dark = MiuixTheme.colorScheme.surface.luminance() < 0.5f
+    val customTheme = bannerTheme?.takeIf { it.isCustom }
+    val pillBg = when {
+        customTheme != null -> if (isBlurBg) {
+            customTheme.cardContainer.copy(alpha = if (dark) 0.78f else 0.84f)
+        } else {
+            customTheme.cardContainer
+        }
+        LocalAppUiStyle.current == AppUiStyle.MATERIAL -> rememberActiveExpressiveScheme().secondaryContainer
+        LocalAppUiStyle.current == AppUiStyle.ONE -> Color(rememberActiveOneUiPalette().chip)
+        else -> accent.copy(alpha = if (dark) 0.18f else 0.12f)
+    }
+    val pillFg = when {
+        customTheme != null -> customTheme.accent
+        LocalAppUiStyle.current == AppUiStyle.MATERIAL -> rememberActiveExpressiveScheme().onSecondaryContainer
+        LocalAppUiStyle.current == AppUiStyle.ONE -> Color(rememberActiveOneUiPalette().onChip)
+        else -> accent
+    }
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(pillBg)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Image(
+            imageVector = MiuixIcons.Regular.Notes,
+            contentDescription = null,
+            modifier = Modifier.size(15.dp),
+            colorFilter = ColorFilter.tint(pillFg),
+        )
+        Text(
+            text = tr("report_short", "报告"),
+            color = pillFg,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun CloudHomeHeader(
+    title: String,
+    arrow: Boolean = false,
+    accentOverride: Color? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    onClick: () -> Unit = {},
+) {
     if (LocalAppUiStyle.current == AppUiStyle.ONE) {
         val palette = rememberActiveOneUiPalette()
         Row(
-            Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp).clip(RoundedCornerShape(14.dp)).clickable(enabled = arrow, onClick = onClick).padding(vertical = 4.dp),
+            Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp).clip(RoundedCornerShape(14.dp)).clickable(enabled = arrow, onClick = onClick).padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(title, Modifier.weight(1f), color = Color(palette.text), fontSize = 19.sp, fontWeight = FontWeight.Bold)
-            if (arrow) Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(20.dp), colorFilter = ColorFilter.tint(Color(palette.accentDeep)))
+            trailing?.invoke()
+            if (arrow) Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(20.dp), colorFilter = ColorFilter.tint(accentOverride ?: Color(palette.accentDeep)))
         }
         return
     }
     if (LocalAppUiStyle.current == AppUiStyle.MATERIAL) {
         val scheme = rememberActiveExpressiveScheme()
         Row(
-            Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp).clip(RoundedCornerShape(14.dp)).clickable(enabled = arrow, onClick = onClick).padding(vertical = 4.dp),
+            Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp).clip(RoundedCornerShape(14.dp)).clickable(enabled = arrow, onClick = onClick).padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(title, Modifier.weight(1f), color = scheme.onSurface, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            trailing?.invoke()
             if (arrow) Box(
                 modifier = Modifier.size(30.dp).clip(CircleShape).background(scheme.secondaryContainer),
                 contentAlignment = Alignment.Center,
             ) {
-                Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(16.dp), colorFilter = ColorFilter.tint(scheme.onSecondaryContainer))
+                Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(16.dp), colorFilter = ColorFilter.tint(accentOverride ?: scheme.onSecondaryContainer))
             }
         }
         return
     }
-    Row(Modifier.fillMaxWidth().padding(top = 2.dp).clickable(enabled = arrow, onClick = onClick), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable(enabled = arrow, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         Text(title, Modifier.weight(1f), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
-        if (arrow) Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary))
+        trailing?.invoke()
+        if (arrow) Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(22.dp), colorFilter = ColorFilter.tint(accentOverride ?: MiuixTheme.colorScheme.primary))
     }
 }
 
@@ -312,6 +498,19 @@ private fun rememberSpotlightCards(
                 )
             )
         }
+        val roamingSong = model.roamingPreviewSong
+        if (loggedIn && roamingSong != null) {
+            add(
+                CloudSpotlightCard(
+                    key = "roaming-mode",
+                    eyebrow = tr("roaming_mode", "漫游模式"),
+                    title = roamingSong.title,
+                    artwork = roamingSong.artwork,
+                    onOpen = { model.startRoamingMode() },
+                    onPlay = { model.startRoamingMode() },
+                )
+            )
+        }
         radar.take(6).forEach { card ->
             add(
                 CloudSpotlightCard(
@@ -340,11 +539,36 @@ private fun rememberSpotlightCards(
 }
 
 @Composable
-private fun CloudSpotlightTile(card: CloudSpotlightCard) {
+private fun CloudSpotlightTile(
+    card: CloudSpotlightCard,
+    bannerTheme: HomeBannerTheme? = null,
+    isBlurBg: Boolean = false,
+) {
+    val dark = MiuixTheme.colorScheme.surface.luminance() < 0.5f
+    val resolvedTheme = when {
+        bannerTheme == null -> null
+        bannerTheme.isCustom -> bannerTheme
+        else -> rememberHomeBannerTheme(card.artwork).takeIf { it.isCustom }
+    }
+    val cardColors = if (resolvedTheme != null) {
+        val fill = if (isBlurBg) {
+            resolvedTheme.cardContainer.copy(alpha = if (dark) 0.72f else 0.78f)
+        } else {
+            resolvedTheme.cardContainer
+        }
+        top.yukonga.miuix.kmp.basic.CardDefaults.defaultColors(color = fill)
+    } else {
+        top.yukonga.miuix.kmp.basic.CardDefaults.defaultColors()
+    }
+    val eyebrowColor = resolvedTheme?.mutedInk ?: MiuixTheme.colorScheme.onSurfaceVariantSummary
+    val playBgColor = resolvedTheme?.accent ?: MiuixTheme.colorScheme.primary
+    val playFgColor = resolvedTheme?.onAccent ?: MiuixTheme.colorScheme.onPrimary
+
     SeamlessCard(
         modifier = Modifier.width(178.dp),
         cornerRadius = 20.dp,
         insideMargin = PaddingValues(10.dp),
+        colors = cardColors,
         showIndication = true,
         onClick = card.onOpen,
     ) {
@@ -361,7 +585,7 @@ private fun CloudSpotlightTile(card: CloudSpotlightCard) {
             Column(Modifier.weight(1f).padding(end = 8.dp)) {
                 Text(
                     text = card.eyebrow,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = eyebrowColor,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -382,7 +606,7 @@ private fun CloudSpotlightTile(card: CloudSpotlightCard) {
                     .width(44.dp)
                     .height(30.dp)
                     .clip(RoundedCornerShape(999.dp))
-                    .background(MiuixTheme.colorScheme.primary)
+                    .background(playBgColor)
                     .clickable(onClick = card.onPlay),
                 contentAlignment = Alignment.Center,
             ) {
@@ -390,7 +614,7 @@ private fun CloudSpotlightTile(card: CloudSpotlightCard) {
                     painter = painterResource(R.drawable.ic_player_play),
                     contentDescription = tr("play", "播放"),
                     modifier = Modifier.size(13.dp),
-                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onPrimary),
+                    colorFilter = ColorFilter.tint(playFgColor),
                 )
             }
         }
@@ -407,17 +631,12 @@ private fun CloudFeatureCard(title: String, artwork: String, modifier: Modifier,
 }
 
 @Composable
-private fun CloudRecentCard(song: Song, model: AuraViewModel) {
-    Column(Modifier.width(124.dp).clip(RoundedCornerShape(16.dp)).clickable { model.play(listOf(song)) }.padding(8.dp)) {
-        Artwork(song.artwork, Modifier.fillMaxWidth().aspectRatio(1f), cornerRadius = 12.dp)
-        Text(song.title, Modifier.padding(top = 8.dp), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MiuixTheme.textStyles.body2)
-        Text(song.artist, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
-private fun CloudHomeItemRow(items: List<CloudHomeItem>, model: AuraViewModel) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(15.dp)) {
+private fun CloudHomeItemRow(
+    items: List<CloudHomeItem>,
+    model: AuraViewModel,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+) {
+    LazyRow(contentPadding = contentPadding, horizontalArrangement = Arrangement.spacedBy(15.dp)) {
         items(items, key = { "home-${it.kind}-${it.id}" }) { item ->
             Column(Modifier.width(124.dp).clickable { model.openCloudHomeItem(item) }) {
                 Artwork(item.artwork, Modifier.fillMaxWidth().aspectRatio(1f))

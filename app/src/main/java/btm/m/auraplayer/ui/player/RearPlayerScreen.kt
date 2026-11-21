@@ -435,12 +435,14 @@ fun RearPlayerScreen(
                         1 -> R.drawable.ic_player_shuffle
                         2 -> R.drawable.ic_player_repeat_one
                         btm.m.auraplayer.HEARTBEAT_PLAYBACK_MODE -> R.drawable.ic_player_heartbeat
+                        btm.m.auraplayer.ROAMING_PLAYBACK_MODE -> R.drawable.ic_player_roaming
                         else -> R.drawable.ic_player_repeat
                     }
                     val modeLabel = when (model.playbackMode) {
                         1 -> tr("shuffle_mode", "随机播放")
                         2 -> tr("repeat_one_mode", "单曲循环")
                         btm.m.auraplayer.HEARTBEAT_PLAYBACK_MODE -> tr("heartbeat_mode", "心动模式")
+                        btm.m.auraplayer.ROAMING_PLAYBACK_MODE -> tr("roaming_mode", "漫游模式")
                         else -> tr("repeat_all_mode", "列表循环")
                     }
                     val inlineVolumeWidth = (contentWidth * 0.30f).coerceIn(72.dp, 120.dp)

@@ -145,4 +145,34 @@ class QqMusicApiTest {
             assertEquals("INVALID_RESPONSE", expected.message)
         }
     }
+
+    @Test
+    fun customAndOfficialArtistAlbumsAndTrackListsClassifyConsistently() = runBlocking {
+        reply("""{"result":100,"data":{"total":2,"list":[{"albumID":201,"albumMID":"00Alb1","albumName":"单曲误标专辑","singerName":"歌手","albumtype":"专辑","song_count":2,"pubTime":"2026-05-01"},{"albumID":202,"albumMID":"00Alb2","albumName":"完整专辑","singerName":"歌手","albumtype":"","song_count":10,"pubTime":"2025-10-01"}]}}""")
+        val customPage = customApi.artistAlbums("00Singer1")
+        assertEquals(2, customPage.items.size)
+        assertEquals(PROVIDER_QQ, customPage.items[0].provider)
+        assertEquals("https://y.qq.com/music/photo_new/T002R500x500M00000Alb1.jpg", customPage.items[0].artwork)
+        assertEquals("/singer/album?singermid=00Singer1&pageNo=1&pageSize=30", server.takeRequest().path)
+
+        reply("""{"result":100,"data":{"list":[{"songid":1,"songmid":"00S1","songname":"主打歌","singer":[{"name":"歌手"}],"albummid":"00Alb1","albumname":"单曲误标专辑","interval":210},{"songid":2,"songmid":"00S2","songname":"主打歌 (伴奏)","singer":[{"name":"歌手"}],"albummid":"00Alb1","albumname":"单曲误标专辑","interval":210}]}}""")
+        val customTracks = customApi.albumTracks("00Alb1")
+        assertEquals(2, customTracks.size)
+        assertEquals(ArtistReleaseCategory.SINGLE_OR_EP, classifyArtistRelease(customPage.items[0].copy(tracks = customTracks)).category)
+        assertEquals(ArtistReleaseCategory.ALBUM, classifyArtistRelease(customPage.items[1]).category)
+        assertEquals("/album/songs?albummid=00Alb1", server.takeRequest().path)
+
+        reply("""{"code":0,"req_0":{"data":{"total":1,"albumList":[{"albumID":301,"albumMid":"00Alb3","albumName":"五首长曲专辑","singerName":"歌手","albumType":"EP","totalNum":5,"publishDate":"2024-01-01"}]}}}""")
+        val officialAlbums = official.artistAlbums("00Singer1", 0, 30, customApi::parseAlbums)
+        assertEquals(1, officialAlbums.items.size)
+        val albumListBody = JSONObject(server.takeRequest().body.readUtf8())
+        assertEquals("GetAlbumList", albumListBody.getJSONObject("req_0").getString("method"))
+
+        reply("""{"code":0,"req_0":{"data":{"songList":[{"songInfo":{"id":11,"mid":"00M1","name":"Part 1","singer":[{"name":"歌手"}],"album":{"mid":"00Alb3","name":"五首长曲专辑"},"interval":420}},{"songInfo":{"id":12,"mid":"00M2","name":"Part 2","singer":[{"name":"歌手"}],"album":{"mid":"00Alb3","name":"五首长曲专辑"},"interval":420}},{"songInfo":{"id":13,"mid":"00M3","name":"Part 3","singer":[{"name":"歌手"}],"album":{"mid":"00Alb3","name":"五首长曲专辑"},"interval":420}},{"songInfo":{"id":14,"mid":"00M4","name":"Part 4","singer":[{"name":"歌手"}],"album":{"mid":"00Alb3","name":"五首长曲专辑"},"interval":420}},{"songInfo":{"id":15,"mid":"00M5","name":"Part 5","singer":[{"name":"歌手"}],"album":{"mid":"00Alb3","name":"五首长曲专辑"},"interval":420}}]}}}""")
+        val officialTracks = official.albumTracks("00Alb3", customApi::parseSongs)
+        assertEquals(5, officialTracks.size)
+        assertEquals(ArtistReleaseCategory.ALBUM, classifyArtistRelease(officialAlbums.items[0].copy(tracks = officialTracks)).category)
+        val songListBody = JSONObject(server.takeRequest().body.readUtf8())
+        assertEquals("GetAlbumSongList", songListBody.getJSONObject("req_0").getString("method"))
+    }
 }

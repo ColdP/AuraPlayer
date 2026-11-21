@@ -13,6 +13,7 @@ enum class MaterialPlayerBackground { MATERIAL, BLUR, AURORA, AURORA_BLUR }
 enum class PlayerWeather { NONE, SNOW, RAIN }
 enum class CoverAnimation { DEFAULT, CARD, BLUR, COVER, PAGE, STACK, VERTICAL_FLIP, HORIZONTAL_FLIP }
 enum class CoverTheme { SQUARE, COVERFLOW, TILED }
+enum class StatusBarHideMode { NEVER, ALWAYS, NOW_PLAYING_ONLY, LANDSCAPE_ONLY }
 enum class LyricTheme {
     BLUR,
     DEEP_STAR_SEA,
@@ -130,6 +131,7 @@ data class NowPlayingConfig(
     val spatialCoverViewActive: Boolean = true,
     val mainLyricScalePercent: Float = LYRIC_SCALE_DEFAULT_PERCENT,
     val bgLyricScalePercent: Float = LYRIC_SCALE_DEFAULT_PERCENT,
+    val statusBarHideMode: StatusBarHideMode = StatusBarHideMode.NEVER,
 ) {
     val usesArtworkBackground: Boolean
         get() = theme == PlayerTheme.AURORA_BLUR ||
@@ -209,6 +211,7 @@ internal object NowPlayingCodec {
         put("landscapeAutoCoverflow", c.landscapeAutoCoverflow)
         put("mainLyricScalePercent", c.mainLyricScalePercent.toDouble())
         put("bgLyricScalePercent", c.bgLyricScalePercent.toDouble())
+        put("statusBarHideMode", c.statusBarHideMode.name)
     }.toString()
     fun decode(raw: String): NowPlayingConfig = runCatching {
         val j = JSONObject(raw); val defaults = NowPlayingConfig()
@@ -275,6 +278,8 @@ internal object NowPlayingCodec {
                 "bgLyricScalePercent",
                 defaults.bgLyricScalePercent.toDouble(),
             ).toFloat().let(::clampLyricScalePercent),
+            statusBarHideMode = StatusBarHideMode.entries.firstOrNull { it.name == j.optString("statusBarHideMode") }
+                ?: defaults.statusBarHideMode,
         )
     }.getOrDefault(NowPlayingConfig())
 }

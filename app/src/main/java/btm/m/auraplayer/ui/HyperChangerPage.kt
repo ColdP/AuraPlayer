@@ -416,8 +416,12 @@ private fun ProgressiveTopBarBackground(
             Modifier.matchParentSize().background(
                 Brush.verticalGradient(
                     0f to tint.copy(alpha = PROGRESSIVE_TOP_BAR_OVERLAY_ALPHA),
-                    PROGRESSIVE_TOP_BAR_OVERLAY_END to ComposeColor.Transparent,
-                    1f to ComposeColor.Transparent,
+                    0.18f to tint.copy(alpha = 0.84f),
+                    0.36f to tint.copy(alpha = 0.64f),
+                    0.54f to tint.copy(alpha = 0.40f),
+                    0.72f to tint.copy(alpha = 0.18f),
+                    0.86f to tint.copy(alpha = 0.05f),
+                    1f to tint.copy(alpha = 0f),
                 )
             )
         )
@@ -428,9 +432,8 @@ private const val PROGRESSIVE_TOP_BAR_BLUR_RADIUS = 3.6f
 private const val ONE_PROGRESSIVE_TOP_BAR_BLUR_RADIUS = 10f
 private val LEGACY_PROGRESSIVE_TOP_BAR_BLUR = 8.dp
 private val ONE_LEGACY_PROGRESSIVE_TOP_BAR_BLUR = 16.dp
-private const val PROGRESSIVE_TOP_BAR_BLUR_FADE_START = 0.60f
-private const val PROGRESSIVE_TOP_BAR_OVERLAY_ALPHA = 0.94f
-private const val PROGRESSIVE_TOP_BAR_OVERLAY_END = 0.80f
+private const val PROGRESSIVE_TOP_BAR_BLUR_FADE_START = 0.48f
+private const val PROGRESSIVE_TOP_BAR_OVERLAY_ALPHA = 0.92f
 private const val PROGRESSIVE_TOP_BAR_MINIMUM_CONTENT_HEIGHT = 56f
 internal const val PROGRESSIVE_TOP_BAR_HEIGHT_FACTOR = 1.22f
 internal const val SOLID_TOP_BAR_HEIGHT_FACTOR = PROGRESSIVE_TOP_BAR_HEIGHT_FACTOR * 0.88f

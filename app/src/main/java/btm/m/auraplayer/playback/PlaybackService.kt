@@ -71,6 +71,7 @@ class PlaybackService : MediaSessionService() {
     private val serviceScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
     private val state by lazy { getSharedPreferences("aura.playback.queue", MODE_PRIVATE) }
     private var auraMix: AuraMixManager? = null
+    private var neteaseScrobble: NeteaseScrobbleTracker? = null
     override fun onCreate() {
         super.onCreate()
         activeInstance = this
@@ -123,13 +124,19 @@ class PlaybackService : MediaSessionService() {
             .coerceIn(androidx.media3.common.Player.REPEAT_MODE_OFF, androidx.media3.common.Player.REPEAT_MODE_ALL)
         player.shuffleModeEnabled = state.getBoolean("shuffle", false)
         auraMix = AuraMixManager(this, player, mediaSourceFactory, app.effects, app.auraMix, serviceScope)
+        val scrobbleTracker = NeteaseScrobbleTracker(app).also {
+            neteaseScrobble = it
+            it.syncInitial(player)
+        }
         player.addListener(object : androidx.media3.common.Player.Listener {
             override fun onPositionDiscontinuity(
                 oldPosition: androidx.media3.common.Player.PositionInfo,
                 newPosition: androidx.media3.common.Player.PositionInfo,
                 reason: Int,
             ) {
-                if (reason != androidx.media3.common.Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+                if (reason == androidx.media3.common.Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+                    scrobbleTracker.onAutoTransition(player)
+                } else {
                     app.auraSing.notifyPositionDiscontinuity(newPosition.positionMs.coerceAtLeast(0L))
                 }
             }
@@ -138,6 +145,13 @@ class PlaybackService : MediaSessionService() {
                 if (events.contains(androidx.media3.common.Player.EVENT_MEDIA_ITEM_TRANSITION)) {
                     app.effects.notifyTrackChanged(trackKey(player.currentMediaItem))
                     notifyAuraSingTrack(app, player)
+                    scrobbleTracker.onMediaItemTransition(player)
+                }
+                if (events.containsAny(
+                        androidx.media3.common.Player.EVENT_PLAYBACK_STATE_CHANGED,
+                        androidx.media3.common.Player.EVENT_IS_PLAYING_CHANGED,
+                    )) {
+                    scrobbleTracker.onPlaybackStateChanged(player)
                 }
                 // Volume ramps must not serialize the entire queue on every animation frame.
                 if (events.containsAny(
@@ -267,6 +281,7 @@ class PlaybackService : MediaSessionService() {
                     prefs.sleepDeadline = 0L
                     transport.pause()
                 }
+                scrobbleTracker.onTick(player)
                 elapsedTicks++
                 if (elapsedTicks >= 4 && player.isPlaying) {
                     elapsedTicks = 0
@@ -363,9 +378,14 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
     override fun onTaskRemoved(rootIntent: Intent?) {
         session?.player?.let(::saveState)
-        if (session?.player?.playWhenReady != true) stopSelf()
+        if (session?.player?.playWhenReady != true) {
+            neteaseScrobble?.flushOnStop()
+            stopSelf()
+        }
     }
     override fun onDestroy() {
+        neteaseScrobble?.flushOnStop()
+        neteaseScrobble = null
         if (activeInstance === this) activeInstance = null
         usbReceiver?.let { runCatching { unregisterReceiver(it) } }
         usbReceiver = null
@@ -419,6 +439,7 @@ class PlaybackService : MediaSessionService() {
                             .setAlbumTitle(item.optString("album"))
                             .setExtras(android.os.Bundle().apply {
                                 putLong("albumId", item.optLong("albumId")); putLong("artistId", item.optLong("artistId"))
+                                putLong("sourceId", item.optLong("sourceId"))
                                 putString("artists", item.optString("artists", "[]"))
                             })
                             .setDurationMs(item.optLong("duration", 0L))
@@ -455,6 +476,7 @@ class PlaybackService : MediaSessionService() {
                 put("album", md.albumTitle?.toString().orEmpty())
                 put("albumId", md.extras?.getLong("albumId") ?: 0L)
                 put("artistId", md.extras?.getLong("artistId") ?: 0L)
+                put("sourceId", md.extras?.getLong("sourceId") ?: 0L)
                 put("artists", md.extras?.getString("artists") ?: "[]")
                 put("duration", md.durationMs ?: 0L)
                 put("artwork", md.artworkUri?.toString().orEmpty())

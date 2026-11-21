@@ -20,6 +20,8 @@ internal class OfficialNeteaseClient(
     private val client: OkHttpClient,
     private val webOrigin: String = "https://music.163.com",
     private val streamOrigin: String = "https://interface.music.163.com",
+    private val clientlogOrigin: String = "https://clientlog.music.163.com",
+    private val clientlog3Origin: String = "https://clientlog3.music.163.com",
     private val metadataCache: CloudMetadataCache? = null,
 ) {
     private fun playlistKey(id: String) = "official/" + CloudMetadataCache.digest(webOrigin + "\n" + cookie()) + "/playlist/$id"
@@ -40,6 +42,7 @@ internal class OfficialNeteaseClient(
                 .put("songId", value("id")).put("playlistId", value("pid")).put("type", "fromPlayOne")
                 .put("startMusicId", value("sid", value("id"))).put("count", value("count", "1").toInt()),
                 authenticated, eapi = true, androidClient = true)
+            "personal_fm" -> call("/api/v1/radio/get", JSONObject(), authenticated)
             "personalized/playlist" -> call("/api/personalized/playlist", JSONObject().put("limit", value("limit", "30")).put("offset", value("offset", "0")), authenticated = false)
             "login/status" -> call("/api/w/nuser/account/get", JSONObject(), authenticated)
             "user/playlist" -> call("/api/user/playlist", JSONObject().put("uid", value("uid"))
@@ -49,6 +52,113 @@ internal class OfficialNeteaseClient(
             "search" -> call("/api/search/voice/get", JSONObject().put("keyword", value("keywords")).put("scene", "normal")
                 .put("limit", value("limit", "50")).put("offset", value("offset", "0")), authenticated)
             "user/record" -> call("/api/v1/play/record", JSONObject().put("uid", value("uid")).put("type", value("type", "0")), authenticated)
+            "record/recent/song" -> call("/api/play-record/song/list", JSONObject().put("limit", value("limit", "100").toInt()), authenticated)
+            "scrobble/start" -> {
+                val id = value("id")
+                val sourceId = value("sourceid", id)
+                val logs = JSONArray().put(
+                    JSONObject().put("action", "startplay").put(
+                        "json",
+                        JSONObject()
+                            .put("id", id)
+                            .put("type", "song")
+                            .put("mainsite", "1")
+                            .put("mainsiteWeb", "1")
+                            .put("content", "id=$sourceId"),
+                    ),
+                )
+                call(
+                    "/api/feedback/weblog",
+                    JSONObject().put("logs", logs.toString()),
+                    authenticated,
+                    eapi = true,
+                    osxClient = true,
+                    originOverride = clientlogOrigin,
+                )
+            }
+            "scrobble" -> {
+                val id = value("id")
+                val sourceId = value("sourceid", id)
+                val playedSec = value("time", "30").toIntOrNull()?.coerceAtLeast(1) ?: 30
+                val startLogs = JSONArray().put(
+                    JSONObject().put("action", "startplay").put(
+                        "json",
+                        JSONObject()
+                            .put("id", id)
+                            .put("type", "song")
+                            .put("mainsite", "1")
+                            .put("mainsiteWeb", "1")
+                            .put("content", "id=$sourceId"),
+                    ),
+                )
+                val playLogs = JSONArray().put(
+                    JSONObject().put("action", "play").put(
+                        "json",
+                        JSONObject()
+                            .put("download", 0)
+                            .put("end", value("end", "playend"))
+                            .put("id", id)
+                            .put("sourceId", sourceId)
+                            .put("time", playedSec)
+                            .put("type", "song")
+                            .put("wifi", 0)
+                            .put("source", "list")
+                            .put("mainsite", "1")
+                            .put("mainsiteWeb", "1")
+                            .put("content", "id=$sourceId"),
+                    ),
+                )
+                call(
+                    "/api/feedback/weblog",
+                    JSONObject().put("logs", startLogs.toString()),
+                    authenticated,
+                    eapi = true,
+                    osxClient = true,
+                    originOverride = clientlogOrigin,
+                )
+                call(
+                    "/api/feedback/weblog",
+                    JSONObject().put("logs", playLogs.toString()),
+                    authenticated,
+                    eapi = true,
+                    osxClient = true,
+                    originOverride = clientlogOrigin,
+                )
+            }
+            "scrobble/v1" -> NeteaseNcblClient.scrobbleV1(
+                client = client,
+                rawCookie = if (authenticated) cookie() else "",
+                songId = value("id").toLongOrNull() ?: throw CloudApiException(400, "INVALID_SONG_ID"),
+                playedSec = value("time", "30").toIntOrNull()?.coerceAtLeast(1) ?: 30,
+                totalSec = value("total", value("time", "30")).toIntOrNull()?.coerceAtLeast(1) ?: 30,
+                sourceId = value("sourceid", value("id")),
+                sourceName = value("source", "list"),
+                bitrateKbps = value("bitrate", "320").toIntOrNull() ?: 320,
+                level = value("level", "exhigh"),
+                endReason = value("end", "playend"),
+                uploadOrigin = clientlog3Origin,
+            )
+            "listen/data/today/song" -> call("/api/content/activity/listen/data/today/song/play/rank", JSONObject(), authenticated, eapi = true)
+            "listen/data/realtime/report" -> call(
+                "/api/content/activity/listen/data/realtime/report",
+                JSONObject().put("type", value("type", "week")),
+                authenticated,
+                eapi = true,
+            )
+            "listen/data/report" -> call(
+                "/api/content/activity/listen/data/report",
+                JSONObject().put("type", value("type", "week")).apply { values["endTime"]?.let { put("endTime", it) } },
+                authenticated,
+                eapi = true,
+            )
+            "listen/data/song/play/rank" -> call(
+                "/api/content/activity/listen/data/song/play/rank",
+                JSONObject().put("type", value("type", "week")).apply { values["endTime"]?.let { put("endTime", it) } },
+                authenticated,
+                eapi = true,
+            )
+            "listen/data/year/report" -> call("/api/content/activity/listen/data/year/report", JSONObject(), authenticated, eapi = true)
+            "listen/data/total" -> call("/api/content/activity/listen/data/total", JSONObject(), authenticated, eapi = true)
             "user/follows" -> call("/api/user/getfollows/${value("uid")}", JSONObject()
                 .put("offset", value("offset", "0")).put("limit", value("limit", "30")).put("order", true), authenticated)
             "likelist" -> call("/api/song/like/get", JSONObject().put("uid", value("uid")), authenticated)
@@ -122,22 +232,58 @@ internal class OfficialNeteaseClient(
         }
     }
 
-    private fun call(path: String, data: JSONObject, authenticated: Boolean, eapi: Boolean = false, androidClient: Boolean = false): JSONObject {
+    private fun call(
+        path: String,
+        data: JSONObject,
+        authenticated: Boolean,
+        eapi: Boolean = false,
+        androidClient: Boolean = false,
+        osxClient: Boolean = false,
+        originOverride: String? = null,
+    ): JSONObject {
         val session = if (authenticated) cookie() else ""
         val cookies = session.split(';').map { it.trim() }.filter { '=' in it }
             .associate { it.substringBefore('=') to it.substringAfter('=') }
         val csrf = cookies["__csrf"].orEmpty()
+        val clientOs = when {
+            osxClient -> "osx"
+            androidClient -> "android"
+            else -> "pc"
+        }
+        val clientAppVer = when {
+            osxClient -> "3.1.10.5100"
+            androidClient -> "9.5.61"
+            else -> "3.0.18"
+        }
         data.put("csrf_token", csrf).put("e_r", false)
         val body = if (eapi) {
-            data.put("header", JSONObject().put("os", if (androidClient) "android" else "pc").put("appver", if (androidClient) "9.5.61" else "3.0.18").put("__csrf", csrf)
-                .apply { cookies["MUSIC_U"]?.let { put("MUSIC_U", it) } })
+            data.put("header", JSONObject()
+                .put("os", clientOs)
+                .put("appver", clientAppVer)
+                .put("__csrf", csrf)
+                .apply {
+                    if (osxClient) {
+                        put("osver", "15.5")
+                        put("channel", "netease")
+                    }
+                    cookies["MUSIC_U"]?.let { put("MUSIC_U", it) }
+                })
             NeteaseCrypto.eapi(path, data.toString())
         } else NeteaseCrypto.weapi(data.toString())
-        val origin = if (eapi) streamOrigin else webOrigin
+        val origin = originOverride ?: if (eapi) streamOrigin else webOrigin
+        val userAgent = if (osxClient) {
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        } else {
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36"
+        }
+        val cookieMap = cookies.toMutableMap().apply {
+            put("os", clientOs)
+            put("appver", clientAppVer)
+        }
         val request = Request.Builder().url(origin + path.replaceFirst("/api/", if (eapi) "/eapi/" else "/weapi/"))
             .header("Referer", "https://music.163.com/")
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36")
-            .header("Cookie", (cookies.map { "${it.key}=${it.value}" } + (if (androidClient) "os=android" else "os=pc") + (if (androidClient) "appver=9.5.61" else "appver=3.0.18")).joinToString("; "))
+            .header("User-Agent", userAgent)
+            .header("Cookie", cookieMap.entries.joinToString("; ") { "${it.key}=${it.value}" })
             .post(FormBody.Builder().apply { body.forEach { (k, v) -> add(k, v) } }.build()).build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw CloudApiException(response.code, "HTTP ${response.code}")

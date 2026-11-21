@@ -10,6 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.*
@@ -21,6 +22,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import btm.m.auraplayer.AuraViewModel
+import btm.m.auraplayer.data.CloudAccount
+import btm.m.auraplayer.data.HomeBannerTarget
 import btm.m.auraplayer.data.LibraryFilter
 import btm.m.auraplayer.data.NAVIGATION_OFFSET_DP_RANGE
 import btm.m.auraplayer.data.homeContentSources
@@ -68,33 +71,14 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
         }
         item {
             Group(tr("features", "功能")) {
-                if (!value.cloudDisabled) {
-                    Preference(tr("netease", "网易云音乐"), model.account?.nickname ?: tr("login_summary", "通过网易云官方页面登录")) { open("login") }
-                    Preference(tr("qq_music", "QQ音乐"), model.qqAccount?.nickname
-                        ?: if (model.app.qqEndpoint.isNotBlank()) tr("qq_custom_service", "自建服务连接")
-                        else tr("qq_login_summary", "通过QQ音乐官方页面登录")) { open("qq_login") }
-                    val cloudSources = listOf("netease", "qq", "all")
-                    GlassDropdownPreference(tr("cloud_source", "云端内容显示"),
-                        listOf(tr("netease", "网易云音乐"), tr("qq_music", "QQ音乐"), tr("cloud_source_all", "全部显示")),
-                        cloudSources.indexOf(value.cloudSource).coerceAtLeast(0), backdrop = LocalToolbarBackdrop.current) { index ->
-                        model.updateSettings { it.copy(cloudSource = cloudSources[index]) }
-                    }
-                    val searchSources = listOf("netease", "qq")
-                    GlassDropdownPreference(tr("cloud_search_source", "云端搜索内容"),
-                        listOf(tr("netease", "网易云音乐"), tr("qq_music", "QQ音乐")),
-                        searchSources.indexOf(value.cloudSearchSource).coerceAtLeast(0), backdrop = LocalToolbarBackdrop.current) { index ->
-                        model.updateSettings { it.copy(cloudSearchSource = searchSources[index]) }
-                    }
-                }
                 SwitchPreference(tr("disable_cloud", "关闭所有云端功能"),
                     tr("disable_cloud_summary", "开启后隐藏并关闭网易云音乐、QQ音乐等所有云端功能，成为纯本地播放器"),
                     checked = value.cloudDisabled, onCheckedChange = { checked -> model.updateSettings { it.copy(cloudDisabled = checked) } })
-                Preference(tr("artist_and_album", "艺术家与专辑")) { open("artist_album_settings") }
-                if (!value.cloudDisabled) GlassDropdownPreference(tr("home_content", "首页内容"),
-                    listOf(tr("home_content_local", "本地"), tr("netease", "网易云音乐"), tr("qq_music", "QQ音乐")),
-                    homeContentSources.indexOf(value.homeContent).coerceAtLeast(0), backdrop = LocalToolbarBackdrop.current) { index ->
-                    model.updateSettings { it.copy(homeContent = homeContentSources[index]) }
+                BlurAnimatedVisibility(visible = !value.cloudDisabled, label = "cloud-settings-entry") {
+                    Preference(tr("cloud", "云端")) { open("cloud_settings") }
                 }
+                Preference(tr("local", "本地")) { open("local_settings") }
+                Preference(tr("artist_and_album", "艺术家与专辑")) { open("artist_album_settings") }
                 GlassDropdownPreference(tr("select_language", "选择语言"), listOf(tr("chinese", "简体中文"), tr("english", "English")),
                     if (value.language == "en") 1 else 0, backdrop = LocalToolbarBackdrop.current) { index ->
                     model.updateSettings { it.copy(language = if (index == 0) "zh" else "en") }; I18n.language = model.settings.value.language
@@ -111,7 +95,7 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
         item {
             Group(tr("playback", "播放")) {
                 Preference(tr("audio_effects", "音效")) { open("audio_effects") }
-                Preference(tr("now_playing_page", "正在播放页面")) { open("now_playing_settings") }
+                Preference(tr("now_playing_page", "正在播放界面")) { open("now_playing_settings") }
                 Preference(tr("audio_settings", "音频")) { open("audio_settings") }
                 if (btm.m.auraplayer.rear.RearScreenDevice.isSupported()) {
                     Preference(tr("rear_screen", "背屏")) { open("rear_screen") }
@@ -241,86 +225,320 @@ fun ThemePage(model: AuraViewModel, padding: PaddingValues) {
 
 }
 
+private class NeteaseCloudSectionState(
+    endpointState: MutableState<String>,
+    countryState: MutableState<String>,
+    phoneState: MutableState<String>,
+    captchaState: MutableState<String>,
+    advancedState: MutableState<Boolean>,
+    val launchOfficialLogin: () -> Unit,
+) {
+    var endpoint by endpointState
+    var country by countryState
+    var phone by phoneState
+    var captcha by captchaState
+    var advanced by advancedState
+}
+
 @Composable
-fun LoginPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Unit) {
+private fun rememberNeteaseCloudSectionState(model: AuraViewModel): NeteaseCloudSectionState {
     val context = LocalContext.current
-    var endpoint by rememberSaveable { mutableStateOf(model.app.endpoint) }
-    var country by rememberSaveable { mutableStateOf("86") }
-    var phone by rememberSaveable { mutableStateOf("") }
+    val endpoint = rememberSaveable { mutableStateOf(model.app.endpoint) }
+    val country = rememberSaveable { mutableStateOf("86") }
+    val phone = rememberSaveable { mutableStateOf("") }
     // Verification codes are transient and never persisted.
-    var captcha by remember { mutableStateOf("") }
-    val account = model.account
-    var advanced by rememberSaveable { mutableStateOf(false) }
+    val captcha = remember { mutableStateOf("") }
+    val advanced = rememberSaveable { mutableStateOf(false) }
     val officialLoginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             val cookie = result.data?.getStringExtra(OfficialLoginActivity.EXTRA_COOKIE).orEmpty()
             if (cookie.isNotBlank()) model.completeOfficialLogin(cookie)
         }
     }
-    LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        if (account == null) item {
-            SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
-                Preference(tr("official_login", "网易云音乐官方登录"), tr("official_login_summary", "直接登录，无需配置服务器或 API 地址")) {
-                    if (model.app.endpoint.isNotBlank()) model.useOfficialService()
-                    officialLoginLauncher.launch(OfficialLoginActivity.createIntent(context, clearCookies = false))
-                }
-                if (model.savedAccounts.isNotEmpty()) {
-                    Preference(tr("switch_user", "切换账号")) { open("switch_user") }
-                }
+    return remember(model, context, officialLoginLauncher) {
+        NeteaseCloudSectionState(
+            endpointState = endpoint,
+            countryState = country,
+            phoneState = phone,
+            captchaState = captcha,
+            advancedState = advanced,
+            launchOfficialLogin = {
+                if (model.app.endpoint.isNotBlank()) model.useOfficialService()
+                officialLoginLauncher.launch(OfficialLoginActivity.createIntent(context, clearCookies = false))
+            },
+        )
+    }
+}
+
+private class QqCloudSectionState(
+    endpointState: MutableState<String>,
+    uinState: MutableState<String>,
+    cookieState: MutableState<String>,
+    advancedState: MutableState<Boolean>,
+    val launchOfficialLogin: (clearCookies: Boolean) -> Unit,
+) {
+    var endpoint by endpointState
+    var uin by uinState
+    var cookie by cookieState
+    var advanced by advancedState
+}
+
+@Composable
+private fun rememberQqCloudSectionState(model: AuraViewModel): QqCloudSectionState {
+    val context = LocalContext.current
+    val endpoint = rememberSaveable { mutableStateOf(model.app.qqEndpoint) }
+    val uin = rememberSaveable { mutableStateOf(model.app.qqUin) }
+    val cookie = remember { mutableStateOf(model.app.qqCookie) }
+    val advanced = rememberSaveable { mutableStateOf(model.app.qqEndpoint.isNotBlank()) }
+    val qqAccount = model.qqAccount
+    LaunchedEffect(qqAccount, model.app.qqCookie, model.app.qqUin) {
+        cookie.value = model.app.qqCookie
+        uin.value = model.app.qqUin
+    }
+    val officialLoginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val sessionCookie = result.data?.getStringExtra(OfficialLoginActivity.EXTRA_COOKIE).orEmpty()
+            if (sessionCookie.isNotBlank()) {
+                cookie.value = sessionCookie
+                model.completeQqOfficialLogin(sessionCookie)
             }
         }
-        item {
-            if (account != null) Group(tr("account", "账号")) {
-                Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Artwork(account.avatar, Modifier.size(60.dp), circular = true)
-                    Column(Modifier.padding(start = 16.dp)) { Text(account.nickname); Text("UID ${account.userId}", style = MiuixTheme.textStyles.body2) }
+    }
+    return remember(model, context, officialLoginLauncher) {
+        QqCloudSectionState(
+            endpointState = endpoint,
+            uinState = uin,
+            cookieState = cookie,
+            advancedState = advanced,
+            launchOfficialLogin = { clearCookies ->
+                if (!clearCookies && model.app.qqEndpoint.isNotBlank()) {
+                    model.useQqOfficialService()
+                    endpoint.value = ""
                 }
+                officialLoginLauncher.launch(OfficialLoginActivity.createIntent(context, clearCookies = clearCookies, provider = "qq"))
+            },
+        )
+    }
+}
+
+/** 云端设置二级页面，按「通用 / 网易云音乐 / QQ音乐」分页承载全部云端相关配置。 */
+@Composable
+fun CloudSettingsPage(
+    model: AuraViewModel,
+    padding: PaddingValues,
+    selectedTab: Int,
+    open: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val neteaseState = rememberNeteaseCloudSectionState(model)
+    val qqState = rememberQqCloudSectionState(model)
+    LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        when (selectedTab) {
+            0 -> cloudGeneralItems(model)
+            1 -> neteaseCloudItems(model, context, neteaseState, open, includeCachePreference = false)
+            2 -> qqCloudItems(model, context, qqState, open)
+        }
+    }
+}
+
+private fun LazyListScope.cloudGeneralItems(model: AuraViewModel) {
+    item(key = "cloud_general_display") {
+        val value = model.settings.value
+        Group(tr("cloud_general_display", "内容与显示")) {
+            val cloudSources = listOf("netease", "qq", "all")
+            GlassDropdownPreference(
+                tr("cloud_source", "云端内容显示"),
+                listOf(tr("netease", "网易云音乐"), tr("qq_music", "QQ音乐"), tr("cloud_source_all", "全部显示")),
+                cloudSources.indexOf(value.cloudSource).coerceAtLeast(0),
+                backdrop = LocalToolbarBackdrop.current,
+            ) { index ->
+                model.updateSettings { it.copy(cloudSource = cloudSources[index]) }
+            }
+            val searchSources = listOf("netease", "qq")
+            GlassDropdownPreference(
+                tr("cloud_search_source", "云端搜索内容"),
+                listOf(tr("netease", "网易云音乐"), tr("qq_music", "QQ音乐")),
+                searchSources.indexOf(value.cloudSearchSource).coerceAtLeast(0),
+                backdrop = LocalToolbarBackdrop.current,
+            ) { index ->
+                model.updateSettings { it.copy(cloudSearchSource = searchSources[index]) }
+            }
+            GlassDropdownPreference(
+                tr("home_content", "首页内容"),
+                listOf(tr("home_content_local", "本地"), tr("netease", "网易云音乐"), tr("qq_music", "QQ音乐")),
+                homeContentSources.indexOf(value.homeContent).coerceAtLeast(0),
+                backdrop = LocalToolbarBackdrop.current,
+            ) { index ->
+                model.updateSettings { it.copy(homeContent = homeContentSources[index]) }
+            }
+        }
+    }
+    item(key = "cloud_general_cache") {
+        Group(tr("cache", "缓存")) {
+            CloudCachePreference(model)
+        }
+    }
+}
+
+private fun LazyListScope.neteaseCloudItems(
+    model: AuraViewModel,
+    context: android.content.Context,
+    state: NeteaseCloudSectionState,
+    open: (String) -> Unit,
+    includeCachePreference: Boolean,
+) {
+    val account = model.account
+    if (account == null) item(key = "netease_official_login") {
+        SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+            Preference(tr("official_login", "网易云音乐官方登录"), tr("official_login_summary", "直接登录，无需配置服务器或 API 地址")) {
+                state.launchOfficialLogin()
+            }
+            if (model.savedAccounts.isNotEmpty()) {
                 Preference(tr("switch_user", "切换账号")) { open("switch_user") }
-            } else if (model.app.endpoint.isNotBlank()) Group(tr("phone_login", "手机号验证码登录")) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    AuraTextField(country, { country = it.filter(Char::isDigit).take(4) }, label = tr("country_code", "国际区号"), singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth())
-                    AuraTextField(phone, { phone = it.filter(Char::isDigit).take(20) }, label = tr("phone", "手机号"), singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth())
-                    GlassDialogButton({ model.sendCaptcha(phone, country) }, Modifier.fillMaxWidth(),
-                        enabled = model.smsRemaining == 0 && !model.cloudBusy && phone.length >= 5 && country.isNotBlank() && model.app.endpoint.isNotBlank()) {
-                        Text(if (model.smsRemaining > 0) "${model.smsRemaining}s" else tr("send_captcha", "获取验证码"))
-                    }
-                    AuraTextField(captcha, { captcha = it.filter(Char::isDigit).take(8) }, label = tr("captcha", "验证码"), singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), modifier = Modifier.fillMaxWidth())
-                    GlassDialogButton({ model.login(phone, country, captcha); captcha = "" }, Modifier.fillMaxWidth(),
-                        enabled = !model.cloudBusy && phone.length >= 5 && captcha.length >= 4 && country.isNotBlank() && model.app.endpoint.isNotBlank(),
-                        colors = ButtonDefaults.buttonColorsPrimary()) { Text(if (model.cloudBusy) tr("connecting", "正在连接…") else tr("login", "登录")) }
+            }
+        }
+    }
+    item(key = "netease_account_or_phone") {
+        if (account != null) Group(tr("account", "账号")) {
+            Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Artwork(account.avatar, Modifier.size(60.dp), circular = true)
+                Column(Modifier.padding(start = 16.dp)) { Text(account.nickname); Text("UID ${account.userId}", style = MiuixTheme.textStyles.body2) }
+            }
+            Preference(tr("switch_user", "切换账号")) { open("switch_user") }
+        } else if (model.app.endpoint.isNotBlank()) Group(tr("phone_login", "手机号验证码登录")) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                AuraTextField(state.country, { state.country = it.filter(Char::isDigit).take(4) }, label = tr("country_code", "国际区号"), singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth())
+                AuraTextField(state.phone, { state.phone = it.filter(Char::isDigit).take(20) }, label = tr("phone", "手机号"), singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth())
+                GlassDialogButton({ model.sendCaptcha(state.phone, state.country) }, Modifier.fillMaxWidth(),
+                    enabled = model.smsRemaining == 0 && !model.cloudBusy && state.phone.length >= 5 && state.country.isNotBlank() && model.app.endpoint.isNotBlank()) {
+                    Text(if (model.smsRemaining > 0) "${model.smsRemaining}s" else tr("send_captcha", "获取验证码"))
+                }
+                AuraTextField(state.captcha, { state.captcha = it.filter(Char::isDigit).take(8) }, label = tr("captcha", "验证码"), singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), modifier = Modifier.fillMaxWidth())
+                GlassDialogButton({ model.login(state.phone, state.country, state.captcha); state.captcha = "" }, Modifier.fillMaxWidth(),
+                    enabled = !model.cloudBusy && state.phone.length >= 5 && state.captcha.length >= 4 && state.country.isNotBlank() && model.app.endpoint.isNotBlank(),
+                    colors = ButtonDefaults.buttonColorsPrimary()) { Text(if (model.cloudBusy) tr("connecting", "正在连接…") else tr("login", "登录")) }
+            }
+        }
+    }
+    item(key = "netease_features") {
+        SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+            Preference(tr("downloaded_music", "已下载的音乐"), onClick = { open("downloads") })
+            if (includeCachePreference) CloudCachePreference(model)
+            SwitchPreference(tr("heartbeat_mode", "心动模式"), checked = model.settings.value.heartbeatEnabled,
+                onCheckedChange = { enabled -> model.updateSettings { it.copy(heartbeatEnabled = enabled) } })
+            SwitchPreference(
+                title = tr("netease_scrobble", "同步听歌数据至网易云音乐"),
+                summary = tr("netease_scrobble_summary", "播放网易云歌曲时自动上报官方听歌记录，计入最近播放、听歌排行与年度报告"),
+                checked = model.settings.value.neteaseScrobbleEnabled,
+                onCheckedChange = { enabled -> model.updateSettings { it.copy(neteaseScrobbleEnabled = enabled) } },
+            )
+        }
+    }
+    item(key = "netease_banner") {
+        Group(tr("home_banner_settings", "首页横幅")) {
+            HomeBannerSettings(model, HomeBannerTarget.NETEASE)
+        }
+    }
+    item(key = "netease_advanced_toggle") {
+        SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+            Preference(tr("advanced_connection", "高级连接设置"), tr("advanced_connection_summary", "可选：使用自建 API 服务")) { state.advanced = !state.advanced }
+        }
+    }
+    if (state.advanced) item(key = "netease_connection") {
+        Group(tr("connection", "连接")) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (model.app.endpoint.isNotBlank()) Preference(tr("use_official", "使用网易云官方连接")) {
+                    model.useOfficialService(); state.endpoint = ""; state.advanced = false
+                }
+                AuraTextField(state.endpoint, { state.endpoint = it }, label = tr("api_address", "网易云 API 服务地址"), singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth())
+                GlassDialogButton({ model.configureApi(state.endpoint) }, Modifier.fillMaxWidth(), enabled = state.endpoint.isNotBlank() && !model.cloudBusy) { Text(tr("save_address", "保存服务地址")) }
+                Preference(tr("api_project", "查看 API 开源项目与部署说明")) { openUrl(context, "https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced") }
+            }
+        }
+    }
+    if (model.loginMessage.isNotBlank()) item(key = "netease_message") {
+        Text(model.loginMessage, color = MiuixTheme.colorScheme.primary, modifier = Modifier.padding(16.dp))
+    }
+}
+
+private fun LazyListScope.qqCloudItems(
+    model: AuraViewModel,
+    context: android.content.Context,
+    state: QqCloudSectionState,
+    open: (String) -> Unit,
+) {
+    val qqAccount = model.qqAccount
+    if (qqAccount == null) item(key = "qq_official_login") {
+        SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+            Preference(tr("qq_official_login", "QQ音乐官方登录"), tr("qq_official_login_summary", "直接登录，无需配置服务器或 API 地址")) {
+                state.launchOfficialLogin(false)
+            }
+            if (model.savedQqAccounts.isNotEmpty()) Preference(tr("switch_user", "切换账号")) { open("qq_switch_user") }
+        }
+    }
+    if (qqAccount != null) item(key = "qq_account") {
+        Group(tr("account", "账号")) {
+            Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Artwork(qqAccountAvatar(qqAccount), Modifier.size(60.dp), circular = true)
+                Column(Modifier.padding(start = 16.dp)) {
+                    Text(qqAccount.nickname)
+                    if (qqAccount.userId > 0L) Text("QQ ${qqAccount.userId}", style = MiuixTheme.textStyles.body2)
                 }
             }
-        }
-        item {
-            SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
-                Preference(tr("downloaded_music", "已下载的音乐"), onClick = { open("downloads") })
-                CloudCachePreference(model)
-                SwitchPreference(tr("heartbeat_mode", "心动模式"), checked = model.settings.value.heartbeatEnabled,
-                    onCheckedChange = { enabled -> model.updateSettings { it.copy(heartbeatEnabled = enabled) } })
+            Preference(tr("switch_user", "切换账号")) { open("qq_switch_user") }
+            Preference(tr("qq_relogin", "重新登录")) {
+                state.launchOfficialLogin(true)
+            }
+            Preference(tr("logout", "退出登录")) {
+                state.cookie = ""
+                model.logoutQq()
             }
         }
-        item {
-            SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
-                Preference(tr("advanced_connection", "高级连接设置"), tr("advanced_connection_summary", "可选：使用自建 API 服务")) { advanced = !advanced }
-            }
+    }
+    item(key = "qq_banner") {
+        Group(tr("home_banner_settings", "首页横幅")) {
+            HomeBannerSettings(model, HomeBannerTarget.QQ)
         }
-        if (advanced) item {
-            Group(tr("connection", "连接")) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (model.app.endpoint.isNotBlank()) Preference(tr("use_official", "使用网易云官方连接")) {
-                        model.useOfficialService(); endpoint = ""; advanced = false
-                    }
-                    AuraTextField(endpoint, { endpoint = it }, label = tr("api_address", "网易云 API 服务地址"), singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth())
-                    GlassDialogButton({ model.configureApi(endpoint) }, Modifier.fillMaxWidth(), enabled = endpoint.isNotBlank() && !model.cloudBusy) { Text(tr("save_address", "保存服务地址")) }
-                    Preference(tr("api_project", "查看 API 开源项目与部署说明")) { openUrl(context, "https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced") }
+    }
+    item(key = "qq_advanced_toggle") {
+        SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+            Preference(tr("advanced_connection", "高级连接设置"), tr("advanced_connection_summary", "可选：使用自建 API 服务")) { state.advanced = !state.advanced }
+        }
+    }
+    if (state.advanced) item(key = "qq_connection") {
+        Group(tr("connection", "连接")) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (model.app.qqEndpoint.isNotBlank()) Preference(tr("qq_use_official", "使用QQ音乐官方连接")) {
+                    model.useQqOfficialService(); state.endpoint = ""; state.advanced = false
                 }
+                AuraTextField(state.endpoint, { state.endpoint = it }, label = tr("qq_api_address", "QQ音乐 API 服务地址（可选）"), singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth())
+                AuraTextField(state.uin, { state.uin = it.filter(Char::isDigit).take(12) }, label = tr("qq_number", "QQ 号（用于读取歌单）"), singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                AuraTextField(state.cookie, { state.cookie = it }, label = tr("qq_cookie", "y.qq.com Cookie（可选，用于 VIP 歌曲）"), singleLine = true,
+                    modifier = Modifier.fillMaxWidth())
+                GlassDialogButton({ model.configureQq(state.endpoint, state.uin, state.cookie) }, Modifier.fillMaxWidth(),
+                    enabled = state.endpoint.isNotBlank() && !model.qqBusy,
+                    colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("save_address", "保存服务地址")) }
+                Preference(tr("api_project", "查看 API 开源项目与部署说明")) { openUrl(context, "https://github.com/jsososo/QQMusicApi") }
             }
         }
-        if (model.loginMessage.isNotBlank()) item { Text(model.loginMessage, color = MiuixTheme.colorScheme.primary, modifier = Modifier.padding(16.dp)) }
+    }
+    if (model.qqMessage.isNotBlank()) item(key = "qq_message") {
+        Text(model.qqMessage, color = MiuixTheme.colorScheme.primary, modifier = Modifier.padding(16.dp))
+    }
+}
+
+@Composable
+fun LoginPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Unit) {
+    val context = LocalContext.current
+    val state = rememberNeteaseCloudSectionState(model)
+    LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        neteaseCloudItems(model, context, state, open, includeCachePreference = true)
     }
 }
 
@@ -328,83 +546,17 @@ fun LoginPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Un
 @Composable
 fun QqMusicPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Unit) {
     val context = LocalContext.current
-    var endpoint by rememberSaveable { mutableStateOf(model.app.qqEndpoint) }
-    var uin by rememberSaveable { mutableStateOf(model.app.qqUin) }
-    var cookie by remember { mutableStateOf(model.app.qqCookie) }
-    var advanced by rememberSaveable { mutableStateOf(model.app.qqEndpoint.isNotBlank()) }
-    val qqAccount = model.qqAccount
-    LaunchedEffect(qqAccount, model.app.qqCookie, model.app.qqUin) {
-        cookie = model.app.qqCookie
-        uin = model.app.qqUin
-    }
-    val officialLoginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val sessionCookie = result.data?.getStringExtra(OfficialLoginActivity.EXTRA_COOKIE).orEmpty()
-            if (sessionCookie.isNotBlank()) {
-                cookie = sessionCookie
-                model.completeQqOfficialLogin(sessionCookie)
-            }
-        }
-    }
+    val state = rememberQqCloudSectionState(model)
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        if (qqAccount == null) item {
-            SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
-                Preference(tr("qq_official_login", "QQ音乐官方登录"), tr("qq_official_login_summary", "直接登录，无需配置服务器或 API 地址")) {
-                    if (model.app.qqEndpoint.isNotBlank()) {
-                        model.useQqOfficialService()
-                        endpoint = ""
-                    }
-                    officialLoginLauncher.launch(OfficialLoginActivity.createIntent(context, clearCookies = false, provider = "qq"))
-                }
-                if (model.savedQqAccounts.isNotEmpty()) Preference(tr("switch_user", "切换账号")) { open("qq_switch_user") }
-            }
-        }
-        if (qqAccount != null) item {
-            Group(tr("account", "账号")) {
-                Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Artwork(qqAccount.avatar, Modifier.size(60.dp), circular = true)
-                    Column(Modifier.padding(start = 16.dp)) {
-                        Text(qqAccount.nickname)
-                        if (qqAccount.userId > 0L) Text("QQ ${qqAccount.userId}", style = MiuixTheme.textStyles.body2)
-                    }
-                }
-                Preference(tr("switch_user", "切换账号")) { open("qq_switch_user") }
-                Preference(tr("qq_relogin", "重新登录")) {
-                    officialLoginLauncher.launch(OfficialLoginActivity.createIntent(context, clearCookies = true, provider = "qq"))
-                }
-                Preference(tr("logout", "退出登录")) {
-                    cookie = ""
-                    model.logoutQq()
-                }
-            }
-        }
-        item {
-            SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
-                Preference(tr("advanced_connection", "高级连接设置"), tr("advanced_connection_summary", "可选：使用自建 API 服务")) { advanced = !advanced }
-            }
-        }
-        if (advanced) item {
-            Group(tr("connection", "连接")) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (model.app.qqEndpoint.isNotBlank()) Preference(tr("qq_use_official", "使用QQ音乐官方连接")) {
-                        model.useQqOfficialService(); endpoint = ""; advanced = false
-                    }
-                    AuraTextField(endpoint, { endpoint = it }, label = tr("qq_api_address", "QQ音乐 API 服务地址（可选）"), singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth())
-                    AuraTextField(uin, { uin = it.filter(Char::isDigit).take(12) }, label = tr("qq_number", "QQ 号（用于读取歌单）"), singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-                    AuraTextField(cookie, { cookie = it }, label = tr("qq_cookie", "y.qq.com Cookie（可选，用于 VIP 歌曲）"), singleLine = true,
-                        modifier = Modifier.fillMaxWidth())
-                    GlassDialogButton({ model.configureQq(endpoint, uin, cookie) }, Modifier.fillMaxWidth(),
-                        enabled = endpoint.isNotBlank() && !model.qqBusy,
-                        colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("save_address", "保存服务地址")) }
-                    Preference(tr("api_project", "查看 API 开源项目与部署说明")) { openUrl(context, "https://github.com/jsososo/QQMusicApi") }
-                }
-            }
-        }
-        if (model.qqMessage.isNotBlank()) item { Text(model.qqMessage, color = MiuixTheme.colorScheme.primary, modifier = Modifier.padding(16.dp)) }
+        qqCloudItems(model, context, state, open)
     }
 }
+
+internal fun resolveQqAvatar(userId: Long, avatar: String): String =
+    avatar.ifBlank { if (userId > 0L) "https://q.qlogo.cn/g?b=qq&nk=$userId&s=640" else "" }
+
+internal fun qqAccountAvatar(account: CloudAccount?): String =
+    account?.let { resolveQqAvatar(it.userId, it.avatar) }.orEmpty()
 
 fun openUrl(context: android.content.Context, url: String) {
     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }

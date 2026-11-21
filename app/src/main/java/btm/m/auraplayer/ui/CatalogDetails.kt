@@ -78,19 +78,34 @@ internal fun PopularSongStrip(
     accent: Color = MiuixTheme.colorScheme.primary,
     subtitle: (Song) -> String = ::formatArtistSongAlbumYear,
     scrollState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
+    rowsPerColumn: Int = 5,
+    columnMajor: Boolean = false,
     onPlay: (Int) -> Unit,
 ) {
     if (songs.isEmpty()) return
     val openSongActions = LocalSongActions.current
     val backdrop = LocalToolbarBackdrop.current
-    val columnCount = if (songs.size < 5) 1 else maxOf(3, (songs.size + 4) / 5)
+    val safeRows = rowsPerColumn.coerceAtLeast(1)
+    val columnCount = if (columnMajor) {
+        (songs.size + safeRows - 1) / safeRows
+    } else if (songs.size < safeRows) {
+        1
+    } else {
+        maxOf(3, (songs.size + safeRows - 1) / safeRows)
+    }
     val rowHeight = 48.dp * 1.35f * .92f * .93f
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val cardWidth = artistTopSongCardWidth(maxWidth, margin, columnCount)
         LazyRow(state = scrollState, contentPadding = PaddingValues(horizontal = margin), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(columnCount) { column ->
                 Column(Modifier.width(cardWidth), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (index in column until songs.size step columnCount) {
+                    val indices: IntProgression = if (columnMajor) {
+                        val start = column * safeRows
+                        start until minOf(songs.size, start + safeRows)
+                    } else {
+                        column until songs.size step columnCount
+                    }
+                    for (index in indices) {
                         val song = songs[index]
                         val detail = subtitle(song)
                         Row(Modifier.fillMaxWidth().heightIn(min = rowHeight).clickable { onPlay(index) },
@@ -122,11 +137,8 @@ internal enum class ArtistContentMode {
     SINGLES_EPS,
 }
 
-internal fun isArtistSingleOrEp(album: CatalogAlbum): Boolean {
-    val normalized = album.type.trim().lowercase()
-    if (normalized.isEmpty()) return false
-    return normalized.contains("single") || normalized.contains("ep") || normalized.contains("单曲")
-}
+internal fun isArtistSingleOrEp(album: CatalogAlbum): Boolean =
+    classifyArtistRelease(album).category == ArtistReleaseCategory.SINGLE_OR_EP
 private const val ArtistHeroHeightScale = 1.25f * .90f
 private const val ArtistHeroTransitionScale = .35f * .85f / ArtistHeroHeightScale
 internal val AlbumTrackRowHeight = 74.dp * .88f * .92f * .93f
@@ -385,7 +397,7 @@ internal fun CatalogDetailPage(
     val margin = if (hasImmersiveHero) LocalAuraLayout.current.pageMargin else (configuration.screenWidthDp * .058f * 1.15f).dp
     val related = info?.albums ?: model.songs.filter { song -> tracks.any { it.artistId == song.artistId } }
         .groupBy { it.albumId }.values.map { album -> val first = album.first()
-            CatalogAlbum(first.albumId, first.album, first.artwork, first.artistId, first.artist, count = album.size) }
+            CatalogAlbum(first.albumId, first.album, first.artwork, first.artistId, first.artist, count = album.size, tracks = album) }
         .filterNot { !artist && it.id == collection.key.substringAfterLast(':').toLongOrNull() }
     val context = LocalContext.current
     val favoritePrefs = remember { context.getSharedPreferences("aura.catalog.favorites", android.content.Context.MODE_PRIVATE) }
@@ -1083,7 +1095,7 @@ internal fun ArtistContentsPage(
     } else {
         val allRows = cloud?.albums ?: collection.songs.groupBy { "${it.volume}:${it.albumId}:${it.album}" }.values.map {
             val song = it.first()
-            CatalogAlbum(song.albumId, song.album, song.artwork, song.artistId, song.artist, count = it.size)
+            CatalogAlbum(song.albumId, song.album, song.artwork, song.artistId, song.artist, count = it.size, tracks = it)
         }
         val rows = remember(allRows, mode) {
             when (mode) {

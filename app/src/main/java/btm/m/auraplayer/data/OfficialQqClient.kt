@@ -99,7 +99,10 @@ internal class OfficialQqClient(
             ?: throw IOException("INVALID_RESPONSE")
         val id = creator.optLong("uin", effUin.toLongOrNull() ?: 0L).takeIf { it > 0L } ?: (effUin.toLongOrNull() ?: 0L)
         val nick = creator.optString("nick").ifBlank { "QQ $effUin" }
-        val avatar = creator.optString("headpic").https()
+        val avatar = creator.optString("headpic")
+            .ifBlank { creator.optString("logo") }
+            .ifBlank { if (id > 0L) "https://q.qlogo.cn/g?b=qq&nk=$id&s=640" else "" }
+            .https()
         return CloudAccount(id, nick, avatar)
     }
 
@@ -249,6 +252,49 @@ internal class OfficialQqClient(
         if (purl.isBlank()) throw IOException("UNAVAILABLE_SONG")
         val sip = data.optJSONArray("sip")?.optString(0)?.takeIf { it.isNotBlank() } ?: "https://isure.stream.qqmusic.qq.com/"
         return sip.https().trimEnd('/') + "/" + purl.trimStart('/')
+    }
+
+    fun albumTracks(albumMidOrId: String, parseSongs: (JSONArray) -> List<Song>): List<Song> {
+        val resp = musicu(mapOf("req_0" to JSONObject().apply {
+            put("module", "music.musichallAlbum.AlbumSongList")
+            put("method", "GetAlbumSongList")
+            put("param", JSONObject().apply {
+                albumMidOrId.toLongOrNull()?.let { put("albumId", it) } ?: put("albumMid", albumMidOrId)
+                put("begin", 0)
+                put("num", 100)
+                put("order", 2)
+            })
+        }))
+        val data = resp.optJSONObject("req_0")?.optJSONObject("data") ?: JSONObject()
+        val array = data.optJSONArray("songList")
+            ?: data.optJSONArray("songlist")
+            ?: data.optJSONArray("list")
+            ?: JSONArray()
+        return parseSongs(array)
+    }
+
+    fun artistAlbums(
+        singerMidOrId: String,
+        offset: Int,
+        pageSize: Int,
+        parseAlbums: (JSONArray) -> List<CatalogAlbum>,
+    ): CloudPage<CatalogAlbum> {
+        val resp = musicu(mapOf("req_0" to JSONObject().apply {
+            put("module", "music.musichallAlbum.AlbumListServer")
+            put("method", "GetAlbumList")
+            put("param", JSONObject().apply {
+                singerMidOrId.toLongOrNull()?.let { put("singerId", it) } ?: put("singerMid", singerMidOrId)
+                put("begin", offset)
+                put("num", pageSize)
+                put("order", 0)
+            })
+        }))
+        val data = resp.optJSONObject("req_0")?.optJSONObject("data") ?: JSONObject()
+        val array = data.optJSONArray("albumList") ?: data.optJSONArray("list") ?: JSONArray()
+        val albums = parseAlbums(array)
+        val total = data.optInt("total", 0)
+        val hasMore = albums.isNotEmpty() && (if (total > 0) offset + albums.size < total else albums.size >= pageSize)
+        return CloudPage(albums, offset + albums.size, hasMore, total.takeIf { it > 0 })
     }
 
     private fun String.https() = if (startsWith("http://")) "https://" + removePrefix("http://") else this

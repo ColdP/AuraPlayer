@@ -369,8 +369,15 @@ internal fun PlayerTiledStage(
     val haptics = LocalHapticFeedback.current
     val advancedMaterial = LocalAdvancedMaterialEnabled.current
 
-    val tracks = remember(model.queue, song.key) {
-        model.queue.ifEmpty { listOf(song) }
+    val visibleQueue = remember(model.queue, model.queueIndex, model.playbackMode) {
+        if (model.playbackMode == btm.m.auraplayer.ROAMING_PLAYBACK_MODE) {
+            model.queue.take((model.queueIndex + 1).coerceIn(0, model.queue.size))
+        } else {
+            model.queue
+        }
+    }
+    val tracks = remember(visibleQueue, song.key) {
+        visibleQueue.ifEmpty { listOf(song) }
     }
     val targetIndex = remember(tracks, model.queueIndex, song.key) {
         val idx = model.queueIndex

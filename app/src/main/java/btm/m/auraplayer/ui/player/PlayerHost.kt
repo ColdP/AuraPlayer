@@ -1071,17 +1071,20 @@ private fun rememberFullPlayerMetrics(
         else -> coverY
     }
     val fullCoverSize = if (landscapeGeom != null) {
-        lerp(stageCoverHeroSize, landscapeGeom.lyricsCompactCoverSize, showSmallLandscapeCover)
+        val lyricsSize = lerp(landscapeGeom.heroCoverSize, landscapeGeom.lyricsCompactCoverSize, controlsVisibility)
+        lerp(stageCoverHeroSize, lyricsSize, p)
     } else {
         stageCoverHeroSize + (small - stageCoverHeroSize) * p
     }
     val targetCoverX = if (landscapeGeom != null) {
-        lerp(stageCoverHeroX, landscapeGeom.lyricsCompactCoverX, showSmallLandscapeCover)
+        val lyricsX = lerp(landscapeGeom.heroCoverX, landscapeGeom.lyricsCompactCoverX, controlsVisibility)
+        lerp(stageCoverHeroX, lyricsX, p)
     } else {
         stageCoverHeroX + (smallX - stageCoverHeroX) * p
     }
     val targetCoverY = if (landscapeGeom != null) {
-        lerp(stageCoverHeroY, landscapeGeom.lyricsCompactCoverY, showSmallLandscapeCover)
+        val lyricsY = lerp(landscapeGeom.heroCoverY, landscapeGeom.lyricsCompactCoverY, controlsVisibility)
+        lerp(stageCoverHeroY, lyricsY, p)
     } else {
         stageCoverHeroY + (smallY - stageCoverHeroY) * p
     }
@@ -1428,7 +1431,8 @@ private fun FullPlayerArtworkLayer(
             m.tiledWallMetrics != null -> m.tiledWallMetrics.cornerRadius * 1.825f
             else -> m.baseCoverRadius
         }
-        val sharedRadius = lerp(13.dp * m.miniScale, stageCoverHeroRadius + (9.dp - stageCoverHeroRadius) * m.p, m.e)
+        val cornerProgress = if (m.landscapeGeom != null) m.showSmallLandscapeCover else m.p
+        val sharedRadius = lerp(13.dp * m.miniScale, stageCoverHeroRadius + (9.dp - stageCoverHeroRadius) * cornerProgress, m.e)
         Cover(
             uri = song.artwork,
             modifier = Modifier
@@ -1991,7 +1995,7 @@ private fun FullPlayerMetadataAndActionsLayer(
     val landscapeGeom = m.landscapeGeom
     val immGeom = m.immGeom
     val metadataSize = if (m.squareCardFullscreen && !m.landscape) 1f - .12f * m.e * (1f - m.p) else 1f
-    val measuredTextHeight = with(m.density) { if (textHeight > 0) textHeight.toDp() else (46.sp * metadataSize).toDp() }
+    val measuredTextHeight = with(m.density) { if (textHeight > 0) textHeight.toDp() else (50.sp * metadataSize).toDp() }
     val miniTextX = 66.dp * m.miniScale
     val miniTextWidth = (m.miniWidth - miniTextX - m.miniControlClearance).coerceAtLeast(24.dp)
     val miniTextY = (m.miniHeight - measuredTextHeight * .7f * m.miniScale) / 2
@@ -2120,7 +2124,7 @@ private fun FullPlayerMetadataAndActionsLayer(
         Modifier
             .offset(lerp(miniTextX, fullTextX, m.e), miniTextY + (fullTextY - miniTextY) * m.e)
             .width(textWidth)
-            .height(measuredTextHeight)
+            .wrapContentHeight(Alignment.Top, unbounded = true)
             .graphicsLayer {
                 translationX = m.miniShift
                 this.alpha = m.miniAlpha * m.shareChromeAlpha * landscapeMetaChrome * tiledChromeAlpha
@@ -2129,8 +2133,8 @@ private fun FullPlayerMetadataAndActionsLayer(
     ) {
         Column(
             Modifier
-                .fillMaxSize()
-                .width(textWidth)
+                .fillMaxWidth()
+                .wrapContentHeight()
                 .onSizeChanged { onTextHeightChange(it.height) }
                 .graphicsLayer {
                     transformOrigin = TransformOrigin(0f, 0f)
@@ -2167,7 +2171,8 @@ private fun FullPlayerMetadataAndActionsLayer(
         if (mixVisual != null) {
             Column(
                 Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
+                    .wrapContentHeight()
                     .graphicsLayer {
                         transformOrigin = TransformOrigin(0f, 0f)
                         scaleX = textScale
@@ -2197,7 +2202,7 @@ private fun FullPlayerMetadataAndActionsLayer(
         }
         Box(
             Modifier
-                .fillMaxSize()
+                .matchParentSize()
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -2666,12 +2671,14 @@ private fun PlayerBottomActionsSection(
             1 -> R.drawable.ic_player_shuffle
             2 -> R.drawable.ic_player_repeat_one
             btm.m.auraplayer.HEARTBEAT_PLAYBACK_MODE -> R.drawable.ic_player_heartbeat
+            btm.m.auraplayer.ROAMING_PLAYBACK_MODE -> R.drawable.ic_player_roaming
             else -> R.drawable.ic_player_repeat
         }
         val modeDescription = when (model.playbackMode) {
             1 -> tr("shuffle_mode", "随机播放")
             2 -> tr("repeat_one_mode", "单曲循环")
             btm.m.auraplayer.HEARTBEAT_PLAYBACK_MODE -> tr("heartbeat_mode", "心动模式")
+            btm.m.auraplayer.ROAMING_PLAYBACK_MODE -> tr("roaming_mode", "漫游模式")
             else -> tr("repeat_all_mode", "列表循环")
         }
         val revision = model.history.revision
@@ -3181,10 +3188,17 @@ private fun QueueSwipeRow(song: btm.m.auraplayer.data.Song, current: Boolean, in
 
 @Composable
 private fun PlayerQueue(model: AuraViewModel, modifier: Modifier = Modifier, expressive: PlayerExpressiveColors? = null, oneUi: PlayerOneUiColors? = null) {
-    val list = rememberLazyListState(initialFirstVisibleItemIndex = model.queueIndex.coerceAtLeast(0))
+    val visibleQueue = remember(model.queue, model.queueIndex, model.playbackMode) {
+        if (model.playbackMode == btm.m.auraplayer.ROAMING_PLAYBACK_MODE) {
+            model.queue.take((model.queueIndex + 1).coerceIn(0, model.queue.size))
+        } else {
+            model.queue
+        }
+    }
+    val list = rememberLazyListState(initialFirstVisibleItemIndex = model.queueIndex.coerceIn(0, visibleQueue.lastIndex.coerceAtLeast(0)))
     val density = LocalDensity.current
     val rowStep = with(density) { 58.dp.toPx() }
-    val queueSize by rememberUpdatedState(model.queue.size)
+    val queueSize by rememberUpdatedState(visibleQueue.size)
     var draggingIndex by remember { mutableIntStateOf(-1) }
     Box(modifier) {
     LazyColumn(
@@ -3204,7 +3218,7 @@ private fun PlayerQueue(model: AuraViewModel, modifier: Modifier = Modifier, exp
         contentPadding = PaddingValues(top = 8.dp, bottom = 18.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        itemsIndexed(model.queue) { index, song ->
+        itemsIndexed(visibleQueue) { index, song ->
             val current = index == model.queueIndex
             QueueSwipeRow(song, current, index, model, draggingIndex == index,
                 onDragState = { draggingIndex = if (it) index else -1 },

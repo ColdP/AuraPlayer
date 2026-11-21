@@ -264,6 +264,16 @@ class NeteaseApi(
         val songs = parseSongs(details.optJSONArray("songs") ?: JSONArray()).associateBy { it.id }
         return ids.mapNotNull(songs::get)
     }
+    suspend fun personalFmSongs(): List<Song> {
+        val rows = request("personal_fm").optJSONArray("data") ?: JSONArray()
+        val ids = (0 until rows.length()).mapNotNull { index ->
+            rows.optJSONObject(index)?.optLong("id")?.takeIf { it > 0 }
+        }.distinct()
+        if (ids.isEmpty()) return emptyList()
+        val details = request("song/detail", mapOf("ids" to ids.joinToString(",")))
+        val songs = parseSongs(details.optJSONArray("songs") ?: JSONArray()).associateBy { it.id }
+        return ids.mapNotNull(songs::get)
+    }
     suspend fun follows(uid: Long, offset: Int = 0, limit: Int = 30): CloudPage<CloudFollow> {
         val response = request("user/follows", mapOf("uid" to "$uid", "offset" to "$offset", "limit" to "$limit"))
         val rows = response.optJSONArray("follow") ?: JSONArray()
@@ -288,6 +298,112 @@ class NeteaseApi(
         request("playlist/tracks", mapOf("op" to "add", "pid" to "$playlistId", "tracks" to "$songId"))
         invalidatePlaylist(playlistId)
     }
+    data class RecentPlayEntry(val song: Song, val playTimeMs: Long)
+
+    suspend fun recentPlayEntries(limit: Int = 50): List<RecentPlayEntry> {
+        val response = request("record/recent/song", mapOf("limit" to "${limit.coerceIn(1, 300)}"))
+        val rows = response.optJSONObject("data")?.optJSONArray("list")
+            ?: response.optJSONArray("list")
+            ?: JSONArray()
+        val songs = JSONArray()
+        val playTimes = mutableListOf<Long>()
+        for (index in 0 until rows.length()) {
+            val row = rows.optJSONObject(index) ?: continue
+            val resourceType = row.optString("resourceType")
+            if (resourceType.isNotBlank() && !resourceType.equals("SONG", ignoreCase = true)) continue
+            val songJson = row.optJSONObject("data")
+                ?: row.optJSONObject("song")
+                ?: row.takeIf { it.has("id") && it.has("name") }
+                ?: continue
+            if (songJson.optLong("id") <= 0L) continue
+            songs.put(songJson)
+            playTimes += row.optLong("playTime", 0L)
+        }
+        val parsed = parseSongs(songs)
+        val seen = HashSet<Long>()
+        return buildList {
+            for (index in parsed.indices) {
+                val song = parsed[index]
+                if (seen.add(song.id)) {
+                    add(RecentPlayEntry(song, playTimes.getOrElse(index) { 0L }))
+                }
+            }
+        }
+    }
+
+    suspend fun recentSongs(limit: Int = 50): List<Song> = recentPlayEntries(limit).map { it.song }
+
+    suspend fun scrobble(
+        songId: Long,
+        sourceId: Long,
+        playedSec: Int,
+        totalSec: Int,
+        title: String = "",
+        artist: String = "",
+        bitrateKbps: Int = 320,
+        level: String = "exhigh",
+        completed: Boolean = true,
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (songId <= 0L || cookie().isBlank()) return@withContext false
+        val safePlayed = playedSec.coerceAtLeast(1)
+        val safeTotal = totalSec.coerceAtLeast(safePlayed)
+        val effectiveSourceId = if (sourceId > 0L) sourceId.toString() else songId.toString()
+        val endReason = if (completed) "playend" else "interrupt"
+        val v1Params = buildMap {
+            put("id", songId.toString())
+            put("time", safePlayed.toString())
+            put("total", safeTotal.toString())
+            put("sourceid", effectiveSourceId)
+            put("source", "list")
+            put("bitrate", bitrateKbps.coerceAtLeast(128).toString())
+            put("level", level.ifBlank { "exhigh" })
+            put("end", endReason)
+            if (title.isNotBlank()) put("name", title)
+            if (artist.isNotBlank()) put("artist", artist)
+        }
+        val v1Ok = runCatching {
+            requestBlocking("scrobble/v1", v1Params, authenticated = true)
+            true
+        }.getOrDefault(false)
+        if (v1Ok) {
+            // In official mode, also notify startplay so /record/recent/song updates immediately
+            // without double-counting play/duration metrics.
+            if (endpoint().isBlank()) {
+                runCatching {
+                    requestBlocking(
+                        "scrobble/start",
+                        mapOf("id" to songId.toString(), "sourceid" to effectiveSourceId),
+                        authenticated = true,
+                    )
+                }
+            }
+            return@withContext true
+        }
+        runCatching {
+            requestBlocking(
+                "scrobble",
+                mapOf(
+                    "id" to songId.toString(),
+                    "sourceid" to effectiveSourceId,
+                    "time" to safePlayed.toString(),
+                    "end" to endReason,
+                ),
+                authenticated = true,
+            )
+            true
+        }.getOrDefault(false)
+    }
+
+    suspend fun listenDataToday(): JSONObject = request("listen/data/today/song")
+    suspend fun listenDataRealtimeReport(type: String = "week"): JSONObject =
+        request("listen/data/realtime/report", mapOf("type" to type))
+    suspend fun listenDataReport(type: String = "week"): JSONObject =
+        request("listen/data/report", mapOf("type" to type))
+    suspend fun listenDataSongPlayRank(type: String = "week"): JSONObject =
+        request("listen/data/song/play/rank", mapOf("type" to type))
+    suspend fun listenDataYearReport(): JSONObject = request("listen/data/year/report")
+    suspend fun listenDataTotal(): JSONObject = request("listen/data/total")
+
     suspend fun listeningRank(uid: Long, type: Int = 0): List<Song> {
         val response = request("user/record", mapOf("uid" to "$uid", "type" to "$type"))
         val rows = response.optJSONArray(if (type == 1) "weekData" else "allData") ?: JSONArray()
@@ -301,6 +417,7 @@ class NeteaseApi(
     private fun parseAlbums(items: JSONArray, defaultArtistId: Long = 0L): List<CatalogAlbum> = List(items.length()) { i ->
         val album = items.getJSONObject(i)
         val artist = album.optJSONObject("artist") ?: album.optJSONArray("artists")?.optJSONObject(0)
+        val embeddedTracks = album.optJSONArray("songs")?.let(::parseSongs).orEmpty()
         CatalogAlbum(
             id = album.getLong("id"),
             title = album.optString("name"),
@@ -308,8 +425,10 @@ class NeteaseApi(
             artistId = artist?.optLong("id") ?: defaultArtistId,
             artist = artist?.optString("name").orEmpty(),
             published = album.optLong("publishTime"),
-            count = album.optInt("size"),
+            count = album.optInt("size").takeIf { it > 0 } ?: embeddedTracks.size,
             type = album.optString("type"),
+            subType = album.optString("subType"),
+            tracks = embeddedTracks,
         )
     }
     suspend fun subscribedAlbums(offset: Int = 0): CloudPage<CatalogAlbum> {
@@ -406,6 +525,10 @@ class NeteaseApi(
         val level = single?.optString("level", single.optString("quality")).orEmpty().lowercase()
         val quality = btm.m.auraplayer.playback.StreamQuality.entries.firstOrNull { it.level == level }
         return if (quality != null && single != null) listOf(detail(quality, single)) else emptyList()
+    }
+    suspend fun albumTracks(id: Long): List<Song> {
+        val response = request("album", mapOf("id" to "$id"))
+        return parseSongs(response.optJSONArray("songs") ?: JSONArray())
     }
     suspend fun albumPage(id: Long): CloudCatalogPage {
         val response = request("album", mapOf("id" to "$id"))

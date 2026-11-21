@@ -26,7 +26,7 @@ class CloudCatalogTest {
     @Test fun artistUsesPortraitAndDoesNotRefetchBiographyForEachPage() = withServer { server, api ->
         server.reply("""{"code":200,"more":true,"total":60,"songs":[{"id":1,"name":"Top"}]}""")
         server.reply("""{"code":200,"data":{"artist":{"id":5,"name":"Singer","cover":"portrait","briefDesc":"Biography","transNames":["歌手"],"alias":["Singer","Alias B"],"musicSize":128,"albumSize":14},"identify":{"imageDesc":"华语流行歌手"}}}""")
-        server.reply("""{"code":200,"hotAlbums":[{"id":12,"name":"New release","publishTime":2026,"type":"专辑"},{"id":13,"name":"Latest EP","publishTime":2026,"type":"EP/Single"}]}""")
+        server.reply("""{"code":200,"hotAlbums":[{"id":12,"name":"New release","publishTime":2026,"size":10,"type":"专辑","subType":"录音室版"},{"id":13,"name":"Latest EP","publishTime":2026,"size":4,"type":"EP/Single","subType":"EP"}]}""")
         val first = api.artistPage(5)
         assertEquals("portrait", first.artwork); assertEquals("Biography", first.info!!.description)
         assertEquals(listOf("歌手", "Alias B"), first.info!!.artistAliases)
@@ -34,7 +34,10 @@ class CloudCatalogTest {
         assertEquals(128, first.info!!.artistSongCount)
         assertEquals(14, first.info!!.artistAlbumCount)
         assertEquals("专辑", first.info!!.albums[0].type)
+        assertEquals("录音室版", first.info!!.albums[0].subType)
+        assertEquals(10, first.info!!.albums[0].count)
         assertEquals("EP/Single", first.info!!.albums[1].type)
+        assertEquals(4, first.info!!.albums[1].count)
         assertTrue(first.page.hasMore); assertEquals(60, first.page.total)
         server.reply("""{"code":200,"more":false,"songs":[{"id":2,"name":"Next"}]}""")
         val second = api.artistPage(5, first.page.nextOffset)
@@ -72,5 +75,12 @@ class CloudCatalogTest {
         val unsub = server.takeRequest()
         assertEquals("/artist/sub", unsub.path)
         assertTrue(unsub.body.readUtf8().contains("id=5&t=0"))
+    }
+    @Test fun albumTracksReturnsTrackListWithDurationsForClassification() = withServer { server, api ->
+        server.reply("""{"code":200,"songs":[{"id":101,"name":"Lead","dt":215000},{"id":102,"name":"Lead (伴奏)","dt":215000}]}""")
+        val tracks = api.albumTracks(99)
+        assertEquals(2, tracks.size)
+        assertEquals(215_000L, tracks[0].duration)
+        assertEquals(ArtistReleaseCategory.SINGLE_OR_EP, classifyArtistRelease(CatalogAlbum(99, "Lead", "", 1, "Artist", count = 2, type = "专辑", tracks = tracks)).category)
     }
 }

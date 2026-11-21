@@ -22,6 +22,7 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
     lateinit var settings: AuraSettings; private set
     internal lateinit var navigationMaterial: btm.m.auraplayer.ui.navigation.NavigationMaterialStore; private set
     lateinit var history: LibraryHistory; private set
+    lateinit var neteaseListenStore: NeteaseListenStore; private set
     lateinit var session: SecureSession; private set
     lateinit var api: NeteaseApi; private set
     lateinit var qq: QqMusicApi; private set
@@ -45,6 +46,7 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         auraSing = btm.m.auraplayer.sing.AuraSingEngine(this)
         auraMix = btm.m.auraplayer.auramix.AuraMixSettings(this)
         history = LibraryHistory(this)
+        neteaseListenStore = NeteaseListenStore(this)
         session = SecureSession(this)
         accountsState = MultiAccountStateCodec.decode(session.read())
         cookie = accountsState.activeCookie

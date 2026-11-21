@@ -17,7 +17,7 @@ import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun CloudHubPage(model: AuraViewModel, padding: PaddingValues, login: () -> Unit, loginQq: () -> Unit, openFollows: () -> Unit) {
+internal fun CloudHubPage(model: AuraViewModel, padding: PaddingValues, login: () -> Unit, loginQq: () -> Unit, openFollows: () -> Unit, openReport: () -> Unit = {}) {
     val user = model.account
     val source = model.settings.value.cloudSource
     val showNetease = source != "qq"
@@ -36,7 +36,9 @@ internal fun CloudHubPage(model: AuraViewModel, padding: PaddingValues, login: (
             item("rank") {
                 SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
                     ArrowPreference(title = tr("listening_rank", "听歌排行"), onClick = { if (user == null) login() else model.openListeningRank() },
-                        startAction = { Artwork(model.cloudRecentSongs.firstOrNull()?.artwork.orEmpty(), Modifier.padding(end = 12.dp).size(48.dp), cornerRadius = ListArtworkCornerRadius) })
+                        startAction = { Artwork(model.cloudRankPreviewSongs.firstOrNull()?.artwork.orEmpty(), Modifier.padding(end = 12.dp).size(48.dp), cornerRadius = ListArtworkCornerRadius) })
+                    ArrowPreference(title = tr("listening_report", "听歌报告"), summary = tr("listening_report_summary", "日 / 周 / 月 / 年收听足迹"),
+                        onClick = { if (user == null) login() else openReport() })
                     ArrowPreference(title = tr("my_follows", "我的关注"), onClick = { if (user == null) login() else openFollows() })
                 }
             }
@@ -131,7 +133,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.qqSection(model: Aura
                 title = qqUser?.let { if (it.userId > 0L) "${it.nickname} · ${it.userId}" else it.nickname } ?: tr("qq_music", "QQ音乐"),
                 summary = if (model.app.qqEndpoint.isNotBlank()) tr("qq_custom_service", "自建服务连接") else tr("account_manage", "管理账号与连接"),
                 onClick = loginQq,
-                startAction = { qqUser?.avatar?.takeIf { it.isNotBlank() }?.let { Artwork(it, Modifier.padding(end = 12.dp).size(44.dp), true) } },
+                startAction = { qqAccountAvatar(qqUser).takeIf { it.isNotBlank() }?.let { Artwork(it, Modifier.padding(end = 12.dp).size(44.dp), true) } },
             )
         }
     }

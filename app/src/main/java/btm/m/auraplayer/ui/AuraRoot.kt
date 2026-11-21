@@ -28,11 +28,15 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.*
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import btm.m.auraplayer.AuraApplication
@@ -221,21 +225,41 @@ private fun AuraShell(model: AuraViewModel) {
     val catalogDark = topRoute?.substringBefore(':') in setOf("albumInfo", "artistInfo") ||
         visibleCollection?.key?.let { it.startsWith("artist:") || it.startsWith("cloud:artist:") } == true
     val playerCoveringBars = playerOpen && (!lyricShareTransition.active || lyricShareTransition.progress < .45f)
+    val configuration = LocalConfiguration.current
+    val isLandscapeMode = LocalAuraLayout.current.landscape || configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val hideStatusBar = shouldHideStatusBar(
+        mode = nowPlayingConfig.statusBarHideMode,
+        playerCoveringBars = playerCoveringBars,
+        isLandscape = isLandscapeMode,
+    )
+    val applySystemBars: () -> Unit = {
+        val activity = context as btm.m.auraplayer.MainActivity
+        val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+        controller.isAppearanceLightStatusBars = if (playerCoveringBars) playerHasLightSurface else !playerDark && !catalogDark
+        controller.isAppearanceLightNavigationBars = if (playerCoveringBars) playerHasLightSurface else !playerDark
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (hideStatusBar) {
+            controller.hide(WindowInsetsCompat.Type.statusBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.statusBars())
+        }
+    }
     SideEffect {
         val activity = context as btm.m.auraplayer.MainActivity
         WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
             isAppearanceLightStatusBars = if (playerCoveringBars) playerHasLightSurface else !playerDark && !catalogDark
             isAppearanceLightNavigationBars = if (playerCoveringBars) playerHasLightSurface else !playerDark
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
         activity.window.statusBarColor = android.graphics.Color.TRANSPARENT
         activity.window.navigationBarColor = android.graphics.Color.TRANSPARENT
         activity.window.isStatusBarContrastEnforced = false
     }
-    LaunchedEffect(playerCoveringBars, playerDark, playerHasLightSurface, catalogDark) {
-        val activity = context as btm.m.auraplayer.MainActivity
-        val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
-        controller.isAppearanceLightStatusBars = if (playerCoveringBars) playerHasLightSurface else !playerDark && !catalogDark
-        controller.isAppearanceLightNavigationBars = if (playerCoveringBars) playerHasLightSurface else !playerDark
+    LaunchedEffect(playerCoveringBars, playerDark, playerHasLightSurface, catalogDark, hideStatusBar) {
+        applySystemBars()
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        if (hideStatusBar) applySystemBars()
     }
     var searchOpen by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
@@ -389,23 +413,71 @@ private fun AuraShell(model: AuraViewModel) {
                             if (state == EnterExitState.Visible) 0f else 12f
                         }
                         saveableTabs.SaveableStateProvider(tab) {
+                            val activeHomeTarget = when {
+                                tab != 0 -> null
+                                settings.cloudDisabled || settings.homeContent == "local" -> btm.m.auraplayer.data.HomeBannerTarget.LOCAL
+                                settings.homeContent == "netease" -> btm.m.auraplayer.data.HomeBannerTarget.NETEASE
+                                settings.homeContent == "qq" -> btm.m.auraplayer.data.HomeBannerTarget.QQ
+                                else -> btm.m.auraplayer.data.HomeBannerTarget.LOCAL
+                            }
+                            val activeBannerConfig = activeHomeTarget?.let { settings.bannerConfig(it) }
+                            val activeStyleConfig = activeBannerConfig?.let { it.styleConfig(it.style) }
+                            val activeBannerStyle = activeBannerConfig?.style
+                            val immersiveHomeBanner = activeBannerStyle == btm.m.auraplayer.data.LocalBannerStyle.IMMERSIVE ||
+                                activeBannerStyle == btm.m.auraplayer.data.LocalBannerStyle.IMMERSIVE_GLASS
+                            val coloredHomeBg = immersiveHomeBanner && activeStyleConfig != null &&
+                                activeStyleConfig.backgroundStyle != btm.m.auraplayer.data.HomeBackgroundStyle.DEFAULT
+                            val homeBannerTheme = if (coloredHomeBg && activeBannerConfig != null) {
+                                rememberHomeBannerTheme(activeBannerConfig.imagePath)
+                            } else {
+                                null
+                            }
                             Box(Modifier.fillMaxSize().blur(tabBlur.dp)) {
-                                AppPage(if (tab == 0) "Aura Player" else rootLabels[tab], actions = {
-                                    if (tab == 0) GlassToolbarIconButton(MiuixIcons.Regular.Settings, tr("settings", "设置")) { open("settings") }
-                                    else if (tab == 2) SongsToolbarMenu(model)
-                                    else GlassToolbarIconButton(MiuixIcons.Regular.Refresh, tr("refresh", "刷新")) {
-                                        model.refreshLibrary(); if (tab == 1) model.refreshCloud()
-                                    }
-                                }) { padding, _ ->
+                                AppPage(
+                                    title = if (immersiveHomeBanner) "" else if (tab == 0) "Aura Player" else rootLabels[tab],
+                                    showLargeTitle = !immersiveHomeBanner,
+                                    topBarTint = homeBannerTheme?.topBarTint,
+                                    useLegacyTopBarBackdrop = false,
+                                    pageBackground = if (coloredHomeBg && homeBannerTheme != null && activeBannerConfig != null && activeStyleConfig != null) {
+                                        {
+                                            HomeBannerPageBackground(
+                                                bannerUri = activeBannerConfig.imagePath,
+                                                styleConfig = activeStyleConfig,
+                                                theme = homeBannerTheme,
+                                                modifier = Modifier.matchParentSize(),
+                                            )
+                                        }
+                                    } else {
+                                        null
+                                    },
+                                    actions = {
+                                        if (tab == 0) GlassToolbarIconButton(MiuixIcons.Regular.Settings, tr("settings", "设置")) { open("settings") }
+                                        else if (tab == 2) SongsToolbarMenu(model)
+                                        else GlassToolbarIconButton(MiuixIcons.Regular.Refresh, tr("refresh", "刷新")) {
+                                            model.refreshLibrary(); if (tab == 1) model.refreshCloud()
+                                        }
+                                    },
+                                ) { padding, _ ->
                                     val chromeSpace = if (model.current != null) 184 else 112
                                     val contentPadding = auraContentPadding(padding, chromeSpace + settings.navigationOffsetDp.coerceAtLeast(0))
+                                    val homeContentPadding = if (immersiveHomeBanner) {
+                                        PaddingValues(bottom = contentPadding.calculateBottomPadding())
+                                    } else {
+                                        contentPadding
+                                    }
+                                    val immersiveTop = if (immersiveHomeBanner) padding.calculateTopPadding() else 0.dp
                                     when (tab) {
                                         0 -> when (if (settings.cloudDisabled) "local" else settings.homeContent) {
-                                            "netease" -> CloudHomePage(model, contentPadding, { open("login") }, { open("cloud_recommended") })
-                                            "qq" -> QqHomePage(model, contentPadding) { open("qq_login") }
-                                            else -> HomePage(model, contentPadding, requestPermission)
+                                            "netease" -> CloudHomePage(model, homeContentPadding, { open("login") }, { open("cloud_recommended") }, immersiveTop, { open("cloud_report") })
+                                            "qq" -> QqHomePage(model, homeContentPadding, { open("qq_login") }, immersiveTop)
+                                            else -> HomePage(
+                                                model = model,
+                                                padding = homeContentPadding,
+                                                requestPermission = requestPermission,
+                                                immersiveTopPadding = immersiveTop,
+                                            )
                                         }
-                                        1 -> CloudHubPage(model, contentPadding, { open("login") }, { open("qq_login") }, { open("cloud_follows") })
+                                        1 -> CloudHubPage(model, contentPadding, { open("login") }, { open("qq_login") }, { open("cloud_follows") }, { open("cloud_report") })
                                         2 -> SongsPage(model, contentPadding, requestPermission) { secondary ->
                                             open(when (secondary) { 0 -> "albums"; 1 -> "artists"; else -> "localPlaylists" })
                                         }
@@ -527,6 +599,9 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
     var materialTab by rememberSaveable {
         mutableIntStateOf(NavigationMaterialSettings.styles.indexOf(NavigationStyle.fromPreference(model.settings.value.navigation)).coerceAtLeast(0))
     }
+    var cloudTab by rememberSaveable { mutableIntStateOf(0) }
+    var reportTab by rememberSaveable { mutableIntStateOf(0) }
+    var reportRefreshNonce by rememberSaveable { mutableIntStateOf(0) }
     val tagEditorExitGuard = LocalTagEditorExitGuard.current
     val destination = route.takeIf { it.startsWith("collection:") }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)
     val albumInfoDestination = route.takeIf { it.substringBefore(':') in setOf("albumInfo", "artistInfo", "artistSongs", "artistAlbums", "artistSingles") }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)
@@ -578,6 +653,8 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
     val title = when (page) {
         "tagEditor" -> tr("tag_editor", "标签编辑器")
         "settings" -> tr("settings", "设置")
+        "cloud_settings" -> tr("cloud", "云端")
+        "local_settings" -> tr("local", "本地")
         "theme" -> tr("theme_color", "主题与颜色")
         "navigation_material" -> tr("nav_material_title", "底部导航栏材质参数调整")
         "login" -> tr("netease", "网易云音乐")
@@ -585,6 +662,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "switch_user", "qq_switch_user" -> tr("switch_user", "切换账号")
         "cloud_recommended" -> tr("recommended_playlists", "推荐歌单")
         "cloud_follows" -> tr("my_follows", "我的关注")
+        "cloud_report" -> tr("listening_report", "听歌报告")
         "downloads" -> tr("downloaded_music", "已下载的音乐")
         "audio_effects" -> tr("audio_effects", "音效")
         "effect_library" -> tr("preset_library", "预设库")
@@ -598,7 +676,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "llm_translation_edit" -> tr("llm_edit_lines", "编辑译文")
         "llm_auto_language_rules" -> tr("llm_auto_rules_title", "自动翻译语言规则")
         "song_credits" -> tr("production_team", "制作团队")
-        "now_playing_settings" -> tr("now_playing_page", "正在播放页面")
+        "now_playing_settings" -> tr("now_playing_page", "正在播放界面")
         "aura_sing" -> tr("aura_sing_title", "Aura Sing")
         "aura_sing_downloads" -> tr("spatial_model_downloads", "模型下载")
         "aura_sing_cache" -> tr("aura_sing_cache_title", "伴奏与人声分离缓存")
@@ -675,10 +753,23 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         onBack = closePlaylistSearch,
     )
     AppPage(title, back, showLargeTitle = page != "about" && (!catalog || page in setOf("artistSongs", "artistAlbums", "artistSingles")),
+        actions = {
+            if (page == "cloud_report") {
+                GlassToolbarIconButton(MiuixIcons.Regular.Refresh, tr("refresh", "刷新")) { reportRefreshNonce++ }
+            }
+        },
         header = {
             when (page) {
                 "effect_library" -> SoftGlassHeaderTabs(listOf(tr("builtin_presets", "内置预设"), tr("user_presets", "用户预设")), presetTab) { presetTab = it }
                 "navigation_material" -> SoftGlassHeaderTabs(listOf(tr("nav_material_hyper", "HyperOS"), tr("nav_material_harmony", "HarmonyOS"), tr("nav_material_liquid", "液态玻璃")), materialTab) { materialTab = it }
+                "cloud_settings" -> SoftGlassHeaderTabs(
+                    listOf(tr("cloud_tab_general", "通用"), tr("netease", "网易云音乐"), tr("qq_music", "QQ音乐")),
+                    cloudTab,
+                ) { cloudTab = it }
+                "cloud_report" -> SoftGlassHeaderTabs(
+                    listOf(tr("report_day", "日"), tr("report_week", "周"), tr("report_month", "月"), tr("report_year", "年")),
+                    reportTab,
+                ) { reportTab = it }
                 "collection" -> if (playlistSearchSupported) {
                     Column(Modifier.fillMaxWidth()) {
                         if (destination?.cloud?.source == "rank") {
@@ -723,6 +814,8 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         val contentPadding = auraContentPadding(padding, chromeSpace)
         when (page) {
             "settings" -> SettingsPage(model, contentPadding, open)
+            "cloud_settings" -> CloudSettingsPage(model, contentPadding, cloudTab, open)
+            "local_settings" -> LocalSettingsPage(model, contentPadding)
             "theme" -> ThemePage(model, contentPadding)
             "navigation_material" -> NavigationMaterialPage(model, contentPadding, NavigationMaterialSettings.styles[materialTab])
             "login" -> LoginPage(model, contentPadding, open)
@@ -731,6 +824,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             "qq_switch_user" -> SwitchUserPage(model, contentPadding, isQq = true)
             "cloud_recommended" -> CloudRecommendedPage(model, contentPadding)
             "cloud_follows" -> CloudFollowsPage(model, contentPadding)
+            "cloud_report" -> NeteaseListenReportPage(model, contentPadding, reportTab, reportRefreshNonce) { open("login") }
             "downloads" -> DownloadedMusicPage(model, contentPadding)
             "audio_effects" -> AudioEffectsPage(contentPadding, isActive, open)
             "effect_library" -> PresetLibraryPage(contentPadding, presetTab, open)
@@ -798,6 +892,17 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             else -> LegalPage(page, contentPadding)
         }
     }
+}
+
+internal fun shouldHideStatusBar(
+    mode: btm.m.auraplayer.playback.StatusBarHideMode,
+    playerCoveringBars: Boolean,
+    isLandscape: Boolean,
+): Boolean = when (mode) {
+    btm.m.auraplayer.playback.StatusBarHideMode.NEVER -> false
+    btm.m.auraplayer.playback.StatusBarHideMode.ALWAYS -> true
+    btm.m.auraplayer.playback.StatusBarHideMode.NOW_PLAYING_ONLY -> playerCoveringBars
+    btm.m.auraplayer.playback.StatusBarHideMode.LANDSCAPE_ONLY -> isLandscape
 }
 
 private val CHROME_HIDDEN_ROUTES = setOf("navigation_material", "lyricShare", "about", "spatial_cover_preview")
