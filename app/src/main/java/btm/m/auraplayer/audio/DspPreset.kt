@@ -28,7 +28,37 @@ data class DspConfig(
 }
 
 data class DspPreset(val id: String, val name: String, val description: String, val config: DspConfig, val core: Boolean = false)
+data class EqBandPreset(val id: String, val name: String, val band: EqBand)
 enum class SoundStyle { CLASSIC, BALANCED, ORIGINAL }
+
+/** Built-in single-band EQ templates so users can mix and match individual bands freely. */
+object BuiltInEqBandPresets {
+    val all: List<EqBandPreset> = listOf(
+        EqBandPreset("flat", "Flat Reset", EqBand(1000.0, 0.0, 0.707, FilterType.PEAK)),
+        EqBandPreset("sub_bass", "Sub-Bass Boost", EqBand(55.0, 4.0, 0.707, FilterType.LOW_SHELF)),
+        EqBandPreset("bass_punch", "Bass Punch", EqBand(95.0, 3.2, 0.90, FilterType.PEAK)),
+        EqBandPreset("warm_body", "Warm Body", EqBand(200.0, 2.5, 0.80, FilterType.PEAK)),
+        EqBandPreset("de_mud", "De-Mud Cut", EqBand(320.0, -3.0, 1.10, FilterType.PEAK)),
+        EqBandPreset("mid_scoop", "Mid Scoop", EqBand(1000.0, -2.5, 0.85, FilterType.PEAK)),
+        EqBandPreset("vocal_presence", "Vocal Presence", EqBand(1800.0, 2.8, 0.90, FilterType.PEAK)),
+        EqBandPreset("clarity_detail", "Clarity & Detail", EqBand(3200.0, 2.6, 1.00, FilterType.PEAK)),
+        EqBandPreset("soften_harsh", "Soften Harshness", EqBand(4200.0, -3.0, 1.40, FilterType.PEAK)),
+        EqBandPreset("de_ess", "De-Ess Cut", EqBand(6800.0, -3.5, 2.00, FilterType.PEAK)),
+        EqBandPreset("smooth_rolloff", "Smooth High Roll-Off", EqBand(7500.0, -3.0, 0.707, FilterType.HIGH_SHELF)),
+        EqBandPreset("air_sparkle", "Air & Sparkle", EqBand(11000.0, 3.0, 0.707, FilterType.HIGH_SHELF)),
+    ).also { presets ->
+        DspConfig(bands = presets.take(8).map { it.band }).validate()
+        DspConfig(bands = presets.drop(8).map { it.band }).validate()
+    }
+
+    fun match(band: EqBand): EqBandPreset? = all.firstOrNull { preset ->
+        val p = preset.band
+        band.type == p.type &&
+            kotlin.math.abs(band.frequency - p.frequency) <= 1.0 &&
+            kotlin.math.abs(band.gainDb - p.gainDb) <= 0.05 &&
+            kotlin.math.abs(band.q - p.q) <= 0.02
+    }
+}
 
 /** Names are localized at the UI boundary; DSP data never depends on the current language. */
 object BuiltInPresets {

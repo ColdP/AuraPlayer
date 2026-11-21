@@ -480,6 +480,7 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
     val customEnabled = !isSmart
     val c = state.editableConfig
     val controlsEnabled = customEnabled && !c.bypass
+    val headroom = remember(c) { DspResponseMath.headroomBreakdown(c) }
     var saving by remember { mutableStateOf(false) }
     fun change(block: (DspConfig) -> DspConfig) { if (customEnabled) store.custom(block(store.state.value.editableConfig)) }
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -494,7 +495,11 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
                 SwitchPreference(tr("enable_custom_processing", "启用自定义处理"), checked = customEnabled && !c.bypass, enabled = customEnabled) { enabled -> change { it.copy(bypass = !enabled) } }
             }
         }
+        item {
+            OverallEqResponseCard(config = c, headroom = headroom, enabled = controlsEnabled)
+        }
         item { Group(tr("effect_headroom", "增益余量")) {
+            HeadroomVisualizer(breakdown = headroom, enabled = controlsEnabled)
             SliderPreference(tr("effect_preamp", "前置增益"), c.preampDb.toFloat(), -18f..0f, "${decimal(c.preampDb)} dB", controlsEnabled, steps = 35, defaultValue = -2f) { value -> change { it.copy(preampDb = value.toDouble()) } }
             BasicComponent(title = tr("automatic_headroom", "自动增益保护"), summary = tr("automatic_headroom_summary", "在前置增益基础上，为 EQ 和声场增强额外预留余量，并限制输出峰值"), enabled = controlsEnabled, insideMargin = CompactPreferencePadding)
         } }
@@ -502,6 +507,8 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
             val b = c.bands[index]
             fun band(block: (EqBand) -> EqBand) = change { current -> current.copy(bands = current.bands.mapIndexed { i, v -> if (i == index) block(v) else v }) }
             Group("${tr("eq_band", "均衡频段")} ${index + 1}") {
+                BandResponseVisualizer(band = b, bandIndex = index, allBands = c.bands, enabled = controlsEnabled)
+                EqBandPresetDropdown(band = b, enabled = controlsEnabled) { presetBand -> band { presetBand } }
                 GlassDropdownPreference(tr("filter_type", "滤波器类型"), listOf(tr("filter_peak", "峰值"), tr("filter_low", "低频搁架"), tr("filter_high", "高频搁架")), b.type.ordinal, enabled = controlsEnabled, backdrop = LocalToolbarBackdrop.current) { type -> band { it.copy(type = FilterType.entries[type]) } }
                 SliderPreference(tr("eq_frequency", "频率"), b.frequency.toFloat(), 20f..20000f, "${b.frequency.roundToInt()} Hz", controlsEnabled, defaultValue = 1000f) { value -> band { it.copy(frequency = value.toDouble()) } }
                 SliderPreference(tr("eq_gain", "增益"), b.gainDb.toFloat(), -9f..6f, "${decimal(b.gainDb)} dB", controlsEnabled, steps = 29) { value -> band { it.copy(gainDb = value.toDouble()) } }
@@ -511,11 +518,13 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
         }
         if (c.bands.size < 8) item { EffectsCard { Preference(tr("add_eq_band", "添加均衡频段"), enabled = customEnabled) { change { it.copy(bands = it.bands + EqBand(1000.0, 0.0)) } } } }
         item { Group(tr("effect_spatial", "空间与音色")) {
+            SpatialVisualPreview(width = c.width, crossfeed = c.crossfeed, saturation = c.saturation, enabled = controlsEnabled)
             SliderPreference(tr("effect_width", "立体声宽度"), c.width.toFloat(), .5f..1.4f, "${(c.width * 100).roundToInt()}%", controlsEnabled, steps = 17, defaultValue = 1f) { value -> change { it.copy(width = value.toDouble()) } }
             SliderPreference(tr("effect_crossfeed", "低频交叉馈送"), c.crossfeed.toFloat(), 0f..0.3f, "${(c.crossfeed * 100).roundToInt()}%", controlsEnabled, steps = 29) { value -> change { it.copy(crossfeed = value.toDouble().coerceIn(0.0, .3)) } }
             SliderPreference(tr("effect_saturation", "谐波染色"), c.saturation.toFloat(), 0f..0.25f, "${(c.saturation * 100).roundToInt()}%", controlsEnabled, steps = 24) { value -> change { it.copy(saturation = value.toDouble()) } }
         } }
         item { Group(tr("effect_dynamics", "动态控制")) {
+            DynamicsVisualPreview(thresholdDb = c.thresholdDb, ratio = c.ratio, attackMs = c.attackMs, releaseMs = c.releaseMs, enabled = controlsEnabled)
             SliderPreference(tr("compressor_ratio", "压缩比"), c.ratio.toFloat(), 1f..4f, "${decimal(c.ratio)}:1", controlsEnabled, steps = 29, defaultValue = 1f) { value -> change { it.copy(ratio = value.toDouble()) } }
             SliderPreference(tr("compressor_threshold", "阈值"), c.thresholdDb.toFloat(), -30f..-3f, "${decimal(c.thresholdDb)} dB", controlsEnabled, steps = 26, defaultValue = -12f) { value -> change { it.copy(thresholdDb = value.toDouble()) } }
             SliderPreference(tr("compressor_attack", "启动时间"), c.attackMs.toFloat(), 1f..100f, "${c.attackMs.roundToInt()} ms", controlsEnabled, defaultValue = 20f) { value -> change { it.copy(attackMs = value.toDouble()) } }

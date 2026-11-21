@@ -36,6 +36,87 @@ internal class Biquad(b: EqBand, sampleRate: Int, channels: Int) {
         val di = a1 * sinW + a2 * sin2W
         return (nr * nr + ni * ni) / max(1e-30, dr * dr + di * di)
     }
+
+    fun responseDb(hz: Double, sampleRate: Int): Double {
+        val w = 2 * PI * hz / sampleRate
+        return 10 * log10(max(1e-30, magnitudeSquared(cos(w), sin(w))))
+    }
+}
+
+data class HeadroomBreakdown(
+    val preampDb: Double,
+    val eqPeakDb: Double,
+    val widthReserveDb: Double,
+    val safetyMarginDb: Double,
+    val totalHeadroomDb: Double,
+)
+
+/** Shared read-only response calculations matching [DspEngine] for UI visualization. */
+object DspResponseMath {
+    const val REFERENCE_SAMPLE_RATE = 48000
+
+    fun logFrequencies(count: Int, minHz: Double = 20.0, maxHz: Double = 20000.0): DoubleArray {
+        val n = count.coerceAtLeast(2)
+        val span = ln(maxHz / minHz)
+        return DoubleArray(n) { i -> minHz * exp(span * i / (n - 1)) }
+    }
+
+    fun bandResponseDb(band: EqBand, frequenciesHz: DoubleArray, sampleRate: Int = REFERENCE_SAMPLE_RATE): FloatArray {
+        val filter = Biquad(band, sampleRate, 1)
+        return FloatArray(frequenciesHz.size) { i -> filter.responseDb(frequenciesHz[i], sampleRate).toFloat() }
+    }
+
+    fun combinedResponseDb(bands: List<EqBand>, frequenciesHz: DoubleArray, sampleRate: Int = REFERENCE_SAMPLE_RATE): FloatArray {
+        if (bands.isEmpty()) return FloatArray(frequenciesHz.size)
+        val filters = bands.map { Biquad(it, sampleRate, 1) }
+        return FloatArray(frequenciesHz.size) { i ->
+            val w = 2 * PI * frequenciesHz[i] / sampleRate
+            val cs = cos(w); val sn = sin(w)
+            filters.sumOf { 10 * log10(max(1e-30, it.magnitudeSquared(cs, sn))) }.toFloat()
+        }
+    }
+
+    fun estimateEqPeakDb(bands: List<EqBand>, sampleRate: Int = REFERENCE_SAMPLE_RATE): Double {
+        if (bands.none { it.gainDb != 0.0 }) return 0.0
+        val filters = bands.map { Biquad(it, sampleRate, 1) }
+        fun responseDb(hz: Double): Double {
+            val w = 2 * PI * hz / sampleRate
+            val cs = cos(w); val sn = sin(w)
+            return filters.sumOf { 10 * log10(max(1e-30, it.magnitudeSquared(cs, sn))) }
+        }
+        var peak = max(0.0, max(responseDb(0.0), responseDb(sampleRate * .5)))
+        val octaves = ln(sampleRate * .5 / 10.0)
+        for (i in 0..1024) peak = max(peak, responseDb(10 * exp(octaves * i / 1024)))
+        for (band in bands) peak = max(peak, responseDb(band.frequency.coerceAtMost(sampleRate * .45)))
+        return peak + .1
+    }
+
+    fun headroomBreakdown(config: DspConfig, channels: Int = 2, sampleRate: Int = REFERENCE_SAMPLE_RATE): HeadroomBreakdown {
+        if (config.bypass) return HeadroomBreakdown(0.0, 0.0, 0.0, 0.0, 0.0)
+        val eqPeakDb = estimateEqPeakDb(config.bands, sampleRate)
+        val widthReserveDb = 20 * log10(max(1.0, if (channels == 2) config.width else 1.0))
+        val safetyMarginDb = 1.0
+        val total = config.preampDb - eqPeakDb - widthReserveDb - safetyMarginDb
+        return HeadroomBreakdown(
+            preampDb = config.preampDb,
+            eqPeakDb = eqPeakDb,
+            widthReserveDb = widthReserveDb,
+            safetyMarginDb = safetyMarginDb,
+            totalHeadroomDb = total,
+        )
+    }
+
+    fun saturationTransfer(input: Double, saturation: Double): Double {
+        if (saturation <= 0.0) return input
+        val drive = 1 + 4 * saturation
+        return (1 - saturation) * input + saturation * tanh(input * drive) / drive
+    }
+
+    fun compressorOutputDb(inputDb: Double, thresholdDb: Double, ratio: Double): Double {
+        if (ratio <= 1.0 || inputDb <= thresholdDb) return inputDb
+        val reduction = (inputDb - thresholdDb) * (1.0 - 1.0 / ratio)
+        return inputDb - reduction
+    }
 }
 
 /** No sample-rate conversion, delay lines or allocations in the sample loop. Stereo operations
