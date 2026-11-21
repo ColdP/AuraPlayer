@@ -58,6 +58,8 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         sortJob = viewModelScope.launch { sortedSongs = withContext(Dispatchers.Default) { order.apply(source) } }
     }
     var songs by mutableStateOf<List<Song>>(emptyList()); private set
+    private val blockedSongsStore = BlockedSongsStore(application)
+    var blockedSongs by mutableStateOf(blockedSongsStore.load()); private set
     var manualImportCount by mutableIntStateOf(ManualImportStore(application).count()); private set
     var scanning by mutableStateOf(false); private set
     var hasPermission by mutableStateOf(false); private set
@@ -540,10 +542,11 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             if (debounce) delay(300)
             scanning = true
             try {
-                val scanned = if (hasPermission) MediaLibrary(app).scan(settings.value) else emptyList()
+                val blockedUris = withContext(Dispatchers.IO) { blockedSongsStore.blockedUris() }
+                val scanned = if (hasPermission) MediaLibrary(app).scan(settings.value, blockedUris) else emptyList()
                 val manual = withContext(Dispatchers.IO) { ManualImportStore(app).load() }
                 manualImportCount = manual.size
-                val merged = mergeSongLists(scanned, manual)
+                val merged = mergeSongLists(scanned, manual).filterNot { it.uri in blockedUris }
                 songs = merged
                 updateSortedSongs()
                 if (error == tr("scan_error", "读取音乐失败，请重新扫描")) error = null
@@ -552,7 +555,8 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: CancellationException) { throw e }
             catch (_: SecurityException) {
                 hasPermission = false
-                val manual = withContext(Dispatchers.IO) { ManualImportStore(app).load() }
+                val blockedUris = withContext(Dispatchers.IO) { blockedSongsStore.blockedUris() }
+                val manual = withContext(Dispatchers.IO) { ManualImportStore(app).load() }.filterNot { it.uri in blockedUris }
                 manualImportCount = manual.size
                 songs = manual
                 updateSortedSongs()
@@ -570,13 +574,13 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch {
-            val (addedCount, manualSongs) = withContext(Dispatchers.IO) {
+            val (addedCount, manualSongs, blockedUris) = withContext(Dispatchers.IO) {
                 val store = ManualImportStore(app)
                 val count = store.addAll(drafts)
-                count to store.load()
+                Triple(count, store.load(), blockedSongsStore.blockedUris())
             }
             manualImportCount = manualSongs.size
-            val merged = mergeSongLists(songs, manualSongs)
+            val merged = mergeSongLists(songs, manualSongs).filterNot { it.uri in blockedUris }
             songs = merged
             updateSortedSongs()
             knownSongs.putAll(merged.associateBy { it.key })
@@ -590,12 +594,13 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         scanJob = viewModelScope.launch {
             scanning = true
             try {
-                val result = MediaLibrary(app).scanTree(treeUri, settings.value)
+                val blockedUris = withContext(Dispatchers.IO) { blockedSongsStore.blockedUris() }
+                val result = MediaLibrary(app).scanTree(treeUri, settings.value, blockedUris)
                 val manual = withContext(Dispatchers.IO) { ManualImportStore(app).load() }
                 manualImportCount = manual.size
                 val folderUris = result.folderSongs.mapTo(hashSetOf()) { it.uri }
                 val retained = songs.filterNot { existing ->
-                    if (existing.cloud || existing.uri in folderUris) return@filterNot true
+                    if (existing.cloud || existing.uri in folderUris || existing.uri in blockedUris) return@filterNot true
                     if (result.volume.isNotBlank() && result.relativePrefix.isNotBlank()) {
                         val sameVolume = existing.volume.equals(result.volume, ignoreCase = true)
                         val normPath = LibraryFilter.normalize(existing.relativePath)
@@ -606,7 +611,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                         false
                     }
                 }
-                val merged = mergeSongLists(retained + result.folderSongs, manual)
+                val merged = mergeSongLists(retained + result.folderSongs, manual).filterNot { it.uri in blockedUris }
                 songs = merged
                 updateSortedSongs()
                 if (error == tr("scan_error", "读取音乐失败，请重新扫描")) error = null
@@ -620,6 +625,49 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 scanning = false
             }
+        }
+    }
+
+    fun blockSong(song: Song) {
+        if (song.cloud || song.uri.isBlank()) return
+        songs = songs.filterNot { it.uri == song.uri }
+        updateSortedSongs()
+        searchResults = searchResults.filterNot { !it.cloud && it.uri == song.uri }
+        searchHits = searchHits.filterNot { !it.cloud && it.song?.uri == song.uri }
+        controller?.let { player ->
+            if (player.currentMediaItem?.mediaId == song.key) player.pause()
+            for (index in player.mediaItemCount - 1 downTo 0) {
+                if (player.getMediaItemAt(index).mediaId == song.key) player.removeMediaItem(index)
+            }
+        }
+        viewModelScope.launch {
+            val updated = withContext(Dispatchers.IO) {
+                val fileName = blockedSongsStore.resolveFileName(song)
+                blockedSongsStore.add(song, fileName)
+            }
+            blockedSongs = updated
+        }
+    }
+
+    fun unblockSong(uri: String) {
+        if (uri.isBlank()) return
+        viewModelScope.launch {
+            val updated = withContext(Dispatchers.IO) {
+                blockedSongsStore.remove(uri)
+            }
+            blockedSongs = updated
+            refreshLibrary(debounce = false)
+        }
+    }
+
+    fun resolveBlockedSongFileName(uri: String) {
+        if (uri.isBlank()) return
+        viewModelScope.launch {
+            val updated = withContext(Dispatchers.IO) {
+                val resolved = blockedSongsStore.resolveFileNameFromUri(uri)
+                if (resolved.isNotBlank()) blockedSongsStore.updateFileName(uri, resolved) else null
+            }
+            if (updated != null) blockedSongs = updated
         }
     }
 
@@ -947,9 +995,11 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openCloudHomeItem(item: CloudHomeItem) {
+        if (item.actionId <= 0L) return
         when (item.actionType.ifBlank { item.kind }) {
             "playlist" -> openCloudPlaylist(CloudPlaylist(item.actionId, item.title, 0, item.artwork))
             "album" -> openSongAlbum(Song(item.actionId, "", "", item.title, albumId = item.actionId, uri = "", artwork = item.artwork, cloud = true))
+            "artist" -> openSongArtist(Song(item.actionId, "", item.title, "", artistId = item.actionId, uri = "", artwork = item.artwork, cloud = true))
             "song" -> viewModelScope.launch { runCatching { app.api.songDetail(item.actionId) }.getOrNull()?.let { play(listOf(it)) } }
         }
     }

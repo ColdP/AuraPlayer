@@ -46,6 +46,11 @@ fun ArtistAlbumSettingsPage(padding: PaddingValues) {
                     summary = tr("player_album_animated_cover_summary", "获取到动态封面时强制使用沉浸式全高封面"),
                     checked = state.albumAnimatedCover,
                 ) { value -> store.update { it.copy(albumAnimatedCover = value) } }
+                SwitchPreference(
+                    title = tr("album_apple_music_record_label", "从 Apple Music 获取唱片公司信息"),
+                    summary = tr("album_apple_music_record_label_summary", "在专辑页面自动获取并显示 Apple Music 唱片公司与版权信息"),
+                    checked = state.appleMusicAlbumRecordLabel,
+                ) { value -> store.update { it.copy(appleMusicAlbumRecordLabel = value) } }
             }
         }
     }

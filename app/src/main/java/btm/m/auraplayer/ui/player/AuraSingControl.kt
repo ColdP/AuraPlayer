@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -83,6 +84,10 @@ internal fun AuraSingControl(
     BackHandler(expanded) { expanded = false }
 
     val p = progress.value.coerceIn(0f, 1f)
+    val isLight = tint.luminance() >= 0.5f
+    val menuInk = if (isLight) Color(0xFF1A1A1E) else Color.White
+    val fillInk = if (isLight) Color(0xFF1A1A1E) else Color.White
+    val iconOnFillInk = if (isLight) Color.White.copy(alpha = 0.94f) else Color(0xFF1B2028).copy(alpha = 0.88f)
     val buttonSize = 44.dp
     val maxExpandedHeight = minOf(154.dp, (anchorY + buttonSize - topInset).coerceAtLeast(buttonSize))
     val height = buttonSize + (maxExpandedHeight - buttonSize) * p
@@ -139,7 +144,7 @@ internal fun AuraSingControl(
                 ) {
                     Text(
                         statusHint,
-                        color = Color.White.copy(alpha = 0.92f),
+                        color = menuInk.copy(alpha = 0.92f),
                         style = MiuixTheme.textStyles.footnote1,
                         textAlign = TextAlign.Center,
                         maxLines = 2,
@@ -230,7 +235,7 @@ internal fun AuraSingControl(
                         Modifier
                             .fillMaxWidth()
                             .fillMaxHeight(displayedVolume.coerceIn(0f, 1f))
-                            .background(Color.White.copy(alpha = 0.78f)),
+                            .background(fillInk.copy(alpha = 0.78f)),
                     )
                 }
             }
@@ -245,14 +250,14 @@ internal fun AuraSingControl(
                 ) {
                     val strokePx = 2.dp.toPx()
                     drawArc(
-                        color = Color.White.copy(alpha = 0.22f),
+                        color = menuInk.copy(alpha = 0.22f),
                         startAngle = -90f,
                         sweepAngle = 360f,
                         useCenter = false,
                         style = Stroke(strokePx, cap = StrokeCap.Round),
                     )
                     drawArc(
-                        color = Color.White.copy(alpha = 0.92f),
+                        color = menuInk.copy(alpha = 0.92f),
                         startAngle = -90f,
                         sweepAngle = (360f * sepProgress).coerceAtLeast(18f),
                         useCenter = false,
@@ -261,12 +266,11 @@ internal fun AuraSingControl(
                 }
             }
 
-            // Mic glyph anchored inside the bottom 44dp, matching screenshot contrast over white fill.
-            val iconOverBrightFill = (p > 0.45f && displayedVolume > 0.20f) || (uiState.activeInPlayer && p < 0.05f)
+            // Mic glyph anchored inside the bottom 44dp, matching contrast over active fill.
             val iconColor = when {
-                p > 0.35f && displayedVolume > 0.22f -> Color(0xFF1B2028).copy(alpha = 0.88f)
-                uiState.activeInPlayer && p <= 0.35f -> Color.White
-                else -> Color.White.copy(alpha = 0.90f)
+                p > 0.35f && displayedVolume > 0.22f -> iconOnFillInk
+                uiState.activeInPlayer && p <= 0.35f -> menuInk
+                else -> menuInk.copy(alpha = 0.90f)
             }
             Box(
                 Modifier
@@ -274,7 +278,7 @@ internal fun AuraSingControl(
                     .align(Alignment.BottomCenter)
                     .let { base ->
                         if (uiState.activeInPlayer && p < 0.05f) {
-                            base.background(Color.White.copy(alpha = 0.20f), shape)
+                            base.background(menuInk.copy(alpha = if (isLight) 0.14f else 0.20f), shape)
                         } else base
                     },
                 contentAlignment = Alignment.Center,

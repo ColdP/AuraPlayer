@@ -57,7 +57,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun AudioScanGroup(model: AuraViewModel) {
+internal fun AudioScanGroup(model: AuraViewModel, open: (String) -> Unit) {
     val context = LocalContext.current
     val settings = model.settings.value
     val scanning = model.scanning
@@ -102,6 +102,15 @@ internal fun AudioScanGroup(model: AuraViewModel) {
             summary = if (settings.whitelist) tr("scan_folder_blacklist_paused", "白名单已开启，文件夹黑名单暂不生效")
                 else tr("blacklist_summary", "黑名单中的文件夹不会在音乐库中显示"),
         ) { showBlacklist = true }
+        val blockedCount = model.blockedSongs.size
+        Preference(
+            title = tr("blocked_songs", "已屏蔽的歌曲"),
+            summary = if (blockedCount > 0) {
+                tr("blocked_songs_count_summary", "已屏蔽 %d 首歌曲").format(blockedCount)
+            } else {
+                tr("blocked_songs_empty_summary", "暂无已屏蔽的歌曲")
+            },
+        ) { open("blocked_songs") }
         val filenameRuleCount = settings.filenameBlockRules.count
         Preference(
             title = tr("scan_filename_block", "文件名屏蔽"),

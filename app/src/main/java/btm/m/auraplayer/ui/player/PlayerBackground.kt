@@ -37,6 +37,8 @@ private const val ARTWORK_SEED_CACHE_LIMIT = 512
 private const val ALBUM_SEED_CACHE_LIMIT = 256
 private val artworkSeedCache = LinkedHashMap<String, Int>(64, 0.75f, true)
 private val albumArtSeedCache = LinkedHashMap<String, Int>(64, 0.75f, true)
+private val oklabArtworkSeedCache = LinkedHashMap<String, Int>(64, 0.75f, true)
+private val oklabAlbumArtSeedCache = LinkedHashMap<String, Int>(64, 0.75f, true)
 
 internal data class CachedArtworkMemoryEntry(
     val key: MemoryCache.Key,
@@ -81,30 +83,34 @@ internal fun findCachedArtworkMemoryEntry(
     return bestExact ?: bestAlbum
 }
 
-private fun cachedInitialArtworkSeed(artwork: String): Int? {
+private fun cachedInitialArtworkSeed(artwork: String, useOklab: Boolean = false): Int? {
     if (artwork.isBlank()) return DEFAULT_ARTWORK_SEED
-    synchronized(artworkSeedCache) {
-        artworkSeedCache[artwork]?.let { return it }
+    val primaryCache = if (useOklab) oklabArtworkSeedCache else artworkSeedCache
+    val albumCache = if (useOklab) oklabAlbumArtSeedCache else albumArtSeedCache
+    synchronized(primaryCache) {
+        primaryCache[artwork]?.let { return it }
     }
     val albumArt = LocalAudioArtwork.parse(artwork)?.albumArtUri?.takeIf { it.isNotBlank() } ?: return null
-    return synchronized(albumArtSeedCache) { albumArtSeedCache[albumArt] }
+    return synchronized(albumCache) { albumCache[albumArt] }
 }
 
-private fun recordArtworkSeed(artwork: String, seed: Int) {
+private fun recordArtworkSeed(artwork: String, seed: Int, useOklab: Boolean = false) {
     if (artwork.isBlank()) return
-    synchronized(artworkSeedCache) {
-        artworkSeedCache[artwork] = seed
-        while (artworkSeedCache.size > ARTWORK_SEED_CACHE_LIMIT) {
-            val first = artworkSeedCache.entries.firstOrNull()?.key ?: break
-            artworkSeedCache.remove(first)
+    val primaryCache = if (useOklab) oklabArtworkSeedCache else artworkSeedCache
+    val albumCache = if (useOklab) oklabAlbumArtSeedCache else albumArtSeedCache
+    synchronized(primaryCache) {
+        primaryCache[artwork] = seed
+        while (primaryCache.size > ARTWORK_SEED_CACHE_LIMIT) {
+            val first = primaryCache.entries.firstOrNull()?.key ?: break
+            primaryCache.remove(first)
         }
     }
     LocalAudioArtwork.parse(artwork)?.albumArtUri?.takeIf { it.isNotBlank() }?.let { albumArt ->
-        synchronized(albumArtSeedCache) {
-            albumArtSeedCache[albumArt] = seed
-            while (albumArtSeedCache.size > ALBUM_SEED_CACHE_LIMIT) {
-                val first = albumArtSeedCache.entries.firstOrNull()?.key ?: break
-                albumArtSeedCache.remove(first)
+        synchronized(albumCache) {
+            albumCache[albumArt] = seed
+            while (albumCache.size > ALBUM_SEED_CACHE_LIMIT) {
+                val first = albumCache.entries.firstOrNull()?.key ?: break
+                albumCache.remove(first)
             }
         }
     }
@@ -123,15 +129,20 @@ private fun coverMonetSeed(bitmap: Bitmap?): Int {
 }
 
 @Composable
-internal fun rememberPlayerArtworkSeed(artwork: String): Int {
+internal fun rememberPlayerArtworkSeed(artwork: String): Int =
+    rememberPlayerArtworkColorSeed(artwork, useOklab = false)
+
+@Composable
+internal fun rememberPlayerArtworkColorSeed(artwork: String, useOklab: Boolean): Int {
     val context = LocalContext.current
-    val initialSeed = remember(artwork) { cachedInitialArtworkSeed(artwork) }
-    val seed by produceState(initialSeed ?: DEFAULT_ARTWORK_SEED, artwork) {
+    val initialSeed = remember(artwork, useOklab) { cachedInitialArtworkSeed(artwork, useOklab) }
+    val seed by produceState(initialSeed ?: DEFAULT_ARTWORK_SEED, artwork, useOklab) {
         if (artwork.isBlank()) {
             value = DEFAULT_ARTWORK_SEED
             return@produceState
         }
-        synchronized(artworkSeedCache) { artworkSeedCache[artwork] }?.let {
+        val primaryCache = if (useOklab) oklabArtworkSeedCache else artworkSeedCache
+        synchronized(primaryCache) { primaryCache[artwork] }?.let {
             value = it
             return@produceState
         }
@@ -155,9 +166,13 @@ internal fun rememberPlayerArtworkSeed(artwork: String): Int {
                     ) as? SuccessResult)?.image?.toBitmap()
                 }.getOrNull()
             }
-            coverMonetSeed(bitmap)
+            if (useOklab) {
+                btm.m.auraplayer.ui.OklabThemeEngine.extractOklabSeed(bitmap, DEFAULT_ARTWORK_SEED)
+            } else {
+                coverMonetSeed(bitmap)
+            }
         }
-        recordArtworkSeed(artwork, computed)
+        recordArtworkSeed(artwork, computed, useOklab)
         value = computed
     }
     return seed
@@ -197,38 +212,79 @@ internal data class PlayerExpressiveColors(
 )
 
 @Composable
-internal fun rememberPlayerExpressiveColors(seed: Int, isDark: Boolean): PlayerExpressiveColors {
-    val target = remember(seed, isDark) {
-        val scheme = SchemeExpressive(Hct.fromInt(seed), isDark, 0.0, ColorSpec.SpecVersion.SPEC_2025)
-        val onSurface = Color(scheme.onSurface)
-        val onSurfaceVariant = Color(scheme.onSurfaceVariant)
-        val primary = Color(scheme.primary)
-        val secondary = Color(scheme.secondary)
-        PlayerExpressiveColors(
-            dark = isDark,
-            surface = Color(scheme.surface),
-            surfaceContainerLow = Color(scheme.surfaceContainerLow),
-            surfaceContainer = Color(scheme.surfaceContainer),
-            surfaceContainerHigh = Color(scheme.surfaceContainerHigh),
-            surfaceContainerHighest = Color(scheme.surfaceContainerHighest),
-            onSurface = onSurface,
-            onSurfaceVariant = onSurfaceVariant,
-            primary = primary,
-            onPrimary = Color(scheme.onPrimary),
-            primaryContainer = Color(scheme.primaryContainer),
-            onPrimaryContainer = Color(scheme.onPrimaryContainer),
-            secondary = secondary,
-            secondaryContainer = Color(scheme.secondaryContainer),
-            onSecondaryContainer = Color(scheme.onSecondaryContainer),
-            tertiaryContainer = Color(scheme.tertiaryContainer),
-            onTertiaryContainer = Color(scheme.onTertiaryContainer),
-            outlineVariant = Color(scheme.outlineVariant),
-            activeInk = onSurface,
-            secondaryInk = lerp(onSurfaceVariant, primary, if (isDark) .40f else .32f),
-            timeInk = lerp(onSurfaceVariant, primary, .24f),
-            iconInk = lerp(onSurfaceVariant, secondary, .28f),
-            dragHandleColor = lerp(onSurfaceVariant, primary, .35f).copy(alpha = if (isDark) .70f else .56f),
-        )
+internal fun rememberPlayerExpressiveColors(
+    seed: Int,
+    isDark: Boolean,
+    useOklab: Boolean = false,
+    paletteIndex: Int = 0,
+): PlayerExpressiveColors {
+    val target = remember(seed, isDark, useOklab, paletteIndex) {
+        if (useOklab) {
+            with(btm.m.auraplayer.ui.OklabThemeEngine) {
+                generateScheme(seed, isDark, paletteIndex)
+            }.let { scheme ->
+                btm.m.auraplayer.ui.AuraExpressiveScheme(
+                    dark = scheme.dark,
+                    surface = scheme.surface,
+                    surfaceContainerLowest = scheme.surfaceContainerLowest,
+                    surfaceContainerLow = scheme.surfaceContainerLow,
+                    surfaceContainer = scheme.surfaceContainer,
+                    surfaceContainerHigh = scheme.surfaceContainerHigh,
+                    surfaceContainerHighest = scheme.surfaceContainerHighest,
+                    onSurface = scheme.onSurface,
+                    onSurfaceVariant = scheme.onSurfaceVariant,
+                    primary = scheme.primary,
+                    onPrimary = scheme.onPrimary,
+                    primaryContainer = scheme.primaryContainer,
+                    onPrimaryContainer = scheme.onPrimaryContainer,
+                    secondary = scheme.secondary,
+                    onSecondary = scheme.onSecondary,
+                    secondaryContainer = scheme.secondaryContainer,
+                    onSecondaryContainer = scheme.onSecondaryContainer,
+                    tertiary = scheme.tertiary,
+                    onTertiary = scheme.onTertiary,
+                    tertiaryContainer = scheme.tertiaryContainer,
+                    onTertiaryContainer = scheme.onTertiaryContainer,
+                    error = scheme.error,
+                    onError = scheme.onError,
+                    errorContainer = scheme.errorContainer,
+                    onErrorContainer = scheme.onErrorContainer,
+                    outline = scheme.outline,
+                    outlineVariant = scheme.outlineVariant,
+                ).toPlayerExpressiveColors()
+            }
+        } else {
+            val scheme = SchemeExpressive(Hct.fromInt(seed), isDark, 0.0, ColorSpec.SpecVersion.SPEC_2025)
+            val onSurface = Color(scheme.onSurface)
+            val onSurfaceVariant = Color(scheme.onSurfaceVariant)
+            val primary = Color(scheme.primary)
+            val secondary = Color(scheme.secondary)
+            PlayerExpressiveColors(
+                dark = isDark,
+                surface = Color(scheme.surface),
+                surfaceContainerLow = Color(scheme.surfaceContainerLow),
+                surfaceContainer = Color(scheme.surfaceContainer),
+                surfaceContainerHigh = Color(scheme.surfaceContainerHigh),
+                surfaceContainerHighest = Color(scheme.surfaceContainerHighest),
+                onSurface = onSurface,
+                onSurfaceVariant = onSurfaceVariant,
+                primary = primary,
+                onPrimary = Color(scheme.onPrimary),
+                primaryContainer = Color(scheme.primaryContainer),
+                onPrimaryContainer = Color(scheme.onPrimaryContainer),
+                secondary = secondary,
+                secondaryContainer = Color(scheme.secondaryContainer),
+                onSecondaryContainer = Color(scheme.onSecondaryContainer),
+                tertiaryContainer = Color(scheme.tertiaryContainer),
+                onTertiaryContainer = Color(scheme.onTertiaryContainer),
+                outlineVariant = Color(scheme.outlineVariant),
+                activeInk = onSurface,
+                secondaryInk = lerp(onSurfaceVariant, primary, if (isDark) .40f else .32f),
+                timeInk = lerp(onSurfaceVariant, primary, .24f),
+                iconInk = lerp(onSurfaceVariant, secondary, .28f),
+                dragHandleColor = lerp(onSurfaceVariant, primary, .35f).copy(alpha = if (isDark) .70f else .56f),
+            )
+        }
     }
     val animSpec = tween<Color>(700, easing = FastOutSlowInEasing)
     return PlayerExpressiveColors(
@@ -259,12 +315,23 @@ internal fun rememberPlayerExpressiveColors(seed: Int, isDark: Boolean): PlayerE
 }
 
 @Composable
-internal fun PlayerAmbientBackground(palette: CorePalette, modifier: Modifier = Modifier, animate: Boolean = true, visible: Boolean = true) {
+internal fun PlayerAmbientBackground(
+    palette: CorePalette,
+    modifier: Modifier = Modifier,
+    animate: Boolean = true,
+    visible: Boolean = true,
+    isDark: Boolean = true,
+    oklabAmbient: btm.m.auraplayer.ui.OklabPlayerAmbientPalette? = null,
+) {
     val colorSpec: FiniteAnimationSpec<Color> = if (visible) tween(1000) else snap()
-    val primary by animateColorAsState(Color(palette.a1.tone(70)), colorSpec, label = "ambientMonetPrimary")
-    val secondary by animateColorAsState(Color(palette.a2.tone(70)), colorSpec, label = "ambientMonetSecondary")
-    val tertiary by animateColorAsState(Color(palette.a3.tone(70)), colorSpec, label = "ambientMonetTertiary")
-    val base by animateColorAsState(Color(palette.n1.tone(8)), colorSpec, label = "ambientMonetBase")
+    val targetPrimary = oklabAmbient?.orbPrimary ?: Color(palette.a1.tone(if (isDark) 70 else 84))
+    val targetSecondary = oklabAmbient?.orbSecondary ?: Color(palette.a2.tone(if (isDark) 70 else 86))
+    val targetTertiary = oklabAmbient?.orbTertiary ?: Color(palette.a3.tone(if (isDark) 70 else 84))
+    val targetBase = oklabAmbient?.base ?: Color(palette.n1.tone(if (isDark) 8 else 96))
+    val primary by animateColorAsState(targetPrimary, colorSpec, label = "ambientMonetPrimary")
+    val secondary by animateColorAsState(targetSecondary, colorSpec, label = "ambientMonetSecondary")
+    val tertiary by animateColorAsState(targetTertiary, colorSpec, label = "ambientMonetTertiary")
+    val base by animateColorAsState(targetBase, colorSpec, label = "ambientMonetBase")
     var phase by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(animate, visible) {
         if (!visible) {

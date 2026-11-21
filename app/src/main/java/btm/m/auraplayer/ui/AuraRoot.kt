@@ -86,41 +86,14 @@ internal val paletteStyles = listOf(ThemePaletteStyle.TonalSpot, ThemePaletteSty
 @Composable
 fun AuraRoot(model: AuraViewModel) {
     val settings = model.settings.value
-    val context = LocalContext.current
     SideEffect { I18n.language = settings.language }
-    val seed = when (settings.color) {
-        "custom" -> model.settings.previewColor ?: settings.customColor
-        "system" -> context.getColor(android.R.color.system_accent1_500)
-        else -> colorPresets.firstOrNull { it.first == settings.color }?.third?.toInt()
-    }
-    val controller = remember(settings.theme, settings.monet, seed, settings.palette, settings.colorSpec) {
-        val mode = if (settings.monet) when (settings.theme) {
-            "light" -> ColorSchemeMode.MonetLight; "dark" -> ColorSchemeMode.MonetDark; else -> ColorSchemeMode.MonetSystem
-        } else when (settings.theme) {
-            "light" -> ColorSchemeMode.Light; "dark" -> ColorSchemeMode.Dark; else -> ColorSchemeMode.System
-        }
-        ThemeController(mode, keyColor = seed?.let(::Color), paletteStyle = paletteStyles[settings.palette.coerceIn(paletteStyles.indices)],
-            colorSpec = if (settings.colorSpec == 0) ThemeColorSpec.Spec2021 else ThemeColorSpec.Spec2025)
-    }
-    CompositionLocalProvider(LocalAdvancedMaterialEnabled provides !settings.disableAdvancedMaterial) {
-        AuraUiTheme(
-            themeMode = settings.theme,
-            uiStyle = settings.uiStyle,
-            monet = settings.monet,
-            seed = seed,
-            useSystemSeed = settings.color == "system",
-            controller = controller,
-            textStyles = remember { auraTextStyles() },
-        ) {
-            ProvideAuraCouiTheme(settings.monet) {
-                AuraAdaptiveLayout { AuraShell(model) }
-            }
-        }
+    ProvideAuraAppTheme(settings = settings, previewColor = model.settings.previewColor) {
+        AuraAdaptiveLayout { AuraShell(model) }
     }
 }
 
 @Composable
-private fun ProvideAuraCouiTheme(monet: Boolean, content: @Composable () -> Unit) {
+internal fun ProvideAuraCouiTheme(monet: Boolean, content: @Composable () -> Unit) {
     val scheme = MiuixTheme.colorScheme
     val dark = scheme.surface.luminance() < .5f
     val couiColors = remember(scheme, dark) {
@@ -213,11 +186,7 @@ private fun AuraShell(model: AuraViewModel) {
     LaunchedEffect(model.current) { if (model.current == null) playerOpen = false }
     val playerDark = MiuixTheme.colorScheme.surface.luminance() < .5f
     val nowPlayingConfig by (context.applicationContext as btm.m.auraplayer.AuraApplication).nowPlaying.state.collectAsState()
-    val playerHasLightSurface = !playerDark && (
-        nowPlayingConfig.theme == btm.m.auraplayer.playback.PlayerTheme.ONE ||
-            (nowPlayingConfig.theme == btm.m.auraplayer.playback.PlayerTheme.MATERIAL &&
-                nowPlayingConfig.materialBackground == btm.m.auraplayer.playback.MaterialPlayerBackground.MATERIAL)
-        )
+    val playerHasLightSurface = !nowPlayingConfig.resolveDarkTheme(appDark = playerDark)
     val topRoute = pages.lastOrNull()
     val visibleCollection = topRoute?.takeIf {
         it.substringBefore(':') in setOf("collection", "albumInfo", "artistInfo")
@@ -265,6 +234,8 @@ private fun AuraShell(model: AuraViewModel) {
     var searchVisible by remember { mutableStateOf(false) }
     var searchProgress by remember { mutableFloatStateOf(0f) }
     var searchAnchor by remember { mutableStateOf(Rect.Zero) }
+    var bannerOverviewRequest by remember { mutableStateOf<BannerOverviewRequest?>(null) }
+    var bannerOverviewProgress by remember { mutableFloatStateOf(0f) }
     val page = pages.lastOrNull()
     val open: (String) -> Unit = { target ->
         if (!closing && pages.lastOrNull() != target) {
@@ -366,12 +337,13 @@ private fun AuraShell(model: AuraViewModel) {
     CompositionLocalProvider(LocalSeamlessNavigation provides seamless, LocalDialogBackdrop provides backdrop,
         LocalLyricShareTransition provides lyricShareTransition,
         LocalTagEditorExitGuard provides tagEditorExitGuard,
+        LocalBannerOverviewOpener provides { bannerOverviewRequest = it },
         LocalOpenTagEditor provides { song -> playerOpen = false; searchOpen = false; open(tagEditorRoute(song)) },
         LocalSongActions provides { request -> songActions = request; songActionsOpen = true }) {
         // MIUIX PopupLayout(renderInRootScaffold=true) must be hosted outside recorded pages.
         Scaffold(containerColor = Color.Transparent) {
             val playerMorphVisible by remember { derivedStateOf { playerExpansion > .001f } }
-            val bypassShellBackdropLayer = chromeHidden && searchProgress <= .001f && !playerMorphVisible
+            val bypassShellBackdropLayer = chromeHidden && searchProgress <= .001f && bannerOverviewProgress <= .001f && !playerMorphVisible
             val usbHudBackdrop = rememberLayerBackdrop { drawRect(surface); drawContent() }
             var usbHudMounted by remember { mutableStateOf(false) }
             Box(Modifier.fillMaxSize().background(surface)) {
@@ -392,7 +364,7 @@ private fun AuraShell(model: AuraViewModel) {
                         alpha = if (covered) 0f else 1f
                         // Read progress in the draw layer, without recomposing the whole page stack
                         // for each spring/gesture frame. Clamp keeps the screen edges filled.
-                        val radius = ((searchProgress * 14f).dp + playerTransitionBlurRadius(miniBlurRadius, playerExpansion)).toPx()
+                        val radius = ((searchProgress * 14f + bannerOverviewProgress * 18f).dp + playerTransitionBlurRadius(miniBlurRadius, playerExpansion)).toPx()
                         renderEffect = if (!covered && radius > .01f) BlurEffect(radius, radius, TileMode.Clamp) else null
                     }
                 }
@@ -520,23 +492,31 @@ private fun AuraShell(model: AuraViewModel) {
                 }
                 AuraBottomBar(selected, model, backdrop, Modifier.align(Alignment.BottomCenter).graphicsLayer {
                     val playerHide = ((playerExpansion - 0.08f) / 0.42f).coerceIn(0f, 1f)
-                    val covered = playerHide >= 1f && searchProgress <= .001f
-                    alpha = if (covered) 0f else 1f - playerHide
-                    val radius = (searchProgress * 14f).dp.toPx()
+                    val covered = playerHide >= 1f && searchProgress <= .001f && bannerOverviewProgress <= .001f
+                    alpha = if (covered) 0f else (1f - playerHide) * (1f - bannerOverviewProgress * 0.45f)
+                    val radius = (searchProgress * 14f + bannerOverviewProgress * 18f).dp.toPx()
                     renderEffect = if (!covered && radius > .01f) BlurEffect(radius, radius, TileMode.Clamp) else null
                 }.drawWithContent {
-                    if (playerExpansion < 0.50f || searchProgress > .001f) drawContent()
+                    if (playerExpansion < 0.50f || searchProgress > .001f || bannerOverviewProgress > .001f) drawContent()
                 },
                     searchVisible, searchProgress, secondaryProgress,
                     { if (searchAnchor.width > 0f) { searchVisible = true; searchOpen = true } },
                     { if (!searchVisible && materialChromeExit < .01f) searchAnchor = it },
                     searchExitProgress = materialChromeExit)
-                btm.m.auraplayer.ui.player.PlayerHost(model, backdrop, miniVisible = !searchVisible,
-                    secondaryProgress = secondaryProgress,
-                    chromeExitProgress = materialChromeExit,
-                    restoreLyricsRequest = restoreLyricsRequest,
-                    onExpansionProgress = { playerExpansion = it },
-                    open = playerOpen, onOpenChange = { playerOpen = it }, openPage = openFromPlayer)
+                Box(
+                    Modifier.fillMaxSize().graphicsLayer {
+                        val radius = (bannerOverviewProgress * 18f).dp.toPx()
+                        renderEffect = if (radius > .01f) BlurEffect(radius, radius, TileMode.Clamp) else null
+                        alpha = 1f - bannerOverviewProgress * 0.35f
+                    },
+                ) {
+                    btm.m.auraplayer.ui.player.PlayerHost(model, backdrop, miniVisible = !searchVisible,
+                        secondaryProgress = secondaryProgress,
+                        chromeExitProgress = materialChromeExit,
+                        restoreLyricsRequest = restoreLyricsRequest,
+                        onExpansionProgress = { playerExpansion = it },
+                        open = playerOpen, onOpenChange = { playerOpen = it }, openPage = openFromPlayer)
+                }
                 if (searchVisible) {
                     CompositionLocalProvider(LocalToolbarBackdrop provides backdrop) {
                         val results = model.searchHits.map { hit -> HomeSearchResult(hit.key, hit.title,
@@ -551,6 +531,16 @@ private fun AuraShell(model: AuraViewModel) {
                             filterContent = { SearchFilters(model) },
                             enabled = true, onDismiss = { searchOpen = false }, onClosed = { searchVisible = false; searchProgress = 0f }, onProgress = { searchProgress = it })
                     }
+                }
+                bannerOverviewRequest?.let { request ->
+                    BannerOverviewOverlay(
+                        request = request,
+                        onProgress = { bannerOverviewProgress = it },
+                        onClosed = {
+                            bannerOverviewRequest = null
+                            bannerOverviewProgress = 0f
+                        },
+                    )
                 }
                 PresetChangeGuard(model.app.effects)
                 UpdateAvailableDialog(
@@ -618,17 +608,25 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
     val catalog = collection?.isCatalog() == true
     val app = LocalContext.current.applicationContext as AuraApplication
     val nowPlayingConfig by app.nowPlaying.state.collectAsState()
-    val catalogTracks = destination?.cloud?.songs ?: collection?.songs.orEmpty()
+    val activeCatalogDestination = destination ?: albumInfoDestination
+    val activeCatalogTracks = activeCatalogDestination?.cloud?.songs ?: collection?.songs.orEmpty()
     val catalogMotionPath = rememberCatalogMotionCoverPath(
-        collection = if (page == "collection" && catalog) collection else null,
-        tracks = catalogTracks,
+        collection = if (page in setOf("collection", "albumInfo") && catalog && !collection.isArtist()) collection else null,
+        tracks = activeCatalogTracks,
         enabled = nowPlayingConfig.albumAnimatedCover,
+    )
+    val catalogAlbumRecordLabel = rememberCatalogAlbumRecordLabel(
+        collection = if (page in setOf("collection", "albumInfo") && catalog && !collection.isArtist()) collection else null,
+        tracks = activeCatalogTracks,
+        catalogArtist = activeCatalogDestination?.cloud?.catalog?.artist,
+        cloudLoading = activeCatalogDestination?.cloud?.loading == true,
+        enabled = nowPlayingConfig.appleMusicAlbumRecordLabel,
     )
     val artistCatalogMedia = rememberCatalogArtistMedia(
         collection = if (page in setOf("collection", "artistInfo") && catalog && collection.isArtist()) collection else null,
         needLogo = page == "collection" && nowPlayingConfig.artistWordmarkLogo,
         needArtwork = nowPlayingConfig.appleMusicArtistArtwork,
-        needMotionVideo = page == "collection" && nowPlayingConfig.artistAnimatedCover,
+        needMotionVideo = page in setOf("collection", "artistInfo") && nowPlayingConfig.artistAnimatedCover,
     )
     val effectiveCollection = if (collection != null && page in setOf("collection", "artistInfo") && collection.isArtist() &&
         nowPlayingConfig.appleMusicArtistArtwork && !artistCatalogMedia.artworkUrl.isNullOrBlank()
@@ -669,6 +667,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "effect_custom" -> tr("custom", "自定义")
         "effect_online" -> tr("online_presets", "在线预设库")
         "audio_settings" -> tr("audio_settings", "音频")
+        "blocked_songs" -> tr("blocked_songs", "已屏蔽的歌曲")
         "artist_album_settings" -> tr("artist_and_album", "艺术家与专辑")
         "llm_translation" -> tr("llm_translation", "大模型翻译")
         "llm_translation_cache" -> tr("llm_translation_cache", "翻译缓存")
@@ -805,7 +804,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
                     immersiveAlbum = immersiveAlbumCatalog,
                 )
             })
-            page == "about" -> ({ AboutMaterialBackground(Modifier.matchParentSize(), model.settings.value.monet) })
+            page == "about" -> ({ AboutMaterialBackground(Modifier.matchParentSize(), model.settings.value.dynamicColorEnabled) })
             else -> null
         }) { padding, _ ->
         val chromeSpace = if (model.current != null && page !in CHROME_HIDDEN_ROUTES) {
@@ -830,6 +829,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             "effect_library" -> PresetLibraryPage(contentPadding, presetTab, open)
             "effect_custom" -> CustomEffectsPage(contentPadding)
             "audio_settings" -> AudioPreferencesPage(model, contentPadding, open)
+            "blocked_songs" -> BlockedSongsPage(model, contentPadding)
             "aura_sing" -> AuraSingPage(contentPadding, isActive, open)
             "aura_sing_downloads" -> AuraSingDownloadsPage(contentPadding)
             "aura_sing_cache" -> AuraSingCachePage(contentPadding)
@@ -863,6 +863,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
                     motionVideoPath = catalogMotionPath,
                     artistLogoUrl = artistCatalogMedia.logoUrl,
                     artistMotionVideoPath = artistCatalogMedia.motionVideoPath,
+                    appleMusicRecordLabel = catalogAlbumRecordLabel,
                 )
                 else CollectionPage(
                     model,
@@ -886,8 +887,8 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
                     },
                 )
             }
-            "albumInfo" -> if (collection != null && albumInfoDestination != null) AlbumInfoPage(model, contentPadding, collection, albumInfoDestination.cloud)
-            "artistInfo" -> if (effectiveCollection != null && albumInfoDestination != null) ArtistInfoPage(contentPadding, effectiveCollection, albumInfoDestination.cloud)
+            "albumInfo" -> if (collection != null && albumInfoDestination != null) AlbumInfoPage(model, contentPadding, collection, albumInfoDestination.cloud, catalogAlbumRecordLabel, catalogMotionPath)
+            "artistInfo" -> if (effectiveCollection != null && albumInfoDestination != null) ArtistInfoPage(contentPadding, effectiveCollection, albumInfoDestination.cloud, artistCatalogMedia.motionVideoPath)
             "directory" -> DirectoryPage(model, contentPadding)
             else -> LegalPage(page, contentPadding)
         }

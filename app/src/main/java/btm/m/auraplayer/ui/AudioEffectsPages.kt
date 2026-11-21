@@ -715,7 +715,7 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
                 }
             }
         } }
-        item { AudioScanGroup(model) }
+        item { AudioScanGroup(model, open) }
         item {
             Group(tr("experimental_features", "实验性功能")) {
                 Preference(

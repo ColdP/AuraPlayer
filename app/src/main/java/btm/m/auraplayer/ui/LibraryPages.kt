@@ -63,6 +63,8 @@ import btm.m.auraplayer.ui.player.LocalSongActions
 import btm.m.auraplayer.ui.player.SongActionRequest
 import java.util.Calendar
 import java.util.UUID
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
 @Composable
 fun AuraTabIcon(index: Int, color: Color) {
@@ -244,7 +246,38 @@ fun SongsPage(model: AuraViewModel, padding: PaddingValues, requestPermission: (
               onOpenSecondary: (Int) -> Unit = {}) {
     val songs = model.sortedSongs
     val columns = LocalAuraLayout.current.listColumns
-    LazyColumn(pageContentModifier(), contentPadding = padding) {
+    val pullToRefreshState = rememberPullToRefreshState()
+    var isRefreshing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isRefreshing) {
+        if (!isRefreshing) return@LaunchedEffect
+        val start = System.currentTimeMillis()
+        try {
+            model.refreshLibrary()
+            snapshotFlow { model.scanning }.first { !it }
+            val elapsed = System.currentTimeMillis() - start
+            if (elapsed < 350L) delay(350L - elapsed)
+        } finally {
+            isRefreshing = false
+        }
+    }
+
+    PullToRefresh(
+        isRefreshing = isRefreshing,
+        onRefresh = { isRefreshing = true },
+        modifier = Modifier.fillMaxSize(),
+        pullToRefreshState = pullToRefreshState,
+        contentPadding = padding,
+        topAppBarScrollBehavior = LocalPageScroll.current,
+        color = MiuixTheme.colorScheme.primary,
+        refreshTexts = listOf(
+            tr("pull_to_refresh", "下拉刷新"),
+            tr("release_to_refresh", "松开刷新"),
+            tr("refreshing", "正在刷新…"),
+            tr("refresh_completed", "刷新完成"),
+        ),
+    ) {
+        LazyColumn(pageContentModifier(), contentPadding = padding) {
         item("song_categories") {
             if (LocalAppUiStyle.current == AppUiStyle.ONE) {
                 val palette = rememberActiveOneUiPalette()
@@ -323,6 +356,7 @@ fun SongsPage(model: AuraViewModel, padding: PaddingValues, requestPermission: (
         if (!model.hasPermission) item { PermissionCard(requestPermission) }
         else if (model.songs.isEmpty()) item { EmptyState(tr("no_songs", "没有找到歌曲"), tr("check_filters", "请检查音乐权限、文件夹与筛选设置"), tr("rescan", "重新扫描"), { model.refreshLibrary() }) }
         songRows(songs, model, columns)
+        }
     }
 }
 

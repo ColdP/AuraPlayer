@@ -199,6 +199,7 @@ class ManualImportStore(context: Context) {
             added = added,
             track = track,
             modified = modified,
+            fileName = fileName,
         )
     }
 

@@ -98,15 +98,19 @@ internal object WidgetUpdateCoordinator {
         }
         val advancedMaterial = !appearance.disableAdvancedMaterial
         val lang = appearance.language
+        val useOklab = appearance.isOklabColor
+        val paletteIndex = appearance.palette
 
         val currentUri = snapshot.current?.artworkUri.orEmpty()
         val currentArtwork = loadArtworkBitmap(context, currentUri, targetSizePx = 400)
-        val seed = resolveSeed(currentUri, currentArtwork)
+        val seed = resolveSeed(currentUri, currentArtwork, useOklab)
         val themeColors = WidgetThemeEngine.resolveThemeColors(
             config = nowPlayingConfig,
             appDark = appDark,
             seedArgb = seed,
             isPlaying = snapshot.isPlaying,
+            useOklab = useOklab,
+            paletteIndex = paletteIndex,
         )
 
         val needsUpcomingArt = activePlayerGroups.any { (spec, ids) ->
@@ -149,6 +153,8 @@ internal object WidgetUpdateCoordinator {
                     advancedMaterial = advancedMaterial,
                     appDark = appDark,
                     seedArgb = seed,
+                    useOklab = useOklab,
+                    paletteIndex = paletteIndex,
                     brandDrawable = brandDrawable,
                     lang = lang,
                 )
@@ -188,6 +194,8 @@ internal object WidgetUpdateCoordinator {
                 advancedMaterial = advancedMaterial,
                 appDark = appDark,
                 seedArgb = seed,
+                useOklab = useOklab,
+                paletteIndex = paletteIndex,
                 brandDrawable = brandDrawable,
                 lang = lang,
             )
@@ -217,6 +225,8 @@ internal object WidgetUpdateCoordinator {
         advancedMaterial: Boolean,
         appDark: Boolean,
         seedArgb: Int,
+        useOklab: Boolean,
+        paletteIndex: Int,
         brandDrawable: android.graphics.drawable.Drawable?,
         lang: String,
     ): RemoteViews {
@@ -236,6 +246,8 @@ internal object WidgetUpdateCoordinator {
             advancedMaterial = advancedMaterial,
             appDark = appDark,
             seedArgb = seedArgb,
+            useOklab = useOklab,
+            paletteIndex = paletteIndex,
         )
         views.setImageViewBitmap(R.id.widget_bg_image, bgBitmap)
 
@@ -394,6 +406,8 @@ internal object WidgetUpdateCoordinator {
         advancedMaterial: Boolean,
         appDark: Boolean,
         seedArgb: Int,
+        useOklab: Boolean,
+        paletteIndex: Int,
         brandDrawable: android.graphics.drawable.Drawable?,
         lang: String,
     ): RemoteViews {
@@ -406,6 +420,8 @@ internal object WidgetUpdateCoordinator {
             advancedMaterial = advancedMaterial,
             appDark = appDark,
             seedArgb = seedArgb,
+            useOklab = useOklab,
+            paletteIndex = paletteIndex,
         )
         views.setImageViewBitmap(R.id.widget_bg_image, bgBitmap)
 
@@ -628,14 +644,19 @@ internal object WidgetUpdateCoordinator {
         return loaded
     }
 
-    private fun resolveSeed(uri: String, bitmap: Bitmap?): Int {
+    private fun resolveSeed(uri: String, bitmap: Bitmap?, useOklab: Boolean): Int {
         if (uri.isBlank() || bitmap == null) return DEFAULT_WIDGET_SEED
+        val cacheKey = if (useOklab) "oklab:$uri" else uri
         synchronized(artworkSeedCache) {
-            artworkSeedCache.get(uri)?.let { return it }
+            artworkSeedCache.get(cacheKey)?.let { return it }
         }
-        val computed = WidgetThemeEngine.extractMonetSeed(bitmap)
+        val computed = if (useOklab) {
+            WidgetThemeEngine.extractOklabSeed(bitmap)
+        } else {
+            WidgetThemeEngine.extractMonetSeed(bitmap)
+        }
         synchronized(artworkSeedCache) {
-            artworkSeedCache.put(uri, computed)
+            artworkSeedCache.put(cacheKey, computed)
         }
         return computed
     }
@@ -670,6 +691,11 @@ internal object WidgetUpdateCoordinator {
         val prefs = context.getSharedPreferences("aura.settings", Context.MODE_PRIVATE)
         return Appearance(
             theme = prefs.getString("theme", "system") ?: "system",
+            colorExtractionMode = btm.m.auraplayer.data.ColorExtractionMode.fromPref(
+                raw = prefs.getString("colorExtractionMode", null),
+                legacyMonet = prefs.getBoolean("monet", false),
+            ),
+            palette = prefs.getInt("palette", 0),
             language = prefs.getString("language", "zh") ?: "zh",
             disableAdvancedMaterial = prefs.getBoolean("disableAdvancedMaterial", false),
         )

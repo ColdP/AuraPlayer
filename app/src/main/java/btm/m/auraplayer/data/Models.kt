@@ -22,6 +22,7 @@ data class Song(
     val artists: List<SongArtist> = emptyList(),
     val playCount: Int = 0,
     val provider: String = "",
+    val fileName: String = "",
 ) { val key: String get() = if (cloud) (if (provider == "qq") "cloud:qq:$id" else "cloud:$id") else "local:$uri" }
 
 data class MusicCollection(val key: String, val title: String, val subtitle: String, val songs: List<Song>, val artwork: String = "")

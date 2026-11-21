@@ -190,8 +190,29 @@ fun ThemePage(model: AuraViewModel, padding: PaddingValues) {
         }
         item {
             Group(tr("colors", "颜色")) {
-                SwitchPreference(tr("monet", "Monet 取色"), tr("monet_summary", "使用 Miuix 动态颜色生成主题色"), value.monet) { checked -> model.updateSettings { it.copy(monet = checked) } }
-                AnimatedVisibility(value.monet,
+                val extractionModes = listOf(
+                    btm.m.auraplayer.data.ColorExtractionMode.OFF,
+                    btm.m.auraplayer.data.ColorExtractionMode.OKLAB,
+                    btm.m.auraplayer.data.ColorExtractionMode.MONET,
+                )
+                val extractionLabels = listOf(
+                    tr("color_extraction_off", "关闭"),
+                    tr("color_extraction_oklab", "Oklab 颜色"),
+                    tr("color_extraction_monet", "Monet 颜色"),
+                )
+                GlassDropdownPreference(
+                    tr("color_extraction_mode", "取色模式"),
+                    extractionLabels,
+                    extractionModes.indexOf(value.colorExtractionMode).coerceAtLeast(0),
+                    backdrop = LocalToolbarBackdrop.current,
+                ) { index ->
+                    val nextMode = extractionModes[index]
+                    if (nextMode == btm.m.auraplayer.data.ColorExtractionMode.OFF) {
+                        model.settings.previewColor = null
+                    }
+                    model.updateSettings { it.copy(colorExtractionMode = nextMode) }
+                }
+                AnimatedVisibility(value.dynamicColorEnabled,
                     enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
                     exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f)) {
                     Column {
@@ -202,8 +223,12 @@ fun ThemePage(model: AuraViewModel, padding: PaddingValues) {
                         GlassDropdownPreference(tr("palette", "调色盘"), listOf(tr("palette_tonal", "柔和彩调"), tr("palette_neutral", "中性"), tr("palette_vibrant", "鲜艳"),
                             tr("palette_expressive", "丰富表现"), tr("palette_rainbow", "彩虹"), tr("palette_fruit", "水果沙拉"), tr("palette_mono", "单色"), tr("palette_fidelity", "保真"), tr("palette_content", "内容")),
                             value.palette.coerceIn(0, 8), backdrop = LocalToolbarBackdrop.current) { index -> model.updateSettings { it.copy(palette = index) } }
-                        GlassDropdownPreference(tr("color_spec", "色彩规范"), listOf(tr("spec_2021", "经典（2021）"), tr("spec_2025", "丰富表现（2025）")),
-                            value.colorSpec.coerceIn(0, 1), backdrop = LocalToolbarBackdrop.current) { index -> model.updateSettings { it.copy(colorSpec = index) } }
+                        AnimatedVisibility(value.colorExtractionMode == btm.m.auraplayer.data.ColorExtractionMode.MONET,
+                            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f)) {
+                            GlassDropdownPreference(tr("color_spec", "色彩规范"), listOf(tr("spec_2021", "经典（2021）"), tr("spec_2025", "丰富表现（2025）")),
+                                value.colorSpec.coerceIn(0, 1), backdrop = LocalToolbarBackdrop.current) { index -> model.updateSettings { it.copy(colorSpec = index) } }
+                        }
                         AnimatedVisibility(value.color == "custom",
                             enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
                             exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f)) {
@@ -216,7 +241,7 @@ fun ThemePage(model: AuraViewModel, padding: PaddingValues) {
                 }
             }
         }
-        if (value.monet && value.colorSpec == 1) item {
+        if (value.colorExtractionMode == btm.m.auraplayer.data.ColorExtractionMode.MONET && value.colorSpec == 1) item {
             SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) {
                 Text(tr("spec_summary", "2025 规范适用于柔和彩调、中性、鲜艳和丰富表现，其余调色盘使用 2021 规范。"), style = MiuixTheme.textStyles.body2)
             }

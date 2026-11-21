@@ -905,7 +905,7 @@ internal fun PlayerTiledStage(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .background(Color.White.copy(alpha = 0.12f)),
+                                        .background(activeInk.copy(alpha = 0.10f)),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Image(
@@ -1124,7 +1124,7 @@ internal fun PlayerTiledStage(
                     )
                     drawPath(
                         path = reticlePath,
-                        color = Color.White.copy(alpha = if (eligibleCandidate != null) 0.28f else 0.42f),
+                        color = activeInk.copy(alpha = if (eligibleCandidate != null) 0.28f else 0.42f),
                         style = Stroke(width = reticleStrokePx * 0.55f),
                     )
                     val progress = dwellProgress.value.coerceIn(0f, 1f)
@@ -1132,7 +1132,7 @@ internal fun PlayerTiledStage(
                         reticleMeasure.setPath(reticlePath, forceClosed = false)
                         reticleSegment.reset()
                         reticleMeasure.getSegment(0f, reticleMeasure.length * progress, reticleSegment, startWithMoveTo = true)
-                        val activeStrokeColor = if (armedCell != null) glowColor else Color.White
+                        val activeStrokeColor = if (armedCell != null) glowColor else activeInk
                         drawPath(
                             path = reticleSegment,
                             color = activeStrokeColor,
@@ -1159,7 +1159,7 @@ internal fun PlayerTiledStage(
         val pillTint = oneUi?.card ?: expressive?.surfaceContainer ?: menuTint
         val pillSurfaceMod = Modifier
             .background(pillTint.copy(alpha = 0.84f), pillShape)
-            .border(0.75.dp, Color.White.copy(alpha = 0.18f), pillShape)
+            .border(0.75.dp, activeInk.copy(alpha = 0.18f), pillShape)
 
         Box(
             modifier = Modifier

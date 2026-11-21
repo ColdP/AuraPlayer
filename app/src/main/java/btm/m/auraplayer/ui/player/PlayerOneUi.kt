@@ -85,24 +85,48 @@ internal data class PlayerOneUiColors(
 )
 
 @Composable
-internal fun rememberPlayerOneUiColors(seed: Int, isDark: Boolean): PlayerOneUiColors {
-    val target = remember(seed, isDark) {
-        val monet = MonetTones.fromSeed(seed, isDark)
-        PlayerOneUiColors(
-            dark = isDark,
-            background = Color(monet.background),
-            card = Color(monet.card),
-            cardAlt = Color(monet.cardAlt),
-            text = Color(monet.text),
-            subText = Color(monet.subText),
-            divider = Color(monet.divider),
-            accent = Color(monet.accent),
-            accentDeep = Color(monet.accentDeep),
-            onAccent = Color(monet.onAccent),
-            chip = Color(monet.chip),
-            onChip = Color(monet.onChip),
-            track = Color(monet.track),
-        )
+internal fun rememberPlayerOneUiColors(
+    seed: Int,
+    isDark: Boolean,
+    useOklab: Boolean = false,
+    paletteIndex: Int = 0,
+): PlayerOneUiColors {
+    val target = remember(seed, isDark, useOklab, paletteIndex) {
+        if (useOklab) {
+            val scheme = btm.m.auraplayer.ui.OklabThemeEngine.generateScheme(seed, isDark, paletteIndex)
+            PlayerOneUiColors(
+                dark = scheme.dark,
+                background = scheme.oneUiBackground,
+                card = scheme.oneUiCard,
+                cardAlt = scheme.oneUiCardAlt,
+                text = scheme.oneUiText,
+                subText = scheme.oneUiSubText,
+                divider = scheme.oneUiDivider,
+                accent = scheme.oneUiAccent,
+                accentDeep = scheme.oneUiAccentDeep,
+                onAccent = scheme.oneUiOnAccent,
+                chip = scheme.oneUiChip,
+                onChip = scheme.oneUiOnChip,
+                track = scheme.oneUiTrack,
+            )
+        } else {
+            val monet = MonetTones.fromSeed(seed, isDark)
+            PlayerOneUiColors(
+                dark = isDark,
+                background = Color(monet.background),
+                card = Color(monet.card),
+                cardAlt = Color(monet.cardAlt),
+                text = Color(monet.text),
+                subText = Color(monet.subText),
+                divider = Color(monet.divider),
+                accent = Color(monet.accent),
+                accentDeep = Color(monet.accentDeep),
+                onAccent = Color(monet.onAccent),
+                chip = Color(monet.chip),
+                onChip = Color(monet.onChip),
+                track = Color(monet.track),
+            )
+        }
     }
     val animSpec = tween<Color>(700, easing = FastOutSlowInEasing)
     return PlayerOneUiColors(

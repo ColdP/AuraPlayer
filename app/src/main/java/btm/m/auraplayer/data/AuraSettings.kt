@@ -34,6 +34,21 @@ enum class HomeBackgroundStyle {
     COLOR_BLUR,
 }
 
+enum class ColorExtractionMode(val prefValue: String) {
+    OFF("off"),
+    OKLAB("oklab"),
+    MONET("monet");
+
+    companion object {
+        fun fromPref(raw: String?, legacyMonet: Boolean = false): ColorExtractionMode = when (raw) {
+            "off" -> OFF
+            "oklab" -> OKLAB
+            "monet" -> MONET
+            else -> if (legacyMonet) MONET else OFF
+        }
+    }
+}
+
 enum class BannerMotionPlayMode {
     OFF,
     ONCE,
@@ -107,7 +122,7 @@ data class Appearance(
     val maxBackProgress: Float = .9f,
     val theme: String = "system",
     val uiStyle: String = "hyper",
-    val monet: Boolean = false,
+    val colorExtractionMode: ColorExtractionMode = ColorExtractionMode.OFF,
     val color: String = "system",
     val customColor: Int = 0xFF7962D9.toInt(),
     val palette: Int = 0,
@@ -144,6 +159,10 @@ data class Appearance(
     val neteaseBannerConfig: HomeBannerConfig = HomeBannerConfig(),
     val qqBannerConfig: HomeBannerConfig = HomeBannerConfig(),
 ) {
+    val monet: Boolean get() = colorExtractionMode == ColorExtractionMode.MONET
+    val isOklabColor: Boolean get() = colorExtractionMode == ColorExtractionMode.OKLAB
+    val dynamicColorEnabled: Boolean get() = colorExtractionMode != ColorExtractionMode.OFF
+
     fun bannerStyleConfig(style: LocalBannerStyle): LocalBannerStyleConfig =
         (localBannerStyleConfigs[style] ?: defaultLocalBannerStyleConfig(style)).normalized()
 
@@ -228,7 +247,11 @@ class AuraSettings(context: Context) {
             maxBackProgress = prefs.getFloat("backMaximum", .9f).coerceIn(.1f, 1f),
             theme = prefs.getString("theme", "system")!!,
             uiStyle = normalizeUiStyle(prefs.getString("uiStyle", "hyper")),
-            monet = prefs.getBoolean("monet", false), color = prefs.getString("color", "system")!!,
+            colorExtractionMode = ColorExtractionMode.fromPref(
+                raw = prefs.getString("colorExtractionMode", null),
+                legacyMonet = prefs.getBoolean("monet", false),
+            ),
+            color = prefs.getString("color", "system")!!,
             customColor = prefs.getInt("customColor", 0xFF7962D9.toInt()),
             palette = prefs.getInt("palette", 0), colorSpec = prefs.getInt("colorSpec", 0),
             language = prefs.getString("language", "zh")!!,
@@ -289,7 +312,10 @@ class AuraSettings(context: Context) {
         prefs.edit().putString("navigation", v.navigation).putString("labels", v.labels)
             .putInt("navigationOffsetDp", v.navigationOffsetDp)
             .putBoolean("predictive", v.predictive).putFloat("backMaximum", v.maxBackProgress)
-            .putString("theme", v.theme).putString("uiStyle", v.uiStyle).putBoolean("monet", v.monet).putString("color", v.color)
+            .putString("theme", v.theme).putString("uiStyle", v.uiStyle)
+            .putString("colorExtractionMode", v.colorExtractionMode.prefValue)
+            .putBoolean("monet", v.colorExtractionMode == ColorExtractionMode.MONET)
+            .putString("color", v.color)
             .putInt("customColor", v.customColor).putInt("palette", v.palette).putInt("colorSpec", v.colorSpec)
             .putString("language", v.language).putBoolean("whitelist", v.whitelist)
             .putString("homeContent", v.homeContent)

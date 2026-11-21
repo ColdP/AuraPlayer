@@ -3,6 +3,7 @@ package btm.m.auraplayer.widget
 import androidx.media3.common.Player
 import btm.m.auraplayer.playback.MaterialPlayerBackground
 import btm.m.auraplayer.playback.NowPlayingConfig
+import btm.m.auraplayer.playback.PlayerColorTheme
 import btm.m.auraplayer.playback.PlayerTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -52,7 +53,8 @@ class WidgetLayoutAndThemeTest {
                 assertTrue(paused.playUsesSquircleWhenPaused)
                 assertNotEquals(paused.playBgColor, playing.playBgColor)
                 val blurMaterial = WidgetThemeEngine.resolveThemeColors(
-                    NowPlayingConfig(theme = PlayerTheme.MATERIAL, materialBackground = MaterialPlayerBackground.BLUR),
+                    NowPlayingConfig(theme = PlayerTheme.MATERIAL, materialBackground = MaterialPlayerBackground.BLUR)
+                        .withColorTheme(PlayerColorTheme.DARK, PlayerTheme.MATERIAL),
                     appDark = false,
                     seedArgb = seed,
                     isPlaying = false,
@@ -68,7 +70,10 @@ class WidgetLayoutAndThemeTest {
             } else {
                 assertFalse(paused.usesButtonContainers)
                 assertEquals(0, paused.playBgColor)
-                assertTrue(paused.isDarkSurface)
+                assertFalse(paused.isDarkSurface)
+                val darkTheme = WidgetThemeEngine.resolveThemeColors(config, appDark = true, seedArgb = seed, isPlaying = false)
+                assertTrue(darkTheme.isDarkSurface)
+                assertNotEquals(paused.titleColor, darkTheme.titleColor)
             }
         }
     }

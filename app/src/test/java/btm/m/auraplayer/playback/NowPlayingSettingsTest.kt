@@ -25,7 +25,7 @@ class NowPlayingSettingsTest {
         assertEquals(TokyoSceneLandmark.CITY_WALK, expected.tokyoSceneLandmark)
         assertEquals(0f, expected.mainLyricScalePercent, 0f)
         assertEquals(0f, expected.bgLyricScalePercent, 0f)
-        assertFalse(expected.immersiveLyrics || expected.keepLyricsAwake || expected.immersiveCover || expected.landscapeAutoCoverflow || expected.coverflowParallax || expected.tiledParallax || expected.appleMusicAnimatedCover || expected.albumAnimatedCover || expected.appleMusicArtistArtwork || expected.artistAnimatedCover)
+        assertFalse(expected.immersiveLyrics || expected.keepLyricsAwake || expected.immersiveCover || expected.landscapeAutoCoverflow || expected.coverflowParallax || expected.tiledParallax || expected.appleMusicAnimatedCover || expected.albumAnimatedCover || expected.appleMusicAlbumRecordLabel || expected.appleMusicArtistArtwork || expected.artistAnimatedCover)
         assertTrue(expected.fullscreenGlass)
     }
 
@@ -46,6 +46,7 @@ class NowPlayingSettingsTest {
                 landscapeAutoCoverflow = true,
                 appleMusicAnimatedCover = true,
                 albumAnimatedCover = true,
+                appleMusicAlbumRecordLabel = true,
                 appleMusicArtistArtwork = true,
                 artistAnimatedCover = true,
                 artistWordmarkLogo = false,
@@ -138,5 +139,28 @@ class NowPlayingSettingsTest {
             assertEquals(expectBlur, cfg.hasBlurControl)
             assertEquals(expectBlur, cfg.usesArtworkBackground)
         }
+    }
+
+    @Test fun colorThemeIsIndependentPerInterfaceThemeAndSurvivesRestart() {
+        var config = NowPlayingConfig(theme = PlayerTheme.AURORA)
+        for (theme in PlayerTheme.entries) {
+            assertEquals(PlayerColorTheme.FOLLOW_APP, config.colorThemeFor(theme))
+        }
+        config = config
+            .withColorTheme(PlayerColorTheme.LIGHT, PlayerTheme.AURORA)
+            .withColorTheme(PlayerColorTheme.DARK, PlayerTheme.BLUR)
+            .withColorTheme(PlayerColorTheme.LIGHT, PlayerTheme.MATERIAL)
+            .withColorTheme(PlayerColorTheme.DARK, PlayerTheme.ONE)
+
+        val decoded = NowPlayingCodec.decode(NowPlayingCodec.encode(config))
+        assertEquals(PlayerColorTheme.LIGHT, decoded.colorThemeFor(PlayerTheme.AURORA))
+        assertEquals(PlayerColorTheme.DARK, decoded.colorThemeFor(PlayerTheme.BLUR))
+        assertEquals(PlayerColorTheme.FOLLOW_APP, decoded.colorThemeFor(PlayerTheme.COLOR))
+        assertEquals(PlayerColorTheme.LIGHT, decoded.colorThemeFor(PlayerTheme.MATERIAL))
+        assertEquals(PlayerColorTheme.DARK, decoded.colorThemeFor(PlayerTheme.ONE))
+        assertFalse(decoded.resolveDarkTheme(appDark = true, target = PlayerTheme.AURORA))
+        assertTrue(decoded.resolveDarkTheme(appDark = false, target = PlayerTheme.BLUR))
+        assertTrue(decoded.resolveDarkTheme(appDark = true, target = PlayerTheme.COLOR))
+        assertFalse(decoded.resolveDarkTheme(appDark = false, target = PlayerTheme.COLOR))
     }
 }

@@ -111,6 +111,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import btm.m.auraplayer.data.Appearance
+import btm.m.auraplayer.data.ColorExtractionMode
 import btm.m.auraplayer.ui.navigation.DampedDragAnimation
 import btm.m.auraplayer.ui.navigation.HostTab
 import btm.m.auraplayer.ui.navigation.NavigationScaleSettings
@@ -118,6 +120,11 @@ import btm.m.auraplayer.ui.player.PlayerExpressiveColors
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.hct.Hct
 import com.materialkolor.scheme.SchemeExpressive
+import dev.pascal.oneuikit.MonetTones
+import dev.pascal.oneuikit.OneUiPalette
+import dev.pascal.oneuikit.OneUiWidgets
+import top.yukonga.miuix.kmp.theme.ColorSchemeMode
+import top.yukonga.miuix.kmp.theme.ThemeColorSpec
 import top.yukonga.miuix.kmp.basic.ButtonColors
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Checkbox
@@ -207,6 +214,7 @@ internal data class AuraExpressiveScheme(
 }
 
 internal val LocalAuraExpressiveScheme = staticCompositionLocalOf<AuraExpressiveScheme?> { null }
+internal val LocalAuraOklabScheme = staticCompositionLocalOf<OklabColorScheme?> { null }
 
 internal fun <T> m3ExpressiveSpatialSpring() = spring<T>(
     dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -338,10 +346,70 @@ internal fun Colors.withExpressiveColors(e: AuraExpressiveScheme): Colors = copy
 )
 
 @Composable
+internal fun ProvideAuraAppTheme(
+    settings: Appearance,
+    previewColor: Int? = null,
+    textStyles: TextStyles = remember { auraTextStyles() },
+    content: @Composable () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val seed = when (settings.color) {
+        "custom" -> previewColor ?: settings.customColor
+        "system" -> MonetTones.seedOf(context).takeIf { it != 0 }
+            ?: context.getColor(android.R.color.system_accent1_500)
+        else -> colorPresets.firstOrNull { it.first == settings.color }?.third?.toInt()
+    }
+    val controller = remember(
+        settings.theme,
+        settings.colorExtractionMode,
+        seed,
+        settings.palette,
+        settings.colorSpec,
+    ) {
+        val mode = if (settings.colorExtractionMode == ColorExtractionMode.MONET) when (settings.theme) {
+            "light" -> ColorSchemeMode.MonetLight
+            "dark" -> ColorSchemeMode.MonetDark
+            else -> ColorSchemeMode.MonetSystem
+        } else when (settings.theme) {
+            "light" -> ColorSchemeMode.Light
+            "dark" -> ColorSchemeMode.Dark
+            else -> ColorSchemeMode.System
+        }
+        ThemeController(
+            mode,
+            keyColor = seed?.let(::Color),
+            paletteStyle = paletteStyles[settings.palette.coerceIn(paletteStyles.indices)],
+            colorSpec = if (settings.colorSpec == 0) ThemeColorSpec.Spec2021 else ThemeColorSpec.Spec2025,
+        )
+    }
+    val colorStyle = remember(settings.colorExtractionMode, settings.palette) {
+        AuraColorStyle(mode = settings.colorExtractionMode, palette = settings.palette)
+    }
+    CompositionLocalProvider(
+        LocalAdvancedMaterialEnabled provides !settings.disableAdvancedMaterial,
+        LocalAuraColorStyle provides colorStyle,
+    ) {
+        AuraUiTheme(
+            themeMode = settings.theme,
+            uiStyle = settings.uiStyle,
+            colorExtractionMode = settings.colorExtractionMode,
+            paletteIndex = settings.palette,
+            seed = seed,
+            useSystemSeed = settings.color == "system",
+            controller = controller,
+            textStyles = textStyles,
+        ) {
+            ProvideAuraCouiTheme(settings.dynamicColorEnabled, content)
+        }
+    }
+}
+
+@Composable
 internal fun AuraUiTheme(
     themeMode: String,
     uiStyle: String,
-    monet: Boolean,
+    colorExtractionMode: ColorExtractionMode,
+    paletteIndex: Int,
     seed: Int?,
     useSystemSeed: Boolean = false,
     controller: ThemeController,
@@ -358,8 +426,17 @@ internal fun AuraUiTheme(
         "light" -> false
         else -> isSystemInDarkTheme()
     }
-    val expressiveSeed = if (monet && seed != null) seed else DEFAULT_MATERIAL_EXPRESSIVE_SEED
-    val expressiveScheme = rememberAuraExpressiveScheme(expressiveSeed, isDark)
+    val isOklab = colorExtractionMode == ColorExtractionMode.OKLAB
+    val isMonet = colorExtractionMode == ColorExtractionMode.MONET
+    val oklabScheme = if (isOklab) {
+        rememberOklabScheme(seed ?: DEFAULT_OKLAB_SEED, isDark, paletteIndex)
+    } else null
+    val expressiveSeed = if (colorExtractionMode != ColorExtractionMode.OFF && seed != null) seed else DEFAULT_MATERIAL_EXPRESSIVE_SEED
+    val expressiveScheme = if (isOklab && oklabScheme != null) {
+        oklabScheme.toAuraExpressiveScheme()
+    } else {
+        rememberAuraExpressiveScheme(expressiveSeed, isDark)
+    }
     when (style) {
         AppUiStyle.MATERIAL -> {
             val base = if (isDark) darkColorScheme() else lightColorScheme()
@@ -368,19 +445,32 @@ internal fun AuraUiTheme(
                 CompositionLocalProvider(
                     LocalAppUiStyle provides AppUiStyle.MATERIAL,
                     LocalAuraExpressiveScheme provides expressiveScheme,
+                    LocalAuraOklabScheme provides oklabScheme,
                     content = content,
                 )
             }
         }
         AppUiStyle.ONE -> {
             val context = androidx.compose.ui.platform.LocalContext.current
-            val onePalette = rememberOneUiPalette(
-                isDark = isDark,
-                useMonet = monet,
-                customSeed = if (useSystemSeed) null else seed,
-            )
+            val oklabTones = remember(oklabScheme) { oklabScheme?.toOneUiMonetTones() }
+            val onePalette = if (isOklab && oklabTones != null) {
+                remember(context, isDark, oklabTones) {
+                    OneUiPalette(
+                        context = context,
+                        forceDark = isDark,
+                        useMonet = true,
+                        overrideTones = oklabTones,
+                    )
+                }
+            } else {
+                rememberOneUiPalette(
+                    isDark = isDark,
+                    useMonet = isMonet,
+                    customSeed = if (useSystemSeed) null else seed,
+                )
+            }
             val oneWidgets = remember(context, onePalette) {
-                dev.pascal.oneuikit.OneUiWidgets(context, onePalette)
+                OneUiWidgets(context, onePalette)
             }
             val base = if (isDark) darkColorScheme() else lightColorScheme()
             val mapped = base.withOneUiColors(onePalette)
@@ -389,6 +479,7 @@ internal fun AuraUiTheme(
                     LocalAppUiStyle provides AppUiStyle.ONE,
                     LocalAuraOneUiPalette provides onePalette,
                     LocalAuraOneUiWidgets provides oneWidgets,
+                    LocalAuraOklabScheme provides oklabScheme,
                     LocalAuraExpressiveScheme provides onePalette.toPlayerExpressiveColors().let { p ->
                         expressiveScheme.copy(
                             dark = p.dark,
@@ -417,12 +508,26 @@ internal fun AuraUiTheme(
             }
         }
         AppUiStyle.HYPER -> {
-            MiuixTheme(controller = controller, textStyles = textStyles) {
-                CompositionLocalProvider(
-                    LocalAppUiStyle provides AppUiStyle.HYPER,
-                    LocalAuraExpressiveScheme provides expressiveScheme,
-                    content = content,
-                )
+            if (isOklab && oklabScheme != null) {
+                val base = if (isDark) darkColorScheme() else lightColorScheme()
+                val mapped = base.withOklabColors(oklabScheme)
+                MiuixTheme(colors = mapped, textStyles = textStyles) {
+                    CompositionLocalProvider(
+                        LocalAppUiStyle provides AppUiStyle.HYPER,
+                        LocalAuraExpressiveScheme provides expressiveScheme,
+                        LocalAuraOklabScheme provides oklabScheme,
+                        content = content,
+                    )
+                }
+            } else {
+                MiuixTheme(controller = controller, textStyles = textStyles) {
+                    CompositionLocalProvider(
+                        LocalAppUiStyle provides AppUiStyle.HYPER,
+                        LocalAuraExpressiveScheme provides expressiveScheme,
+                        LocalAuraOklabScheme provides null,
+                        content = content,
+                    )
+                }
             }
         }
     }

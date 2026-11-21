@@ -54,6 +54,10 @@ internal fun PlayerThemeBackground(
     modifier: Modifier = Modifier,
     visible: Boolean = true,
     prepare: Boolean = false,
+    isDark: Boolean = true,
+    useOklab: Boolean = false,
+    oklabPaletteIndex: Int = 0,
+    seed: Int? = null,
 ) {
     val advancedMaterial = btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled.current
     // Keep decoded pixels outside the theme Crossfade and outside Coil's loading state. A new
@@ -149,6 +153,10 @@ internal fun PlayerThemeBackground(
             last = now
         }
     }
+    val effectiveSeed = seed ?: rememberPlayerArtworkColorSeed(artwork, useOklab)
+    val oklabAmbient = remember(useOklab, effectiveSeed, isDark, oklabPaletteIndex) {
+        if (useOklab) btm.m.auraplayer.ui.OklabThemeEngine.generatePlayerAmbient(effectiveSeed, isDark, oklabPaletteIndex) else null
+    }
     val backgroundSpec: FiniteAnimationSpec<Float> = if (visible) tween(220) else snap()
     val blur by animateFloatAsState(config.blurRadius, backgroundSpec, label = "playerBackgroundBlur")
     val materialMix by animateFloatAsState((config.materialColorMix / 100f).coerceIn(0f, 1f), backgroundSpec, label = "playerMaterialMix")
@@ -176,7 +184,8 @@ internal fun PlayerThemeBackground(
             val baseColor = when {
                 materialMode && materialBg == MaterialPlayerBackground.MATERIAL && expressive != null -> expressive.surface
                 oneUiMode -> oneUi.background
-                else -> Color(palette.a2.tone(14))
+                oklabAmbient != null -> oklabAmbient.surface
+                else -> Color(palette.a2.tone(if (isDark) 14 else 93))
             }
             Box(Modifier.fillMaxSize().background(baseColor)) {
                 val showAurora = advancedMaterial && (theme == PlayerTheme.AURORA ||
@@ -193,7 +202,14 @@ internal fun PlayerThemeBackground(
                     OneUiSurfaceWash(oneUi, Modifier.fillMaxSize())
                 }
                 if (showAurora) {
-                    PlayerAmbientBackground(palette, Modifier.fillMaxSize(), animate, visible)
+                    PlayerAmbientBackground(
+                        palette = palette,
+                        modifier = Modifier.fillMaxSize(),
+                        animate = animate,
+                        visible = visible,
+                        isDark = isDark,
+                        oklabAmbient = oklabAmbient,
+                    )
                 }
                 if (showArtwork) {
                     val flowing = theme == PlayerTheme.AURORA_BLUR ||
@@ -206,8 +222,8 @@ internal fun PlayerThemeBackground(
                             translationX = sin(phase * .42f) * size.width * .07f
                             translationY = cos(phase * .34f) * size.height * .055f
                             rotationZ = sin(phase * .22f) * 4f
-                            // Let the moving Monet colors show through the blurred artwork.
-                            alpha = .38f
+                            // Let the moving dynamic colors show through the blurred artwork.
+                            alpha = if (isDark) .38f else .30f
                         }
                     }.blur(radius.dp)) {
                         // The outgoing image stays fully opaque beneath the incoming image;
@@ -222,11 +238,25 @@ internal fun PlayerThemeBackground(
                     }
                     // Keep controls readable without turning clear negative-blur settings opaque.
                     val scrimScale = if (materialMode) 1f - materialMix * .6f else 1f
-                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = scrimScale * when {
-                        full -> .22f + .16f * compactProgress
-                        flowing -> .20f
-                        else -> .28f
-                    })))
+                    val scrimColor = if (isDark) {
+                        Color.Black.copy(alpha = scrimScale * when {
+                            full -> .22f + .16f * compactProgress
+                            flowing -> .20f
+                            else -> .28f
+                        })
+                    } else {
+                        val lightVeilBase = when {
+                            materialMode && expressive != null -> expressive.surface
+                            oklabAmbient != null -> oklabAmbient.base
+                            else -> Color(palette.n1.tone(96))
+                        }
+                        lightVeilBase.copy(alpha = scrimScale * when {
+                            full -> .14f + .48f * compactProgress
+                            flowing -> .56f
+                            else -> .64f
+                        })
+                    }
+                    Box(Modifier.fillMaxSize().background(scrimColor))
                 }
                 if (materialMode && materialBg != MaterialPlayerBackground.MATERIAL && expressive != null && materialMix > 0.001f) {
                     Box(Modifier.fillMaxSize().background(expressive.surface.copy(alpha = materialMix * .94f)))
@@ -244,7 +274,7 @@ internal fun PlayerThemeBackground(
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        if (config.weather != PlayerWeather.NONE) PlayerWeatherOverlay(config.weather, { phase })
+        if (config.weather != PlayerWeather.NONE) PlayerWeatherOverlay(config.weather, { phase }, isDark = isDark)
     }
 }
 
@@ -369,23 +399,26 @@ internal fun PlayerWeatherOverlay(
     weather: PlayerWeather,
     time: Float,
     modifier: Modifier = Modifier,
-) = PlayerWeatherOverlay(weather, { time }, modifier)
+    isDark: Boolean = true,
+) = PlayerWeatherOverlay(weather, { time }, modifier, isDark)
 
 @Composable
 private fun PlayerWeatherOverlay(
     weather: PlayerWeather,
     time: () -> Float,
     modifier: Modifier = Modifier,
+    isDark: Boolean = true,
 ) {
     val particles = remember { Random(317).let { r -> List(64) { WeatherParticle(r.nextFloat(), r.nextFloat(), .08f + r.nextFloat() * .14f, .5f + r.nextFloat()) } } }
+    val particleTint = if (isDark) Color.White else Color(0xFF3E4A5C)
     Canvas(modifier.fillMaxSize()) {
         val time = time()
         val rain = weather == PlayerWeather.RAIN
         for ((index, p) in particles.withIndex()) {
             val y = ((p.y + time * p.speed * if (rain) 3f else 1f) % 1f) * size.height
             val x = ((p.x + if (rain) -.04f * time else .035f * sin(time * .55f + index)) % 1f + 1f) % 1f * size.width
-            if (rain) drawLine(Color.White.copy(alpha = .22f), Offset(x, y), Offset(x - 4.dp.toPx(), y + (10f + p.size * 8f).dp.toPx()), .8.dp.toPx())
-            else drawCircle(Color.White.copy(alpha = .40f), (p.size * 1.5f).dp.toPx(), Offset(x, y))
+            if (rain) drawLine(particleTint.copy(alpha = if (isDark) .22f else .24f), Offset(x, y), Offset(x - 4.dp.toPx(), y + (10f + p.size * 8f).dp.toPx()), .8.dp.toPx())
+            else drawCircle(particleTint.copy(alpha = if (isDark) .40f else .34f), (p.size * 1.5f).dp.toPx(), Offset(x, y))
         }
     }
 }
@@ -521,34 +554,19 @@ internal fun rememberCatalogPlayerThemeTokens(
     fallbackDarkSurface: Boolean,
     forceHeroSurface: Boolean,
 ): CatalogPlayerThemeTokens {
+    val colorStyle = btm.m.auraplayer.ui.LocalAuraColorStyle.current
+    val useOklab = colorStyle.isOklab
     val palette = rememberPlayerMonetPalette(artwork)
-    val seed = rememberPlayerArtworkSeed(artwork)
-    val effectiveDark = when {
-        config.theme == PlayerTheme.MATERIAL -> fallbackDarkSurface || config.materialBackground != MaterialPlayerBackground.MATERIAL
-        config.theme == PlayerTheme.ONE -> fallbackDarkSurface
-        forceHeroSurface -> true
-        else -> fallbackDarkSurface
+    val seed = rememberPlayerArtworkColorSeed(artwork, useOklab)
+    val effectiveDark = if (forceHeroSurface) true else config.resolveDarkTheme(fallbackDarkSurface)
+    val expressive = rememberPlayerExpressiveColors(seed, isDark = effectiveDark, useOklab = useOklab, paletteIndex = colorStyle.palette)
+    val oneUi = rememberPlayerOneUiColors(seed, isDark = effectiveDark, useOklab = useOklab, paletteIndex = colorStyle.palette)
+    val oklabAmbient = remember(useOklab, seed, effectiveDark, colorStyle.palette) {
+        if (useOklab) btm.m.auraplayer.ui.OklabThemeEngine.generatePlayerAmbient(seed, effectiveDark, colorStyle.palette) else null
     }
-    val expressive = rememberPlayerExpressiveColors(seed, isDark = effectiveDark)
-    val oneUi = rememberPlayerOneUiColors(seed, isDark = effectiveDark)
     val mixFraction = (config.materialColorMix / 100f).coerceIn(0f, 1f)
-    return remember(palette, config.theme, config.materialBackground, mixFraction, effectiveDark, forceHeroSurface, expressive, oneUi) {
+    return remember(palette, config.theme, config.materialBackground, mixFraction, effectiveDark, forceHeroSurface, expressive, oneUi, oklabAmbient) {
         when {
-            !forceHeroSurface && !effectiveDark -> {
-                val base = Color(palette.a2.tone(90))
-                val fg = Color(palette.a1.tone(10))
-                val accent = Color(palette.a1.tone(25))
-                CatalogPlayerThemeTokens(
-                    dark = false,
-                    surface = base,
-                    foreground = fg,
-                    muted = fg.copy(alpha = .66f),
-                    accent = accent,
-                    onAccent = Color.White,
-                    cardFill = fg.copy(alpha = .10f),
-                    heroMixTint = Color(palette.a1.tone(82)),
-                )
-            }
             config.theme == PlayerTheme.MATERIAL -> CatalogPlayerThemeTokens(
                 dark = effectiveDark,
                 surface = expressive.surface,
@@ -569,6 +587,31 @@ internal fun rememberCatalogPlayerThemeTokens(
                 cardFill = oneUi.card.copy(alpha = if (effectiveDark) .66f else .80f),
                 heroMixTint = lerp(oneUi.chip, oneUi.background, .35f),
             )
+            oklabAmbient != null -> CatalogPlayerThemeTokens(
+                dark = effectiveDark,
+                surface = oklabAmbient.surface,
+                foreground = oklabAmbient.activeInk,
+                muted = oklabAmbient.secondaryInk,
+                accent = oklabAmbient.accent,
+                onAccent = oklabAmbient.onAccent,
+                cardFill = oklabAmbient.activeInk.copy(alpha = if (effectiveDark) .11f else .08f),
+                heroMixTint = oklabAmbient.heroMixTint,
+            )
+            !effectiveDark -> {
+                val base = Color(palette.a2.tone(90))
+                val fg = Color(palette.a1.tone(10))
+                val accent = Color(palette.a1.tone(25))
+                CatalogPlayerThemeTokens(
+                    dark = false,
+                    surface = base,
+                    foreground = fg,
+                    muted = fg.copy(alpha = .66f),
+                    accent = accent,
+                    onAccent = Color.White,
+                    cardFill = fg.copy(alpha = .10f),
+                    heroMixTint = Color(palette.a1.tone(82)),
+                )
+            }
             else -> {
                 val accent = Color(palette.a1.tone(80))
                 CatalogPlayerThemeTokens(
@@ -594,15 +637,17 @@ internal fun CatalogNowPlayingBackground(
     forceHeroSurface: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val colorStyle = btm.m.auraplayer.ui.LocalAuraColorStyle.current
+    val useOklab = colorStyle.isOklab
     val palette = rememberPlayerMonetPalette(artwork)
-    val seed = rememberPlayerArtworkSeed(artwork)
+    val seed = rememberPlayerArtworkColorSeed(artwork, useOklab)
     val tokens = rememberCatalogPlayerThemeTokens(artwork, config, fallbackDarkSurface, forceHeroSurface)
     if (!btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled.current || (!forceHeroSurface && !tokens.dark)) {
         Box(modifier.background(tokens.surface))
         return
     }
-    val expressive = rememberPlayerExpressiveColors(seed, isDark = tokens.dark)
-    val oneUi = rememberPlayerOneUiColors(seed, isDark = tokens.dark)
+    val expressive = rememberPlayerExpressiveColors(seed, isDark = tokens.dark, useOklab = useOklab, paletteIndex = colorStyle.palette)
+    val oneUi = rememberPlayerOneUiColors(seed, isDark = tokens.dark, useOklab = useOklab, paletteIndex = colorStyle.palette)
     val resolvedConfig = remember(config) {
         config.copy(lyricTheme = LyricTheme.BLUR, weather = PlayerWeather.NONE)
     }
@@ -615,6 +660,10 @@ internal fun CatalogNowPlayingBackground(
             animate = true,
             expressive = if (resolvedConfig.theme == PlayerTheme.MATERIAL) expressive else null,
             oneUi = if (resolvedConfig.theme == PlayerTheme.ONE) oneUi else null,
+            isDark = tokens.dark,
+            useOklab = useOklab,
+            oklabPaletteIndex = colorStyle.palette,
+            seed = seed,
             modifier = Modifier.fillMaxSize(),
         )
         Box(

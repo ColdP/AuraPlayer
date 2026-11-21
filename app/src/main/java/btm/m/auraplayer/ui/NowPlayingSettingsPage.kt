@@ -57,6 +57,18 @@ fun NowPlayingSettingsPage(padding: PaddingValues, open: (String) -> Unit = {}) 
                     ), state.theme.ordinal, backdrop = LocalToolbarBackdrop.current) { index ->
                     store.update { it.copy(theme = PlayerTheme.entries[index]) }
                 }
+                GlassDropdownPreference(
+                    tr("player_color_theme", "颜色主题"),
+                    listOf(
+                        tr("player_color_theme_follow_app", "跟随应用"),
+                        tr("player_color_theme_light", "浅色主题"),
+                        tr("player_color_theme_dark", "深色主题"),
+                    ),
+                    state.colorThemeFor().ordinal,
+                    backdrop = LocalToolbarBackdrop.current,
+                ) { index ->
+                    store.update { it.withColorTheme(PlayerColorTheme.entries[index]) }
+                }
                 materialSetting.AnimatedVisibility(visible = { it }, enter = fadeIn(tween(220)) + expandVertically(tween(220)),
                     exit = fadeOut(tween(220)) + shrinkVertically(tween(220))) {
                     Box(Modifier.blur(materialBlur.dp)) {

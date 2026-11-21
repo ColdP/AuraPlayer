@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -228,10 +229,11 @@ internal fun Modifier.playerDockGlassSurface(
     lensEdge: Dp = 38.dp,
     blurRadius: Dp = 10.dp,
 ): Modifier {
+    val isLightDock = menuTint.luminance() >= 0.5f
     val dockSurfaceTint = when {
         oneUi != null -> oneUi.card.copy(alpha = 0.68f)
         expressive != null -> expressive.surfaceContainer.copy(alpha = 0.68f)
-        else -> menuTint.copy(alpha = 0.26f)
+        else -> menuTint.copy(alpha = if (isLightDock) 0.52f else 0.26f)
     }
     return if (advancedMaterial) {
         this.drawBackdrop(
@@ -285,7 +287,7 @@ internal fun PlayerQueueCounterBadge(
     val textColor = when {
         expressive != null -> expressive.onSecondaryContainer
         oneUi != null -> oneUi.text
-        else -> Color.White
+        else -> if (menuTint.luminance() >= 0.5f) Color(0xFF1A1A1E) else Color.White
     }
     Box(
         modifier = modifier,

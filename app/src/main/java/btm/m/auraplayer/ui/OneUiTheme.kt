@@ -140,8 +140,22 @@ internal fun rememberActiveOneUiPalette(): OneUiPalette {
     LocalAuraOneUiPalette.current?.let { return it }
     val context = LocalContext.current
     val isDark = MiuixTheme.colorScheme.surface.luminance() < .5f
-    return remember(context, isDark) {
-        OneUiPalette(context = context, forceDark = isDark, useMonet = false)
+    val oklabScheme = LocalAuraOklabScheme.current
+    val colorStyle = LocalAuraColorStyle.current
+    if (colorStyle.isOklab && oklabScheme != null) {
+        val tones = remember(oklabScheme) { oklabScheme.toOneUiMonetTones() }
+        return remember(context, isDark, tones) {
+            OneUiPalette(context = context, forceDark = isDark, useMonet = true, overrideTones = tones)
+        }
+    }
+    val primarySeed = MiuixTheme.colorScheme.primary.toArgb()
+    return remember(context, isDark, colorStyle.isMonet, primarySeed) {
+        OneUiPalette(
+            context = context,
+            forceDark = isDark,
+            useMonet = colorStyle.isMonet,
+            customSeed = if (colorStyle.isMonet) primarySeed else null,
+        )
     }
 }
 

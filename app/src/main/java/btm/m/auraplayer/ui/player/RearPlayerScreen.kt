@@ -135,8 +135,9 @@ fun RearPlayerScreen(
 
     val song = model.current
     val artwork = song?.artwork.orEmpty()
+    val colorStyle = btm.m.auraplayer.ui.LocalAuraColorStyle.current
     val palette = rememberPlayerMonetPalette(artwork)
-    val seed = rememberPlayerArtworkSeed(artwork)
+    val seed = rememberPlayerArtworkColorSeed(artwork, useOklab = colorStyle.isOklab)
     val amoledBlack = rearConfig.amoledBlack
     val baseDark = when (rearConfig.colorMode) {
         RearColorMode.DARK -> true
@@ -145,16 +146,16 @@ fun RearPlayerScreen(
     }
     val effectiveDark = baseDark || amoledBlack
     val expressiveColors = if (resolvedAppearance.theme == PlayerTheme.MATERIAL) {
-        rememberPlayerExpressiveColors(seed, effectiveDark)
+        rememberPlayerExpressiveColors(seed, effectiveDark, useOklab = colorStyle.isOklab, paletteIndex = colorStyle.palette)
     } else null
     val oneUiColors = if (resolvedAppearance.theme == PlayerTheme.ONE) {
-        rememberPlayerOneUiColors(seed, effectiveDark)
+        rememberPlayerOneUiColors(seed, effectiveDark, useOklab = colorStyle.isOklab, paletteIndex = colorStyle.palette)
     } else null
+    val oklabAmbient = remember(colorStyle, seed, effectiveDark) {
+        if (colorStyle.isOklab) btm.m.auraplayer.ui.OklabThemeEngine.generatePlayerAmbient(seed, effectiveDark, colorStyle.palette) else null
+    }
 
-    val isLightPalette = !amoledBlack && (
-        (resolvedAppearance.theme == PlayerTheme.MATERIAL && expressiveColors?.dark == false) ||
-            (resolvedAppearance.theme == PlayerTheme.ONE && oneUiColors?.dark == false)
-        )
+    val isLightPalette = !amoledBlack && !effectiveDark
 
     var rearLyricsMode by rememberSaveable { mutableStateOf(false) }
     val displayMode = when {
@@ -190,12 +191,16 @@ fun RearPlayerScreen(
         isAodMode -> Color.White
         resolvedAppearance.theme == PlayerTheme.MATERIAL && expressiveColors != null -> expressiveColors.onSurface
         resolvedAppearance.theme == PlayerTheme.ONE && oneUiColors != null -> oneUiColors.text
+        oklabAmbient != null -> oklabAmbient.activeInk
+        isLightPalette -> Color(palette.n1.tone(10))
         else -> Color.White
     }
     val baseSubInk = when {
         isAodMode -> Color.White.copy(alpha = 0.72f)
         resolvedAppearance.theme == PlayerTheme.MATERIAL && expressiveColors != null -> expressiveColors.onSurfaceVariant
         resolvedAppearance.theme == PlayerTheme.ONE && oneUiColors != null -> oneUiColors.subText
+        oklabAmbient != null -> oklabAmbient.secondaryInk
+        isLightPalette -> Color(palette.n1.tone(32)).copy(alpha = 0.86f)
         else -> Color.White.copy(alpha = 0.72f)
     }
     val ink = if (lyricInkBlend > 0.001f) lerp(baseInk, lyricSpec.inkColor, lyricInkBlend) else baseInk
@@ -247,6 +252,10 @@ fun RearPlayerScreen(
                         animate = true,
                         expressive = expressiveColors,
                         oneUi = oneUiColors,
+                        isDark = effectiveDark,
+                        useOklab = colorStyle.isOklab,
+                        oklabPaletteIndex = colorStyle.palette,
+                        seed = seed,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

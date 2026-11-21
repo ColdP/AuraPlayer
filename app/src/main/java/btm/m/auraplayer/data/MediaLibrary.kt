@@ -29,8 +29,8 @@ data class PartialScanResult(
 class MediaLibrary(private val context: Context) {
     private val audioExtensions = setOf("mp3", "flac", "m4a", "mp4", "ogg", "opus", "wav", "aac", "wma", "aif", "aiff")
 
-    suspend fun scan(settings: Appearance): List<Song> = withContext(Dispatchers.IO) {
-        val songs = queryMediaStore(settings = settings)
+    suspend fun scan(settings: Appearance, blockedUris: Set<String> = emptySet()): List<Song> = withContext(Dispatchers.IO) {
+        val songs = queryMediaStore(settings = settings, blockedUris = blockedUris)
         val collator = Collator.getInstance()
         songs.sortedWith { first, second -> collator.compare(first.title, second.title) }
     }
@@ -40,7 +40,7 @@ class MediaLibrary(private val context: Context) {
      * re-queries MediaStore for that folder prefix, and falls back to reading SAF audio files directly
      * if MediaStore has not indexed them yet.
      */
-    suspend fun scanTree(treeUri: Uri, settings: Appearance): PartialScanResult = withContext(Dispatchers.IO) {
+    suspend fun scanTree(treeUri: Uri, settings: Appearance, blockedUris: Set<String> = emptySet()): PartialScanResult = withContext(Dispatchers.IO) {
         val treeId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull().orEmpty()
         val isExternalStorageDoc = treeUri.authority == "com.android.externalstorage.documents" && treeId.contains(':')
         val volume = if (isExternalStorageDoc) {
@@ -56,7 +56,8 @@ class MediaLibrary(private val context: Context) {
 
         val filenameMatcher = settings.filenameBlockRules.compile()
         val discoveredDocs = if (treeId.isNotBlank()) {
-            collectSafAudioDocs(treeUri, treeId, relativePrefix).filterNot { filenameMatcher.blocks(it.displayName) }
+            collectSafAudioDocs(treeUri, treeId, relativePrefix)
+                .filterNot { filenameMatcher.blocks(it.displayName) || it.uri.toString() in blockedUris }
         } else emptyList()
         if (volume == MediaStore.VOLUME_EXTERNAL_PRIMARY) {
             val scanPaths = discoveredDocs.mapNotNull { doc ->
@@ -75,6 +76,7 @@ class MediaLibrary(private val context: Context) {
                 filenameMatcher = filenameMatcher,
                 targetVolume = volume,
                 relativePrefix = relativePrefix,
+                blockedUris = blockedUris,
             )
         } else {
             emptyList()
@@ -122,6 +124,7 @@ class MediaLibrary(private val context: Context) {
         filenameMatcher: FilenameBlockMatcher = settings.filenameBlockRules.compile(),
         targetVolume: String? = null,
         relativePrefix: String? = null,
+        blockedUris: Set<String> = emptySet(),
     ): List<Song> {
         val columns = arrayOf(
             Audio._ID, Audio.TITLE, Audio.ARTIST, Audio.ALBUM, Audio.ALBUM_ID, Audio.ARTIST_ID,
@@ -151,12 +154,14 @@ class MediaLibrary(private val context: Context) {
                 if (!LibraryFilter.accepts(path, duration, settings.whitelist, settings.blacklist, settings.durationFilter, settings.minimumSeconds, volume)) {
                     continue
                 }
-                if (filenameMatcher.blocks(cursor.getString(ix[15]).orEmpty())) continue
+                val displayName = cursor.getString(ix[15]).orEmpty()
+                if (filenameMatcher.blocks(displayName)) continue
                 val id = cursor.getLong(ix[0])
                 val albumId = cursor.getLong(ix[4])
                 val modified = cursor.getLong(ix[12])
                 val songCollection = Audio.getContentUri(volume)
                 val songUri = ContentUris.withAppendedId(songCollection, id).toString()
+                if (songUri in blockedUris) continue
                 val albumArtUri = ContentUris.withAppendedId(Uri.parse("content://media/$volume/audio/albumart"), albumId).toString()
                 songs += Song(
                     id = id,
@@ -176,6 +181,7 @@ class MediaLibrary(private val context: Context) {
                     modified = modified,
                     composer = cursor.getString(ix[13]).orEmpty(),
                     albumArtist = cursor.getString(ix[14]).orEmpty(),
+                    fileName = displayName,
                 )
             }
         }
@@ -293,6 +299,7 @@ class MediaLibrary(private val context: Context) {
             volume = volume,
             year = year,
             modified = nowSec,
+            fileName = doc.displayName,
         )
     }
 

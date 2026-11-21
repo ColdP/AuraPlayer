@@ -153,6 +153,10 @@ class RearPlayerActivity : ComponentActivity() {
                 androidx.compose.runtime.CompositionLocalProvider(
                     LocalAppUiStyle provides uiStyle,
                     btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled provides !settings.disableAdvancedMaterial,
+                    btm.m.auraplayer.ui.LocalAuraColorStyle provides btm.m.auraplayer.ui.AuraColorStyle(
+                        mode = settings.colorExtractionMode,
+                        palette = settings.palette,
+                    ),
                 ) {
                     RearPlayerScreen(
                         model = model,

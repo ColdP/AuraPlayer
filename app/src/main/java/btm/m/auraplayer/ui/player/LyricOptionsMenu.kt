@@ -50,6 +50,8 @@ internal fun LyricOptionsMenu(
     DisposableEffect(Unit) { onDispose { onExpandedChange(false) } }
     BackHandler(expanded) { expanded = false }
     val p = progress.value.coerceIn(0f, 1f)
+    val isLight = tint.luminance() >= 0.5f
+    val menuInk = if (isLight) Color(0xFF1A1A1E) else Color.White
     val buttonSize = 44.dp
     val menuWidth = (minOf(260.dp, (screenWidth - anchorX - 16.dp).coerceAtLeast(buttonSize)) * .9f).coerceAtLeast(buttonSize)
     // Seven 44dp rows plus the divider and size label fit in 348dp; expand when dual translation sources appear.
@@ -78,34 +80,34 @@ internal fun LyricOptionsMenu(
                     .verticalScroll(rememberScrollState()).padding(top = 4.dp, bottom = 0.dp)) {
                     OptionRow(
                         if (model.showPronunciation) tr("hide_pronunciation", "隐藏发音") else tr("show_pronunciation", "显示发音"),
-                        model.showPronunciation, enabled = expanded,
+                        model.showPronunciation, enabled = expanded, inkColor = menuInk,
                     ) { model.lyricsOptions(model.showTranslation, !model.showPronunciation) }
                     OptionRow(
                         if (model.showTranslation) tr("hide_translation", "隐藏翻译") else tr("show_translation", "显示翻译"),
-                        model.showTranslation, enabled = expanded,
+                        model.showTranslation, enabled = expanded, inkColor = menuInk,
                     ) { model.lyricsOptions(!model.showTranslation, model.showPronunciation) }
                     if (model.hasDualTranslationSources) {
                         Box(Modifier.padding(horizontal = 16.dp, vertical = 7.dp).fillMaxWidth()
-                            .height(1.dp).background(Color.White.copy(alpha = .16f)))
-                        Text(tr("translation_source", "翻译来源"), color = Color.White.copy(alpha = .65f), fontSize = 12.sp,
+                            .height(1.dp).background(menuInk.copy(alpha = .16f)))
+                        Text(tr("translation_source", "翻译来源"), color = menuInk.copy(alpha = .65f), fontSize = 12.sp,
                             modifier = Modifier.padding(start = 18.dp, bottom = 4.dp))
                         OptionRow(
                             tr("translation_source_llm", "大模型翻译"),
                             model.lyricTranslationSource == LyricTranslationSource.LLM,
-                            enabled = expanded,
+                            enabled = expanded, inkColor = menuInk,
                         ) { model.changeLyricTranslationSource(LyricTranslationSource.LLM) }
                         OptionRow(
                             tr("translation_source_network", "网络检索"),
                             model.lyricTranslationSource == LyricTranslationSource.NETWORK,
-                            enabled = expanded,
+                            enabled = expanded, inkColor = menuInk,
                         ) { model.changeLyricTranslationSource(LyricTranslationSource.NETWORK) }
                     }
                     Box(Modifier.padding(horizontal = 16.dp, vertical = 7.dp).fillMaxWidth()
-                        .height(1.dp).background(Color.White.copy(alpha = .16f)))
-                    Text(tr("lyrics_size", "歌词大小"), color = Color.White.copy(alpha = .65f), fontSize = 12.sp,
+                        .height(1.dp).background(menuInk.copy(alpha = .16f)))
+                    Text(tr("lyrics_size", "歌词大小"), color = menuInk.copy(alpha = .65f), fontSize = 12.sp,
                         modifier = Modifier.padding(start = 18.dp, bottom = 4.dp))
                     LyricSize.entries.forEach { size ->
-                        OptionRow(lyricSizeLabel(size), model.lyricSize == size, enabled = expanded) {
+                        OptionRow(lyricSizeLabel(size), model.lyricSize == size, enabled = expanded, inkColor = menuInk) {
                             model.changeLyricSize(size)
                         }
                     }
@@ -114,20 +116,20 @@ internal fun LyricOptionsMenu(
                 if (iconAlpha > 0f) Image(painterResource(R.drawable.ic_player_translate), tr("lyrics_options", "歌词选项"),
                     Modifier.align(Alignment.BottomStart).size(buttonSize).padding(10.dp)
                         .graphicsLayer { alpha = iconAlpha }.blur((p * 16).dp),
-                    colorFilter = ColorFilter.tint(Color.White))
+                    colorFilter = ColorFilter.tint(menuInk))
             }
         }
     }
 }
 
 @Composable
-private fun OptionRow(label: String, checked: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun OptionRow(label: String, checked: Boolean, enabled: Boolean, inkColor: Color, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().height(44.dp).clickable(enabled = enabled, onClick = onClick)
         .semantics { selected = checked }.padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+        Text(label, color = inkColor, fontSize = 15.sp, fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f))
         if (checked) Image(painterResource(R.drawable.ic_player_check), null,
-            Modifier.size(19.dp), colorFilter = ColorFilter.tint(Color.White))
+            Modifier.size(19.dp), colorFilter = ColorFilter.tint(inkColor))
     }
 }

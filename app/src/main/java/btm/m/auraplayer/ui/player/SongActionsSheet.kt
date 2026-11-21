@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import btm.m.auraplayer.AuraViewModel
@@ -43,7 +44,13 @@ internal fun SongActionsSheet(model: AuraViewModel, request: SongActionRequest, 
     var playlistOpen by remember(song.key) { mutableStateOf(false) }
     var playlistMounted by remember(song.key) { mutableStateOf(false) }
     var audioInfoOpen by remember(song.key) { mutableStateOf(false) }
-    LaunchedEffect(show) { if (!show) audioInfoOpen = false }
+    var blockConfirmOpen by remember(song.key) { mutableStateOf(false) }
+    LaunchedEffect(show) {
+        if (!show) {
+            audioInfoOpen = false
+            blockConfirmOpen = false
+        }
+    }
     LaunchedEffect(song.key) { artists = model.resolveSongArtists(song) }
     val historyRevision = model.history.revision
     val favorite = model.isFavorite(song)
@@ -152,6 +159,19 @@ internal fun SongActionsSheet(model: AuraViewModel, request: SongActionRequest, 
                     action(MiuixIcons.Regular.Info, tr("audio_info", "音频信息"), position = SheetItemPosition.BOTTOM) { audioInfoOpen = true }
                 }
             }
+            if (!song.cloud) {
+                divider()
+                Column(groupModifier) {
+                    SheetActionRow(
+                        icon = MiuixIcons.Regular.Hide,
+                        title = tr("block_song", "屏蔽该歌曲"),
+                        expressive = expressive,
+                        position = SheetItemPosition.SINGLE,
+                        destructive = true,
+                        onClick = { blockConfirmOpen = true },
+                    )
+                }
+            }
         }
     }
     if (playlistMounted) SongPlaylistPicker(model, song, playlistOpen, request.backdrop,
@@ -163,6 +183,40 @@ internal fun SongActionsSheet(model: AuraViewModel, request: SongActionRequest, 
             playingFormat = model.audioFormat.takeIf { model.current?.key == song.key },
             onDismissRequest = { audioInfoOpen = false },
         )
+        WindowDialog(
+            show = blockConfirmOpen,
+            title = tr("block_song_confirm_title", "屏蔽该歌曲？"),
+            summary = tr(
+                "block_song_confirm_summary",
+                "屏蔽后，「%s」将不会在本地音乐库中显示，你可以在“设置 - 音频 - 扫描 - 已屏蔽的歌曲”中随时取消屏蔽。",
+            ).format(song.title.ifBlank { tr("unknown_title", "未命名歌曲") }),
+            titleTextAlign = TextAlign.Start,
+            summaryTextAlign = TextAlign.Start,
+            onDismissRequest = { blockConfirmOpen = false },
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                GlassDialogButton(
+                    onClick = { blockConfirmOpen = false },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(tr("cancel", "取消"))
+                }
+                GlassDialogButton(
+                    onClick = {
+                        blockConfirmOpen = false
+                        model.blockSong(song)
+                        dismiss()
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) {
+                    Text(tr("block_song_confirm_action", "屏蔽"))
+                }
+            }
+        }
     }
 }
 

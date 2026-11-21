@@ -29,7 +29,15 @@ internal class OfficialNeteaseClient(
     fun request(path: String, values: Map<String, String>, authenticated: Boolean): JSONObject {
         fun value(key: String, fallback: String = "") = values[key] ?: fallback
         return when (path.trim('/')) {
-            "banner/get" -> call("/api/v2/banner/get", JSONObject().put("clientType", "pc"), authenticated = false)
+            "banner", "banner/get" -> {
+                val clientType = when (value("type")) {
+                    "1" -> "android"
+                    "2" -> "iphone"
+                    "3" -> "ipad"
+                    else -> "pc"
+                }
+                call("/api/v2/banner/get", JSONObject().put("clientType", clientType), authenticated = false)
+            }
             "homepage/block/page" -> call("/api/homepage/block/page", JSONObject()
                 .put("refresh", false).put("cursor", "-1").put("refreshType", 1), authenticated)
             "recommend/resource" -> call("/api/discovery/recommend/resource", JSONObject()

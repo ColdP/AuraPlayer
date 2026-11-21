@@ -148,11 +148,6 @@ class OfficialLoginActivity : ComponentActivity() {
         val loginUrl = if (isQq) QQ_LOGIN_URL else LOGIN_URL
         val app = application as AuraApplication
         val auraSettings = app.settings.value
-        val seed = when (auraSettings.color) {
-            "custom" -> app.settings.previewColor ?: auraSettings.customColor
-            "system" -> getColor(android.R.color.system_accent1_500)
-            else -> colorPresets.firstOrNull { it.first == auraSettings.color }?.third?.toInt()
-        }
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -173,31 +168,9 @@ class OfficialLoginActivity : ComponentActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             )
             setContent {
-                val controller = remember(auraSettings.theme, auraSettings.monet, seed, auraSettings.palette, auraSettings.colorSpec) {
-                    val mode = if (auraSettings.monet) when (auraSettings.theme) {
-                        "light" -> ColorSchemeMode.MonetLight
-                        "dark" -> ColorSchemeMode.MonetDark
-                        else -> ColorSchemeMode.MonetSystem
-                    } else when (auraSettings.theme) {
-                        "light" -> ColorSchemeMode.Light
-                        "dark" -> ColorSchemeMode.Dark
-                        else -> ColorSchemeMode.System
-                    }
-                    ThemeController(
-                        mode,
-                        keyColor = seed?.let(::Color),
-                        paletteStyle = paletteStyles[auraSettings.palette.coerceIn(paletteStyles.indices)],
-                        colorSpec = if (auraSettings.colorSpec == 0) ThemeColorSpec.Spec2021 else ThemeColorSpec.Spec2025,
-                    )
-                }
-                AuraUiTheme(
-                    themeMode = auraSettings.theme,
-                    uiStyle = auraSettings.uiStyle,
-                    monet = auraSettings.monet,
-                    seed = seed,
-                    useSystemSeed = auraSettings.color == "system",
-                    controller = controller,
-                    textStyles = remember { auraTextStyles() },
+                ProvideAuraAppTheme(
+                    settings = auraSettings,
+                    previewColor = app.settings.previewColor,
                 ) {
                     var failed by failedState
                     val surface = MiuixTheme.colorScheme.surface

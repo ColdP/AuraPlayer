@@ -89,10 +89,15 @@ internal fun SheetActionRow(
     expressive: PlayerExpressiveColors? = null,
     position: SheetItemPosition = SheetItemPosition.SINGLE,
     isDropdown: Boolean = false,
+    destructive: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val errorColor = MiuixTheme.colorScheme.error
     if (expressive != null) {
         val disabledAlpha = if (enabled) 1f else .38f
+        val iconContainerColor = if (destructive) errorColor.copy(alpha = 0.14f * disabledAlpha) else expressive.secondaryContainer.copy(alpha = disabledAlpha)
+        val iconTint = if (destructive) errorColor.copy(alpha = disabledAlpha) else expressive.onSecondaryContainer.copy(alpha = disabledAlpha)
+        val titleTextColor = if (destructive) errorColor.copy(alpha = disabledAlpha) else expressive.onSurface.copy(alpha = disabledAlpha)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -106,20 +111,20 @@ internal fun SheetActionRow(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(expressive.secondaryContainer.copy(alpha = disabledAlpha)),
+                    .background(iconContainerColor),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
                     imageVector = icon,
                     contentDescription = null,
                     modifier = Modifier.size(19.dp),
-                    colorFilter = ColorFilter.tint(expressive.onSecondaryContainer.copy(alpha = disabledAlpha)),
+                    colorFilter = ColorFilter.tint(iconTint),
                 )
             }
             Column(Modifier.weight(1f).padding(start = 14.dp, end = 8.dp)) {
                 Text(
                     text = title,
-                    color = expressive.onSurface.copy(alpha = disabledAlpha),
+                    color = titleTextColor,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -138,7 +143,7 @@ internal fun SheetActionRow(
             val arrowTint = expressive.onSurfaceVariant.copy(alpha = if (enabled) .75f else .35f)
             if (isDropdown) {
                 DropdownArrowEndAction(arrowTint)
-            } else {
+            } else if (!destructive) {
                 Image(
                     imageVector = MiuixIcons.Basic.ArrowRight,
                     contentDescription = null,
@@ -152,6 +157,9 @@ internal fun SheetActionRow(
     if (LocalAppUiStyle.current == AppUiStyle.ONE) {
         val palette = rememberActiveOneUiPalette()
         val disabledAlpha = if (enabled) 1f else .42f
+        val iconContainerColor = if (destructive) errorColor.copy(alpha = 0.14f * disabledAlpha) else Color(palette.chip).copy(alpha = disabledAlpha)
+        val iconTint = if (destructive) errorColor.copy(alpha = disabledAlpha) else Color(palette.onChip).copy(alpha = disabledAlpha)
+        val titleTextColor = if (destructive) errorColor.copy(alpha = disabledAlpha) else Color(palette.text).copy(alpha = disabledAlpha)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -163,20 +171,20 @@ internal fun SheetActionRow(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(palette.chip).copy(alpha = disabledAlpha)),
+                    .background(iconContainerColor),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
                     imageVector = icon,
                     contentDescription = null,
                     modifier = Modifier.size(19.dp),
-                    colorFilter = ColorFilter.tint(Color(palette.onChip).copy(alpha = disabledAlpha)),
+                    colorFilter = ColorFilter.tint(iconTint),
                 )
             }
             Column(Modifier.weight(1f).padding(start = 14.dp, end = 8.dp)) {
                 Text(
                     text = title,
-                    color = Color(palette.text).copy(alpha = disabledAlpha),
+                    color = titleTextColor,
                     fontSize = 15.5.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -195,7 +203,7 @@ internal fun SheetActionRow(
             val arrowTint = Color(palette.subText).copy(alpha = if (enabled) .75f else .35f)
             if (isDropdown) {
                 DropdownArrowEndAction(arrowTint)
-            } else {
+            } else if (!destructive) {
                 Image(
                     imageVector = MiuixIcons.Basic.ArrowRight,
                     contentDescription = null,
@@ -207,12 +215,14 @@ internal fun SheetActionRow(
         return
     }
     val foreground = sheetForeground()
+    val resolvedTitleColor = if (destructive) errorColor else foreground
+    val resolvedIconColor = if (destructive) errorColor else foreground
     BasicComponent(
         title = title,
         summary = summary,
-        titleColor = BasicComponentColors(foreground, foreground.copy(alpha = .35f)),
+        titleColor = BasicComponentColors(resolvedTitleColor, resolvedTitleColor.copy(alpha = .35f)),
         summaryColor = BasicComponentColors(foreground.copy(alpha = .68f), foreground.copy(alpha = .3f)),
-        startAction = { Image(icon, null, Modifier.padding(end = 14.dp).size(24.dp), colorFilter = ColorFilter.tint(foreground)) },
+        startAction = { Image(icon, null, Modifier.padding(end = 14.dp).size(24.dp), colorFilter = ColorFilter.tint(resolvedIconColor)) },
         endActions = {
             if (isDropdown) DropdownArrowEndAction(foreground.copy(alpha = .7f))
         },

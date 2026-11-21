@@ -188,21 +188,49 @@ class NeteaseApi(
         }
     }
 
-    /** Public, non-personalized desktop discovery banners (the red-tab NetEase home carousel). */
+    /** Public discovery banners shown on the NetEase home carousel. */
     suspend fun publicBanners(): List<CloudHomeItem> = withContext(Dispatchers.IO) {
-        val response = requestBlocking("banner/get", authenticated = false)
+        val response = try {
+            requestBlocking("banner", mapOf("type" to "0"), authenticated = false)
+        } catch (e: CloudApiException) {
+            if (e.status == 404) requestBlocking("banner/get", authenticated = false) else throw e
+        }
         val banners = response.optJSONArray("banners") ?: JSONArray()
         List(banners.length()) { index ->
             val item = banners.getJSONObject(index)
-            val actionType = when (item.optInt("targetType")) { 10 -> "playlist"; 1 -> "song"; 100 -> "album"; else -> "" }
+            val targetId = item.optLong("targetId", 0L)
+            val songObj = item.optJSONObject("song")
+            val actionType = when (item.optInt("targetType")) {
+                1000 -> "playlist"
+                1 -> "song"
+                10 -> "album"
+                100 -> "artist"
+                3000 -> "url"
+                else -> ""
+            }
+            val actionId = when {
+                targetId > 0L -> targetId
+                actionType == "song" -> songObj?.optLong("id", 0L) ?: 0L
+                else -> 0L
+            }
+            val ui = item.optJSONObject("uiElement")
+            val mainTitle = item.optJSONObject("mainTitle")?.optString("title").orEmpty()
+                .ifBlank { item.optString("mainTitle") }
+                .ifBlank { ui?.optJSONObject("mainTitle")?.optString("title").orEmpty() }
+                .ifBlank { songObj?.optString("name").orEmpty() }
+            val typeTitle = item.optString("typeTitle")
+            val artwork = item.optString("pic")
+                .ifBlank { item.optString("imageUrl") }
+                .replaceFirst("http://", "https://")
             CloudHomeItem(
-                id = item.optLong("targetId", index.toLong()),
-                title = item.optString("typeTitle", "网易云音乐"),
+                id = targetId.takeIf { it > 0L } ?: index.toLong(),
+                title = mainTitle.ifBlank { typeTitle }.ifBlank { "网易云音乐" },
                 subtitle = item.optString("url"),
-                artwork = item.optString("pic").replaceFirst("http://", "https://"),
+                artwork = artwork,
                 kind = "banner",
+                section = typeTitle,
                 actionType = actionType,
-                actionId = item.optLong("targetId", index.toLong()),
+                actionId = actionId,
             )
         }.filter { it.artwork.isNotBlank() }
     }

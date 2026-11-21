@@ -1,5 +1,6 @@
 package btm.m.auraplayer.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -39,6 +40,7 @@ import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.size.Precision
+import kotlinx.coroutines.launch
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.basic.*
@@ -185,6 +187,20 @@ internal fun formatAlbumReleaseSummary(dateLabel: String?, durationLabel: String
         .takeIf { it.isNotEmpty() }
         ?.joinToString(", ")
 
+internal fun formatAlbumReleaseRecordLabel(
+    appleMusicEnabled: Boolean,
+    appleMusicRecordLabel: String?,
+    fallbackCompany: String?,
+    recordLabelPrefix: String = tr("record_label", "发行公司"),
+): String? {
+    if (appleMusicEnabled) {
+        val am = appleMusicRecordLabel?.trim()?.takeIf(String::isNotEmpty)
+        if (am != null) return am
+    }
+    val fallback = fallbackCompany?.trim()?.takeIf(String::isNotEmpty) ?: return null
+    return "$recordLabelPrefix: $fallback"
+}
+
 internal fun representativeAlbumMotionSong(
     collection: MusicCollection,
     tracks: List<Song>,
@@ -307,6 +323,55 @@ internal fun rememberCatalogArtistMedia(
 }
 
 @Composable
+internal fun rememberCatalogAlbumRecordLabel(
+    collection: MusicCollection?,
+    tracks: List<Song>,
+    catalogArtist: String?,
+    cloudLoading: Boolean,
+    enabled: Boolean,
+): String? {
+    val context = LocalContext.current
+    val isArtist = collection?.isArtist() == true
+    val albumTitle = remember(collection?.key, collection?.title, tracks) {
+        collection?.title?.trim()?.takeIf(String::isNotEmpty)
+            ?: tracks.firstOrNull()?.album?.trim().orEmpty()
+    }
+    val albumArtist = remember(collection?.key, collection?.subtitle, catalogArtist, tracks) {
+        if (collection == null) "" else resolveAlbumArtist(catalogArtist, collection.subtitle, tracks)
+    }
+    var label by remember(collection?.key, albumTitle, albumArtist, enabled) {
+        mutableStateOf(
+            if (enabled && collection != null && !isArtist && albumTitle.isNotBlank() && albumArtist.isNotBlank()) {
+                AppleMusicAlbumLabelManager.peekCachedRecordLabel(context, albumTitle, albumArtist)
+            } else {
+                null
+            },
+        )
+    }
+    LaunchedEffect(collection?.key, albumTitle, albumArtist, tracks.size, cloudLoading, enabled) {
+        if (!enabled || collection == null || isArtist || albumTitle.isBlank() || albumArtist.isBlank()) {
+            label = null
+            return@LaunchedEffect
+        }
+        val cached = AppleMusicAlbumLabelManager.peekCachedRecordLabel(context, albumTitle, albumArtist)
+        if (cached != null) {
+            label = cached
+            return@LaunchedEffect
+        }
+        if (cloudLoading && tracks.isEmpty()) {
+            return@LaunchedEffect
+        }
+        label = AppleMusicAlbumLabelManager.resolveAlbumRecordLabel(
+            context = context,
+            albumTitle = albumTitle,
+            artistName = albumArtist,
+            tracks = tracks,
+        )
+    }
+    return if (enabled && !isArtist) label else null
+}
+
+@Composable
 internal fun CatalogBackground(
     collection: MusicCollection?,
     modifier: Modifier = Modifier,
@@ -327,8 +392,16 @@ internal fun CatalogBackground(
 @Composable
 internal fun AlbumInfoBackground(collection: MusicCollection, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val colorStyle = LocalAuraColorStyle.current
     val palette = rememberPlayerMonetPalette(collection.artwork)
-    val base = Color(palette.a2.tone(14))
+    val base = if (colorStyle.isOklab) {
+        val seed = btm.m.auraplayer.ui.player.rememberPlayerArtworkColorSeed(collection.artwork, useOklab = true)
+        remember(seed, colorStyle.palette) {
+            OklabThemeEngine.generatePlayerAmbient(seed, isDark = true, paletteIndex = colorStyle.palette).surface
+        }
+    } else {
+        Color(palette.a2.tone(14))
+    }
     if (!LocalAdvancedMaterialEnabled.current) {
         Box(modifier.background(base))
         return
@@ -370,6 +443,7 @@ internal fun CatalogDetailPage(
     motionVideoPath: String? = null,
     artistLogoUrl: String? = null,
     artistMotionVideoPath: String? = null,
+    appleMusicRecordLabel: String? = null,
 ) {
     val artist = collection.isArtist()
     val immersiveAlbum = shouldShowImmersiveAlbumHero(artist, nowPlayingConfig.albumAnimatedCover, motionVideoPath)
@@ -728,10 +802,15 @@ internal fun CatalogDetailPage(
                 else -> tracks.firstOrNull()?.year?.takeIf { it > 0 }?.toString()
             }
             val summaryText = formatAlbumReleaseSummary(dateLabel, formatAlbumTotalDuration(tracks))
-            if (summaryText != null || !info?.company.isNullOrBlank()) {
+            val recordLabelText = formatAlbumReleaseRecordLabel(
+                appleMusicEnabled = nowPlayingConfig.appleMusicAlbumRecordLabel,
+                appleMusicRecordLabel = appleMusicRecordLabel,
+                fallbackCompany = info?.company,
+            )
+            if (summaryText != null || recordLabelText != null) {
                 Column(Modifier.padding(horizontal = margin, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     summaryText?.let { Text(it, color = muted, fontSize = 13.sp) }
-                    info?.company?.takeIf { it.isNotBlank() }?.let { Text(tr("record_label", "发行公司") + ": $it", color = muted, fontSize = 13.sp) }
+                    recordLabelText?.let { Text(it, color = muted, fontSize = 13.sp) }
                 }
             }
         }
@@ -867,39 +946,125 @@ private fun CatalogArtworkDownloadDialog(
     summary: String,
     artworkUrl: String,
     fileBaseName: String,
-    downloadTitle: String,
-    downloadDescription: String,
+    motionVideoPath: String? = null,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var saving by remember { mutableStateOf(false) }
+    val videoPath = motionVideoPath?.takeIf { it.isNotBlank() }
+    val savedMsg = tr("saved_to_gallery", "已保存到相册")
+    val saveFailedMsg = tr("save_failed", "保存失败，请重试")
+
+    fun runSave(action: suspend () -> Boolean) {
+        if (saving) return
+        saving = true
+        scope.launch {
+            val ok = runCatching { action() }.getOrDefault(false)
+            saving = false
+            onDismiss()
+            Toast.makeText(context, if (ok) savedMsg else saveFailedMsg, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     WindowDialog(
         visible,
         title = title,
         titleTextAlign = androidx.compose.ui.text.style.TextAlign.Start,
         summary = summary,
         summaryTextAlign = androidx.compose.ui.text.style.TextAlign.Start,
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!saving) onDismiss() },
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("cancel", "取消")) }
-            GlassDialogButton({
-                onDismiss()
-                if (artworkUrl.startsWith("http://") || artworkUrl.startsWith("https://")) {
-                    runCatching {
-                        val request = android.app.DownloadManager.Request(android.net.Uri.parse(artworkUrl))
-                            .setTitle(downloadTitle).setDescription(downloadDescription)
-                            .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                            .setDestinationInExternalFilesDir(context, android.os.Environment.DIRECTORY_PICTURES, "Aura Player/$fileBaseName.jpg")
-                        context.getSystemService(android.app.DownloadManager::class.java).enqueue(request)
-                    }
+        if (videoPath != null) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(
+                    onClick = {
+                        runSave {
+                            MotionPhotoExporter.saveMotionPhoto(
+                                context = context,
+                                artworkSource = artworkUrl,
+                                motionVideoPath = videoPath,
+                                baseName = fileBaseName,
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !saving,
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) {
+                    Text(tr("save_motion_photo", "动态图片"))
                 }
-            }, Modifier.weight(1f), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("download", "下载")) }
+                GlassDialogButton(
+                    onClick = {
+                        runSave {
+                            MotionPhotoExporter.saveVideo(
+                                context = context,
+                                motionVideoPath = videoPath,
+                                baseName = fileBaseName,
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !saving,
+                ) {
+                    Text(tr("save_video", "视频"))
+                }
+                GlassDialogButton(
+                    onClick = {
+                        runSave {
+                            MotionPhotoExporter.saveStaticImage(
+                                context = context,
+                                artworkSource = artworkUrl,
+                                motionVideoPath = videoPath,
+                                baseName = fileBaseName,
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !saving,
+                ) {
+                    Text(tr("save_static_image", "静态图片"))
+                }
+                GlassDialogButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !saving,
+                ) {
+                    Text(tr("cancel", "取消"))
+                }
+            }
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                GlassDialogButton(onDismiss, Modifier.weight(1f), enabled = !saving) { Text(tr("cancel", "取消")) }
+                GlassDialogButton(
+                    onClick = {
+                        runSave {
+                            MotionPhotoExporter.saveStaticImage(
+                                context = context,
+                                artworkSource = artworkUrl,
+                                motionVideoPath = null,
+                                baseName = fileBaseName,
+                            )
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = !saving,
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) { Text(tr("download", "下载")) }
+            }
         }
     }
 }
 
 @Composable
-internal fun AlbumInfoPage(model: AuraViewModel, padding: PaddingValues, collection: MusicCollection, cloud: CloudPlaylistContent?) {
+internal fun AlbumInfoPage(
+    model: AuraViewModel,
+    padding: PaddingValues,
+    collection: MusicCollection,
+    cloud: CloudPlaylistContent?,
+    appleMusicRecordLabel: String? = null,
+    motionVideoPath: String? = null,
+) {
     val tracks = cloud?.songs ?: collection.songs
     val info = cloud?.catalog
     val foreground = Color.White
@@ -925,7 +1090,9 @@ internal fun AlbumInfoPage(model: AuraViewModel, padding: PaddingValues, collect
                 info?.published?.takeIf { it > 0 }?.let {
                     CatalogInfoMetadataField(label = tr("release_time", "发行时间"), value = dateText(it))
                 }
-                info?.company?.takeIf { it.isNotBlank() }?.let {
+                val displayRecordLabel = appleMusicRecordLabel?.trim()?.takeIf(String::isNotEmpty)
+                    ?: info?.company?.trim()?.takeIf(String::isNotEmpty)
+                displayRecordLabel?.let {
                     CatalogInfoMetadataField(
                         label = tr("record_label", "发行公司"),
                         value = it,
@@ -946,14 +1113,18 @@ internal fun AlbumInfoPage(model: AuraViewModel, padding: PaddingValues, collect
         summary = "$title · $artist",
         artworkUrl = collection.artwork,
         fileBaseName = sanitizeArtworkFileName(title, "album"),
-        downloadTitle = title,
-        downloadDescription = artist,
+        motionVideoPath = motionVideoPath,
         onDismiss = { confirmDownload = false },
     )
 }
 
 @Composable
-internal fun ArtistInfoPage(padding: PaddingValues, collection: MusicCollection, cloud: CloudPlaylistContent?) {
+internal fun ArtistInfoPage(
+    padding: PaddingValues,
+    collection: MusicCollection,
+    cloud: CloudPlaylistContent?,
+    motionVideoPath: String? = null,
+) {
     val tracks = cloud?.songs ?: collection.songs
     val info = cloud?.catalog
     val foreground = Color.White
@@ -971,7 +1142,9 @@ internal fun ArtistInfoPage(padding: PaddingValues, collection: MusicCollection,
     val (songCount, albumCount) = remember(info, cloud, tracks) {
         resolveArtistCounts(info, cloud, tracks)
     }
-    val canDownloadArtwork = collection.artwork.startsWith("http://") || collection.artwork.startsWith("https://")
+    val canDownloadArtwork = collection.artwork.startsWith("http://") ||
+        collection.artwork.startsWith("https://") ||
+        !motionVideoPath.isNullOrBlank()
     val description = info?.description?.trim().orEmpty()
     LazyColumn(pageContentModifier(), contentPadding = PaddingValues(bottom = padding.calculateBottomPadding(), start = 28.dp, end = 28.dp)) {
         item {
@@ -1029,8 +1202,7 @@ internal fun ArtistInfoPage(padding: PaddingValues, collection: MusicCollection,
         summary = if (subtitle != roleLabel) "$title · $subtitle" else title,
         artworkUrl = collection.artwork,
         fileBaseName = sanitizeArtworkFileName(title, "artist"),
-        downloadTitle = title,
-        downloadDescription = subtitle,
+        motionVideoPath = motionVideoPath,
         onDismiss = { confirmDownload = false },
     )
 }

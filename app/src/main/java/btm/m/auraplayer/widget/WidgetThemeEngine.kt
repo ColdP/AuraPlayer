@@ -12,9 +12,12 @@ import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.drawable.Drawable
+import androidx.compose.ui.graphics.toArgb
 import btm.m.auraplayer.playback.MaterialPlayerBackground
 import btm.m.auraplayer.playback.NowPlayingConfig
 import btm.m.auraplayer.playback.PlayerTheme
+import btm.m.auraplayer.ui.OklabThemeEngine
+import btm.m.auraplayer.ui.toOneUiMonetTones
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.hct.Hct
 import com.materialkolor.palettes.CorePalette
@@ -70,47 +73,83 @@ internal object WidgetThemeEngine {
             .firstOrNull() ?: DEFAULT_WIDGET_SEED
     }
 
+    fun extractOklabSeed(bitmap: Bitmap?): Int =
+        OklabThemeEngine.extractOklabSeed(bitmap, DEFAULT_WIDGET_SEED)
+
     fun resolveThemeColors(
         config: NowPlayingConfig,
         appDark: Boolean,
         seedArgb: Int,
         isPlaying: Boolean,
+        useOklab: Boolean = false,
+        paletteIndex: Int = 0,
     ): WidgetThemeColors {
         val palette = CorePalette.of(seedArgb)
+        val effectiveDark = config.resolveDarkTheme(appDark)
+        val oklabScheme = if (useOklab) OklabThemeEngine.generateScheme(seedArgb, effectiveDark, paletteIndex) else null
+        val oklabAmbient = if (useOklab) OklabThemeEngine.generatePlayerAmbient(seedArgb, effectiveDark, paletteIndex) else null
         return when (config.theme) {
             PlayerTheme.MATERIAL -> {
-                val isDarkScheme = appDark || config.materialBackground != MaterialPlayerBackground.MATERIAL
-                val scheme = SchemeExpressive(Hct.fromInt(seedArgb), isDarkScheme, 0.0, ColorSpec.SpecVersion.SPEC_2025)
-                val title = scheme.onSurface
-                val artist = lerpColor(scheme.onSurfaceVariant, scheme.primary, if (isDarkScheme) 0.40f else 0.32f)
-                val muted = lerpColor(scheme.onSurfaceVariant, scheme.primary, 0.24f)
-                val playBg = if (isPlaying) scheme.primary else scheme.primaryContainer
-                val playIcon = if (isPlaying) scheme.onPrimary else scheme.onPrimaryContainer
-                val queueBg = if (config.materialBackground == MaterialPlayerBackground.MATERIAL) {
-                    scheme.surfaceContainerHigh
+                if (oklabScheme != null) {
+                    val title = oklabScheme.onSurface.toArgb()
+                    val artist = lerpColor(oklabScheme.onSurfaceVariant.toArgb(), oklabScheme.primary.toArgb(), if (effectiveDark) 0.40f else 0.32f)
+                    val muted = lerpColor(oklabScheme.onSurfaceVariant.toArgb(), oklabScheme.primary.toArgb(), 0.24f)
+                    val playBg = if (isPlaying) oklabScheme.primary.toArgb() else oklabScheme.primaryContainer.toArgb()
+                    val playIcon = if (isPlaying) oklabScheme.onPrimary.toArgb() else oklabScheme.onPrimaryContainer.toArgb()
+                    val queueBg = if (config.materialBackground == MaterialPlayerBackground.MATERIAL) {
+                        oklabScheme.surfaceContainerHigh.toArgb()
+                    } else {
+                        withAlpha(oklabScheme.surfaceContainerHigh.toArgb(), 0.84f)
+                    }
+                    WidgetThemeColors(
+                        titleColor = title,
+                        artistColor = artist,
+                        mutedColor = muted,
+                        usesButtonContainers = true,
+                        playBgColor = playBg,
+                        playIconColor = playIcon,
+                        playUsesSquircleWhenPaused = !isPlaying,
+                        secondaryBgColor = oklabScheme.secondaryContainer.toArgb(),
+                        secondaryIconColor = oklabScheme.onSecondaryContainer.toArgb(),
+                        queueCardBgColor = queueBg,
+                        placeholderBgColor = oklabScheme.surfaceContainerHighest.toArgb(),
+                        placeholderIconColor = oklabScheme.onSurfaceVariant.toArgb(),
+                        coverCornerDp = 12f,
+                        isDarkSurface = effectiveDark,
+                    )
                 } else {
-                    withAlpha(scheme.surfaceContainerHigh, 0.84f)
+                    val scheme = SchemeExpressive(Hct.fromInt(seedArgb), effectiveDark, 0.0, ColorSpec.SpecVersion.SPEC_2025)
+                    val title = scheme.onSurface
+                    val artist = lerpColor(scheme.onSurfaceVariant, scheme.primary, if (effectiveDark) 0.40f else 0.32f)
+                    val muted = lerpColor(scheme.onSurfaceVariant, scheme.primary, 0.24f)
+                    val playBg = if (isPlaying) scheme.primary else scheme.primaryContainer
+                    val playIcon = if (isPlaying) scheme.onPrimary else scheme.onPrimaryContainer
+                    val queueBg = if (config.materialBackground == MaterialPlayerBackground.MATERIAL) {
+                        scheme.surfaceContainerHigh
+                    } else {
+                        withAlpha(scheme.surfaceContainerHigh, 0.84f)
+                    }
+                    WidgetThemeColors(
+                        titleColor = title,
+                        artistColor = artist,
+                        mutedColor = muted,
+                        usesButtonContainers = true,
+                        playBgColor = playBg,
+                        playIconColor = playIcon,
+                        playUsesSquircleWhenPaused = !isPlaying,
+                        secondaryBgColor = scheme.secondaryContainer,
+                        secondaryIconColor = scheme.onSecondaryContainer,
+                        queueCardBgColor = queueBg,
+                        placeholderBgColor = scheme.surfaceContainerHighest,
+                        placeholderIconColor = scheme.onSurfaceVariant,
+                        coverCornerDp = 12f,
+                        isDarkSurface = effectiveDark,
+                    )
                 }
-                WidgetThemeColors(
-                    titleColor = title,
-                    artistColor = artist,
-                    mutedColor = muted,
-                    usesButtonContainers = true,
-                    playBgColor = playBg,
-                    playIconColor = playIcon,
-                    playUsesSquircleWhenPaused = !isPlaying,
-                    secondaryBgColor = scheme.secondaryContainer,
-                    secondaryIconColor = scheme.onSecondaryContainer,
-                    queueCardBgColor = queueBg,
-                    placeholderBgColor = scheme.surfaceContainerHighest,
-                    placeholderIconColor = scheme.onSurfaceVariant,
-                    coverCornerDp = 12f,
-                    isDarkSurface = isDarkScheme,
-                )
             }
 
             PlayerTheme.ONE -> {
-                val monet = MonetTones.fromSeed(seedArgb, appDark)
+                val monet = oklabScheme?.toOneUiMonetTones() ?: MonetTones.fromSeed(seedArgb, effectiveDark)
                 WidgetThemeColors(
                     titleColor = monet.text,
                     artistColor = monet.subText,
@@ -125,27 +164,33 @@ internal object WidgetThemeEngine {
                     placeholderBgColor = monet.cardAlt,
                     placeholderIconColor = monet.subText,
                     coverCornerDp = 12f,
-                    isDarkSurface = appDark,
+                    isDarkSurface = effectiveDark,
                 )
             }
 
             PlayerTheme.FULLSCREEN -> {
+                val fg = oklabAmbient?.activeInk?.toArgb()
+                    ?: if (effectiveDark) COLOR_WHITE else palette.n1.tone(10)
+                val sub = oklabAmbient?.secondaryInk?.toArgb()
+                    ?: if (effectiveDark) withAlpha(COLOR_WHITE, 0.82f) else withAlpha(fg, 0.78f)
+                val muted = if (effectiveDark) withAlpha(fg, 0.68f) else withAlpha(fg, 0.64f)
                 val cardAlpha = if (config.fullscreenGlass) 0.24f else 0.16f
+                val cardBase = if (effectiveDark) COLOR_BLACK else COLOR_WHITE
                 WidgetThemeColors(
-                    titleColor = COLOR_WHITE,
-                    artistColor = withAlpha(COLOR_WHITE, 0.82f),
-                    mutedColor = withAlpha(COLOR_WHITE, 0.68f),
+                    titleColor = fg,
+                    artistColor = sub,
+                    mutedColor = muted,
                     usesButtonContainers = false,
                     playBgColor = 0,
-                    playIconColor = COLOR_WHITE,
+                    playIconColor = fg,
                     playUsesSquircleWhenPaused = false,
                     secondaryBgColor = 0,
-                    secondaryIconColor = COLOR_WHITE,
-                    queueCardBgColor = withAlpha(COLOR_BLACK, cardAlpha + 0.14f),
-                    placeholderBgColor = palette.a2.tone(24),
-                    placeholderIconColor = withAlpha(COLOR_WHITE, 0.72f),
+                    secondaryIconColor = fg,
+                    queueCardBgColor = withAlpha(cardBase, cardAlpha + 0.14f),
+                    placeholderBgColor = oklabAmbient?.surface?.toArgb() ?: palette.a2.tone(if (effectiveDark) 24 else 88),
+                    placeholderIconColor = withAlpha(fg, 0.72f),
                     coverCornerDp = 12f,
-                    isDarkSurface = true,
+                    isDarkSurface = effectiveDark,
                 )
             }
 
@@ -154,21 +199,26 @@ internal object WidgetThemeEngine {
             PlayerTheme.BLUR,
             PlayerTheme.COLOR,
             -> {
+                val fg = oklabAmbient?.activeInk?.toArgb()
+                    ?: if (effectiveDark) COLOR_WHITE else palette.n1.tone(10)
+                val sub = oklabAmbient?.secondaryInk?.toArgb()
+                    ?: if (effectiveDark) withAlpha(COLOR_WHITE, 0.78f) else withAlpha(fg, 0.76f)
+                val muted = if (effectiveDark) withAlpha(fg, 0.64f) else withAlpha(fg, 0.62f)
                 WidgetThemeColors(
-                    titleColor = COLOR_WHITE,
-                    artistColor = withAlpha(COLOR_WHITE, 0.78f),
-                    mutedColor = withAlpha(COLOR_WHITE, 0.64f),
+                    titleColor = fg,
+                    artistColor = sub,
+                    mutedColor = muted,
                     usesButtonContainers = false,
                     playBgColor = 0,
-                    playIconColor = COLOR_WHITE,
+                    playIconColor = fg,
                     playUsesSquircleWhenPaused = false,
                     secondaryBgColor = 0,
-                    secondaryIconColor = COLOR_WHITE,
-                    queueCardBgColor = withAlpha(COLOR_WHITE, 0.13f),
-                    placeholderBgColor = palette.a2.tone(24),
-                    placeholderIconColor = withAlpha(COLOR_WHITE, 0.72f),
+                    secondaryIconColor = fg,
+                    queueCardBgColor = withAlpha(fg, if (effectiveDark) 0.13f else 0.08f),
+                    placeholderBgColor = oklabAmbient?.surface?.toArgb() ?: palette.a2.tone(if (effectiveDark) 24 else 88),
+                    placeholderIconColor = withAlpha(fg, 0.72f),
                     coverCornerDp = 12f,
-                    isDarkSurface = true,
+                    isDarkSurface = effectiveDark,
                 )
             }
         }
@@ -182,6 +232,8 @@ internal object WidgetThemeEngine {
         advancedMaterial: Boolean,
         appDark: Boolean,
         seedArgb: Int,
+        useOklab: Boolean = false,
+        paletteIndex: Int = 0,
     ): Bitmap {
         val w = widthPx.coerceAtLeast(32)
         val h = heightPx.coerceAtLeast(32)
@@ -191,54 +243,73 @@ internal object WidgetThemeEngine {
 
         val isMaterial = config.theme == PlayerTheme.MATERIAL
         val isOne = config.theme == PlayerTheme.ONE
-        val isDarkMaterial = appDark || config.materialBackground != MaterialPlayerBackground.MATERIAL
-        val expressive = if (isMaterial) {
-            SchemeExpressive(Hct.fromInt(seedArgb), isDarkMaterial, 0.0, ColorSpec.SpecVersion.SPEC_2025)
+        val effectiveDark = config.resolveDarkTheme(appDark)
+        val oklabScheme = if (useOklab) OklabThemeEngine.generateScheme(seedArgb, effectiveDark, paletteIndex) else null
+        val oklabAmbient = if (useOklab) OklabThemeEngine.generatePlayerAmbient(seedArgb, effectiveDark, paletteIndex) else null
+        val expressive = if (isMaterial && oklabScheme == null) {
+            SchemeExpressive(Hct.fromInt(seedArgb), effectiveDark, 0.0, ColorSpec.SpecVersion.SPEC_2025)
         } else {
             null
         }
-        val oneUi = if (isOne) MonetTones.fromSeed(seedArgb, appDark) else null
+        val expressiveSurface = oklabScheme?.surface?.toArgb() ?: expressive?.surface
+        val expressivePrimaryCont = oklabScheme?.primaryContainer?.toArgb() ?: expressive?.primaryContainer
+        val expressiveSecondaryCont = oklabScheme?.secondaryContainer?.toArgb() ?: expressive?.secondaryContainer
+        val expressiveTertiaryCont = oklabScheme?.tertiaryContainer?.toArgb() ?: expressive?.tertiaryContainer
+        val oneUi = if (isOne) (oklabScheme?.toOneUiMonetTones() ?: MonetTones.fromSeed(seedArgb, effectiveDark)) else null
 
         val baseColor = when {
-            isMaterial && config.materialBackground == MaterialPlayerBackground.MATERIAL && expressive != null -> expressive.surface
+            isMaterial && config.materialBackground == MaterialPlayerBackground.MATERIAL && expressiveSurface != null -> expressiveSurface
             isOne && oneUi != null -> oneUi.background
-            else -> palette.a2.tone(14)
+            oklabAmbient != null -> oklabAmbient.surface.toArgb()
+            else -> palette.a2.tone(if (effectiveDark) 14 else 93)
         }
         canvas.drawColor(baseColor)
 
         if (!advancedMaterial) {
-            if (isMaterial && config.materialBackground != MaterialPlayerBackground.MATERIAL && expressive != null) {
+            if (isMaterial && config.materialBackground != MaterialPlayerBackground.MATERIAL && expressiveSurface != null) {
                 val mix = (config.materialColorMix / 100f).coerceIn(0f, 1f)
                 if (mix > 0.001f) {
-                    canvas.drawColor(withAlpha(expressive.surface, mix * 0.94f))
+                    canvas.drawColor(withAlpha(expressiveSurface, mix * 0.94f))
                 }
             }
             return out
         }
 
-        if (isMaterial && config.materialBackground == MaterialPlayerBackground.MATERIAL && expressive != null) {
+        if (isMaterial && config.materialBackground == MaterialPlayerBackground.MATERIAL && expressiveSurface != null) {
             val mix = (config.materialColorMix / 100f).coerceIn(0f, 1f)
             val washStrength = 1f - mix * 0.92f
             if (washStrength > 0.005f) {
-                val primaryAlpha = (if (isDarkMaterial) 0.36f else 0.48f) * washStrength
-                val tertiaryAlpha = (if (isDarkMaterial) 0.30f else 0.42f) * washStrength
-                val secondaryAlpha = (if (isDarkMaterial) 0.25f else 0.34f) * washStrength
-                drawRadialOrb(canvas, w * 0.22f, h * 0.18f, max(w, h) * 0.90f, withAlpha(expressive.primaryContainer, primaryAlpha))
-                drawRadialOrb(canvas, w * 0.78f, h * 0.78f, max(w, h) * 0.88f, withAlpha(expressive.tertiaryContainer, tertiaryAlpha))
-                drawRadialOrb(canvas, w * 0.72f, h * 0.36f, max(w, h) * 0.68f, withAlpha(expressive.secondaryContainer, secondaryAlpha))
+                val primaryAlpha = (if (effectiveDark) 0.36f else 0.48f) * washStrength
+                val tertiaryAlpha = (if (effectiveDark) 0.30f else 0.42f) * washStrength
+                val secondaryAlpha = (if (effectiveDark) 0.25f else 0.34f) * washStrength
+                expressivePrimaryCont?.let { drawRadialOrb(canvas, w * 0.22f, h * 0.18f, max(w, h) * 0.90f, withAlpha(it, primaryAlpha)) }
+                expressiveTertiaryCont?.let { drawRadialOrb(canvas, w * 0.78f, h * 0.78f, max(w, h) * 0.88f, withAlpha(it, tertiaryAlpha)) }
+                expressiveSecondaryCont?.let { drawRadialOrb(canvas, w * 0.72f, h * 0.36f, max(w, h) * 0.68f, withAlpha(it, secondaryAlpha)) }
             }
         }
 
         if (isOne && oneUi != null) {
-            drawRadialOrb(canvas, w * 0.50f, h * 0.22f, max(w, h) * 0.90f, withAlpha(oneUi.accent, if (appDark) 0.18f else 0.12f))
-            drawRadialOrb(canvas, w * 0.52f, h * 0.84f, max(w, h) * 0.85f, withAlpha(oneUi.chip, if (appDark) 0.22f else 0.16f))
+            drawRadialOrb(canvas, w * 0.50f, h * 0.22f, max(w, h) * 0.90f, withAlpha(oneUi.accent, if (effectiveDark) 0.18f else 0.12f))
+            drawRadialOrb(canvas, w * 0.52f, h * 0.84f, max(w, h) * 0.85f, withAlpha(oneUi.chip, if (effectiveDark) 0.22f else 0.16f))
         }
 
         val showAurora = config.theme == PlayerTheme.AURORA ||
             config.theme == PlayerTheme.AURORA_BLUR ||
             (isMaterial && (config.materialBackground == MaterialPlayerBackground.AURORA || config.materialBackground == MaterialPlayerBackground.AURORA_BLUR))
         if (showAurora) {
-            drawAuroraBackground(canvas, w, h, palette)
+            if (oklabAmbient != null) {
+                canvas.drawColor(oklabAmbient.base.toArgb())
+                drawRadialOrb(canvas, w * 0.24f, h * 0.24f, w * 0.85f, withAlpha(oklabAmbient.orbPrimary.toArgb(), 0.72f))
+                drawRadialOrb(canvas, w * 0.78f, h * 0.50f, w * 0.85f, withAlpha(oklabAmbient.orbSecondary.toArgb(), 0.72f))
+                drawRadialOrb(canvas, w * 0.38f, h * 0.84f, w * 0.85f, withAlpha(oklabAmbient.orbTertiary.toArgb(), 0.72f))
+            } else if (!effectiveDark) {
+                canvas.drawColor(palette.n1.tone(96))
+                drawRadialOrb(canvas, w * 0.24f, h * 0.24f, w * 0.85f, withAlpha(palette.a1.tone(84), 0.76f))
+                drawRadialOrb(canvas, w * 0.78f, h * 0.50f, w * 0.85f, withAlpha(palette.a2.tone(86), 0.76f))
+                drawRadialOrb(canvas, w * 0.38f, h * 0.84f, w * 0.85f, withAlpha(palette.a3.tone(84), 0.76f))
+            } else {
+                drawAuroraBackground(canvas, w, h, palette)
+            }
         }
 
         val showArtwork = config.theme == PlayerTheme.AURORA_BLUR ||
@@ -261,13 +332,14 @@ internal object WidgetThemeEngine {
             }
             val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
             if (flowing) {
-                paint.alpha = (0.40f * 255f).roundToInt()
+                paint.alpha = ((if (effectiveDark) 0.40f else 0.30f) * 255f).roundToInt()
             }
             canvas.drawBitmap(scaledArt, 0f, 0f, paint)
             scaledArt.recycle()
 
             val mix = (config.materialColorMix / 100f).coerceIn(0f, 1f)
             val scrimScale = if (isMaterial) 1f - mix * 0.6f else 1f
+            val veilBase = if (effectiveDark) COLOR_BLACK else (expressiveSurface ?: oklabAmbient?.base?.toArgb() ?: palette.n1.tone(96))
             if (fullscreen) {
                 val gradientPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     shader = LinearGradient(
@@ -275,19 +347,31 @@ internal object WidgetThemeEngine {
                         0f,
                         0f,
                         h.toFloat(),
-                        intArrayOf(
-                            withAlpha(COLOR_BLACK, 0.22f),
-                            withAlpha(COLOR_BLACK, 0.34f),
-                            withAlpha(COLOR_BLACK, 0.56f),
-                        ),
+                        if (effectiveDark) {
+                            intArrayOf(
+                                withAlpha(COLOR_BLACK, 0.22f),
+                                withAlpha(COLOR_BLACK, 0.34f),
+                                withAlpha(COLOR_BLACK, 0.56f),
+                            )
+                        } else {
+                            intArrayOf(
+                                withAlpha(veilBase, 0.24f),
+                                withAlpha(veilBase, 0.42f),
+                                withAlpha(veilBase, 0.62f),
+                            )
+                        },
                         floatArrayOf(0f, 0.45f, 1f),
                         Shader.TileMode.CLAMP,
                     )
                 }
                 canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), gradientPaint)
             } else {
-                val scrimAlpha = scrimScale * if (flowing) 0.14f else 0.18f
-                canvas.drawColor(withAlpha(COLOR_BLACK, scrimAlpha))
+                val scrimAlpha = scrimScale * if (effectiveDark) {
+                    if (flowing) 0.14f else 0.18f
+                } else {
+                    if (flowing) 0.52f else 0.62f
+                }
+                canvas.drawColor(withAlpha(veilBase, scrimAlpha))
                 val depthGradient = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     shader = LinearGradient(
                         0f,
@@ -296,7 +380,7 @@ internal object WidgetThemeEngine {
                         h.toFloat(),
                         intArrayOf(
                             0,
-                            withAlpha(COLOR_BLACK, scrimScale * 0.16f),
+                            withAlpha(veilBase, scrimScale * if (effectiveDark) 0.16f else 0.14f),
                         ),
                         floatArrayOf(0.25f, 1f),
                         Shader.TileMode.CLAMP,
@@ -305,13 +389,15 @@ internal object WidgetThemeEngine {
                 canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), depthGradient)
             }
         } else if (config.theme == PlayerTheme.COLOR) {
-            drawRadialOrb(canvas, w * 0.28f, h * 0.24f, max(w, h) * 0.78f, withAlpha(palette.a1.tone(24), 0.32f))
+            val orbTint = oklabAmbient?.orbPrimary?.toArgb()
+                ?: palette.a1.tone(if (effectiveDark) 24 else 86)
+            drawRadialOrb(canvas, w * 0.28f, h * 0.24f, max(w, h) * 0.78f, withAlpha(orbTint, 0.32f))
         }
 
-        if (isMaterial && config.materialBackground != MaterialPlayerBackground.MATERIAL && expressive != null) {
+        if (isMaterial && config.materialBackground != MaterialPlayerBackground.MATERIAL && expressiveSurface != null) {
             val mix = (config.materialColorMix / 100f).coerceIn(0f, 1f)
             if (mix > 0.001f) {
-                canvas.drawColor(withAlpha(expressive.surface, mix * 0.94f))
+                canvas.drawColor(withAlpha(expressiveSurface, mix * 0.94f))
             }
         }
 

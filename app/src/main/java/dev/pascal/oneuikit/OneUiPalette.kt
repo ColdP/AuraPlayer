@@ -24,6 +24,7 @@ class OneUiPalette(
     forceDark: Boolean? = null,
     useMonet: Boolean = true,
     customSeed: Int? = null,
+    overrideTones: MonetTones? = null,
 ) {
     /** 当前色板是否为深色模式。显式指定优先，否则取自系统夜间模式。 */
     val dark: Boolean = forceDark
@@ -74,6 +75,7 @@ class OneUiPalette(
 
     init {
         val monet = when {
+            overrideTones != null -> overrideTones
             !useMonet -> null
             customSeed != null && customSeed != 0 -> MonetTones.fromSeed(customSeed, dark)
             else -> MonetTones.from(context, dark)

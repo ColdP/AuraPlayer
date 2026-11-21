@@ -8,6 +8,7 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 enum class PlayerTheme { AURORA, AURORA_BLUR, BLUR, COLOR, FULLSCREEN, MATERIAL, ONE }
+enum class PlayerColorTheme { FOLLOW_APP, LIGHT, DARK }
 enum class GlowProgressStyle { OFF, HYPER, ONE }
 enum class MaterialPlayerBackground { MATERIAL, BLUR, AURORA, AURORA_BLUR }
 enum class PlayerWeather { NONE, SNOW, RAIN }
@@ -94,6 +95,7 @@ data class NowPlayingConfig(
     val immersiveCover: Boolean = false,
     val appleMusicAnimatedCover: Boolean = false,
     val albumAnimatedCover: Boolean = false,
+    val appleMusicAlbumRecordLabel: Boolean = false,
     val appleMusicArtistArtwork: Boolean = false,
     val artistAnimatedCover: Boolean = false,
     val artistWordmarkLogo: Boolean = true,
@@ -132,6 +134,7 @@ data class NowPlayingConfig(
     val mainLyricScalePercent: Float = LYRIC_SCALE_DEFAULT_PERCENT,
     val bgLyricScalePercent: Float = LYRIC_SCALE_DEFAULT_PERCENT,
     val statusBarHideMode: StatusBarHideMode = StatusBarHideMode.NEVER,
+    val colorThemes: Map<PlayerTheme, PlayerColorTheme> = emptyMap(),
 ) {
     val usesArtworkBackground: Boolean
         get() = theme == PlayerTheme.AURORA_BLUR ||
@@ -145,6 +148,18 @@ data class NowPlayingConfig(
             (theme == PlayerTheme.MATERIAL && (materialBackground == MaterialPlayerBackground.BLUR || materialBackground == MaterialPlayerBackground.AURORA_BLUR))
     // 0 keeps the existing default. Negative values approach clear, positive values add blur.
     val blurRadius get() = if (blur < 0) 48f * (blur.coerceAtLeast(-64) + 64) / 64 else 48f + blur.coerceAtMost(96)
+
+    fun colorThemeFor(target: PlayerTheme = theme): PlayerColorTheme =
+        colorThemes[target] ?: PlayerColorTheme.FOLLOW_APP
+
+    fun withColorTheme(value: PlayerColorTheme, target: PlayerTheme = theme): NowPlayingConfig =
+        copy(colorThemes = colorThemes + (target to value))
+
+    fun resolveDarkTheme(appDark: Boolean, target: PlayerTheme = theme): Boolean = when (colorThemeFor(target)) {
+        PlayerColorTheme.FOLLOW_APP -> appDark
+        PlayerColorTheme.LIGHT -> false
+        PlayerColorTheme.DARK -> true
+    }
 }
 
 /** Dedicated appearance/interaction storage, shared by settings, activity and player. */
@@ -176,7 +191,13 @@ class NowPlayingSettings(context: Context) {
 
 internal object NowPlayingCodec {
     fun encode(c: NowPlayingConfig): String = JSONObject().apply {
-        put("theme", c.theme.name); put("blur", c.blur); put("weather", c.weather.name)
+        put("theme", c.theme.name)
+        if (c.colorThemes.isNotEmpty()) {
+            put("colorThemes", JSONObject().apply {
+                c.colorThemes.forEach { (playerTheme, colorTheme) -> put(playerTheme.name, colorTheme.name) }
+            })
+        }
+        put("blur", c.blur); put("weather", c.weather.name)
         put("coverAnimation", c.coverAnimation.name); put("immersiveCover", c.immersiveCover); put("showVolume", c.showVolume)
         put("openFromNotification", c.openFromNotification); put("keepLyricsAwake", c.keepLyricsAwake)
         put("showAudioInfo", c.showAudioInfo); put("swipeTracks", c.swipeTracks)
@@ -199,6 +220,7 @@ internal object NowPlayingCodec {
         put("spatialCoverViewActive", c.spatialCoverViewActive)
         put("appleMusicAnimatedCover", c.appleMusicAnimatedCover)
         put("albumAnimatedCover", c.albumAnimatedCover)
+        put("appleMusicAlbumRecordLabel", c.appleMusicAlbumRecordLabel)
         put("appleMusicArtistArtwork", c.appleMusicArtistArtwork)
         put("artistAnimatedCover", c.artistAnimatedCover)
         put("artistWordmarkLogo", c.artistWordmarkLogo)
@@ -215,8 +237,19 @@ internal object NowPlayingCodec {
     }.toString()
     fun decode(raw: String): NowPlayingConfig = runCatching {
         val j = JSONObject(raw); val defaults = NowPlayingConfig()
+        val colorThemesObj = j.optJSONObject("colorThemes")
+        val parsedColorThemes = buildMap {
+            if (colorThemesObj != null) {
+                for (playerTheme in PlayerTheme.entries) {
+                    val rawMode = colorThemesObj.optString(playerTheme.name, "")
+                    val parsedMode = PlayerColorTheme.entries.firstOrNull { it.name == rawMode }
+                    if (parsedMode != null) put(playerTheme, parsedMode)
+                }
+            }
+        }
         defaults.copy(
             theme = PlayerTheme.entries.firstOrNull { it.name == j.optString("theme") } ?: defaults.theme,
+            colorThemes = parsedColorThemes,
             blur = j.optInt("blur", 0).coerceIn(-64, 96),
             weather = PlayerWeather.entries.firstOrNull { it.name == j.optString("weather") } ?: defaults.weather,
             coverAnimation = CoverAnimation.entries.firstOrNull { it.name == j.optString("coverAnimation") } ?: defaults.coverAnimation,
@@ -254,6 +287,7 @@ internal object NowPlayingCodec {
             spatialCoverViewActive = j.optBoolean("spatialCoverViewActive", defaults.spatialCoverViewActive),
             appleMusicAnimatedCover = j.optBoolean("appleMusicAnimatedCover", defaults.appleMusicAnimatedCover),
             albumAnimatedCover = j.optBoolean("albumAnimatedCover", defaults.albumAnimatedCover),
+            appleMusicAlbumRecordLabel = j.optBoolean("appleMusicAlbumRecordLabel", defaults.appleMusicAlbumRecordLabel),
             appleMusicArtistArtwork = j.optBoolean("appleMusicArtistArtwork", defaults.appleMusicArtistArtwork),
             artistAnimatedCover = j.optBoolean("artistAnimatedCover", defaults.artistAnimatedCover),
             artistWordmarkLogo = j.optBoolean("artistWordmarkLogo", defaults.artistWordmarkLogo),

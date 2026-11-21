@@ -72,6 +72,51 @@ class CatalogAlbumTrackTest {
         assertEquals("2022年3月9日, 39分钟", formatAlbumReleaseSummary("2022年3月9日", "39分钟"))
         assertEquals("39分钟", formatAlbumReleaseSummary(null, "39分钟"))
         assertNull(formatAlbumReleaseSummary("", null))
+
+        assertEquals(
+            "℗ 2026 Sony Music Label Inc.",
+            formatAlbumReleaseRecordLabel(
+                appleMusicEnabled = true,
+                appleMusicRecordLabel = "℗ 2026 Sony Music Label Inc.",
+                fallbackCompany = "Sony Music",
+                recordLabelPrefix = "发行公司",
+            ),
+        )
+        assertEquals(
+            "A Polydor Records release; ℗ 2026 UNIVERSAL MUSIC LLC",
+            formatAlbumReleaseRecordLabel(
+                appleMusicEnabled = true,
+                appleMusicRecordLabel = "A Polydor Records release; ℗ 2026 UNIVERSAL MUSIC LLC",
+                fallbackCompany = null,
+                recordLabelPrefix = "发行公司",
+            ),
+        )
+        assertEquals(
+            "发行公司: Sony Music",
+            formatAlbumReleaseRecordLabel(
+                appleMusicEnabled = true,
+                appleMusicRecordLabel = null,
+                fallbackCompany = "Sony Music",
+                recordLabelPrefix = "发行公司",
+            ),
+        )
+        assertEquals(
+            "发行公司: Sony Music",
+            formatAlbumReleaseRecordLabel(
+                appleMusicEnabled = false,
+                appleMusicRecordLabel = "℗ 2026 Sony Music Label Inc.",
+                fallbackCompany = "Sony Music",
+                recordLabelPrefix = "发行公司",
+            ),
+        )
+        assertNull(
+            formatAlbumReleaseRecordLabel(
+                appleMusicEnabled = false,
+                appleMusicRecordLabel = null,
+                fallbackCompany = " ",
+                recordLabelPrefix = "发行公司",
+            ),
+        )
     }
 
     @Test

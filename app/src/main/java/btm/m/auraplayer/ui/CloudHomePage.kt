@@ -2,6 +2,10 @@
 package btm.m.auraplayer.ui
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -20,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -27,12 +32,18 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.R
 import btm.m.auraplayer.data.CatalogAlbum
@@ -47,6 +58,7 @@ import btm.m.auraplayer.data.cloudSection
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
@@ -178,6 +190,16 @@ internal fun CloudHomePage(
             }
         }
         if (playlists.isNotEmpty()) item("recommend") { CloudHomeItemRow(playlists.take(6), model, contentPadding = rowContentPadding) }
+        if (model.cloudPublicBanners.isNotEmpty()) item("banners") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                    CloudHomeHeader(tr("netease_banners", "网易云音乐推荐"))
+                }
+                Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                    CloudHomeBannerStack(model.cloudPublicBanners, model)
+                }
+            }
+        }
         if (model.cloudFollowedAlbums.isNotEmpty()) item("follow_title") {
             Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
                 CloudHomeHeader(tr("followed_artist_updates", "你关注的艺人的新动向"))
@@ -189,12 +211,6 @@ internal fun CloudHomePage(
                 Box(Modifier.padding(horizontal = itemHorizontalPadding)) { CloudHomeHeader(tr("discover_albums", "发现专辑")) }
                 CloudHomeItemRow(albums.take(8), model, contentPadding = rowContentPadding)
             }
-        }
-        if (model.cloudPublicBanners.isNotEmpty()) item("banners_title") {
-            Box(Modifier.padding(horizontal = itemHorizontalPadding)) { CloudHomeHeader(tr("netease_banners", "网易云音乐推荐")) }
-        }
-        if (model.cloudPublicBanners.isNotEmpty()) item("banners") {
-            Box(Modifier.padding(horizontal = itemHorizontalPadding)) { CloudHomeBannerStack(model.cloudPublicBanners, model) }
         }
     }
 }
@@ -651,42 +667,405 @@ private fun CloudHomeItemRow(
 private fun CloudHomeBannerStack(items: List<CloudHomeItem>, model: AuraViewModel) {
     if (items.isEmpty()) return
     val scope = rememberCoroutineScope()
-    val drag = remember { androidx.compose.animation.core.Animatable(0f) }
-    var index by remember { mutableIntStateOf(0) }
-    BoxWithConstraints(Modifier.fillMaxWidth().height(146.dp)) {
-        val widthPx = with(androidx.compose.ui.platform.LocalDensity.current) { maxWidth.toPx() * 3f }
-        Box(Modifier.fillMaxSize().pointerInput(items) {
-            detectHorizontalDragGestures(
-                onHorizontalDrag = { _, delta -> scope.launch { drag.snapTo((drag.value + delta).coerceIn(-widthPx, widthPx)) } },
-                onDragEnd = {
-                    scope.launch {
-                        val direction = if (drag.value < -56f) 1 else if (drag.value > 56f) -1 else 0
-                        if (direction != 0) {
-                            drag.animateTo(direction * widthPx, tween(180))
-                            index = (index + direction + items.size) % items.size
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val overviewOpener = LocalBannerOverviewOpener.current
+    val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
+    val overviewThresholdPx = screenWidthPx * 0.35f
+
+    val drag = remember(items) { Animatable(0f) }
+    val promote = remember(items) { Animatable(0f) }
+    var index by remember(items) { mutableIntStateOf(0) }
+    var isDragging by remember(items) { mutableStateOf(false) }
+    var overviewTriggered by remember(items) { mutableStateOf(false) }
+    var recentlySwitched by remember(items) { mutableStateOf(false) }
+    var interactionTick by remember(items) { mutableIntStateOf(0) }
+    var cardBoundsInWindow by remember { mutableStateOf(Rect.Zero) }
+
+    fun openBannerItem(item: CloudHomeItem) {
+        if (item.actionType == "url" &&
+            (item.subtitle.startsWith("https://") || item.subtitle.startsWith("http://"))
+        ) {
+            openUrl(context, item.subtitle)
+        } else {
+            model.openCloudHomeItem(item)
+        }
+    }
+
+    LaunchedEffect(recentlySwitched, isDragging, interactionTick) {
+        if (recentlySwitched && !isDragging) {
+            delay(5_000L)
+            recentlySwitched = false
+        }
+    }
+
+    val peek by animateFloatAsState(
+        targetValue = if (items.size > 1 && (recentlySwitched || isDragging)) 1f else 0f,
+        animationSpec = tween(durationMillis = if (recentlySwitched || isDragging) 240 else 420, easing = FastOutSlowInEasing),
+        label = "banner_peek",
+    )
+    val dragFan by animateFloatAsState(
+        targetValue = if (items.size > 1 && isDragging) 1f else 0f,
+        animationSpec = tween(durationMillis = if (isDragging) 160 else 280, easing = FastOutSlowInEasing),
+        label = "banner_drag_fan",
+    )
+
+    val safeIndex = index % items.size
+    val cardHeight = 150.dp
+    val topBuffer = 4.dp * peek + 8.dp * dragFan
+    val bottomBuffer = 6.dp * peek + 18.dp * dragFan
+    val indicatorHeight = 20.dp * peek
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = topBuffer),
+    ) {
+        BoxWithConstraints(
+            Modifier
+                .fillMaxWidth()
+                .padding(bottom = bottomBuffer),
+        ) {
+            val cardWidthPx = with(density) { maxWidth.coerceAtLeast(120.dp).toPx() }
+            val swipeThresholdPx = with(density) { 56.dp.toPx() }
+            val exitDistancePx = cardWidthPx * 1.15f
+
+            val dragPromote = if (items.size > 1 && isDragging && !overviewTriggered) {
+                (kotlin.math.abs(drag.value) / (cardWidthPx * 0.85f)).coerceIn(0f, 0.85f)
+            } else {
+                0f
+            }
+            val effectivePromote = maxOf(promote.value, dragPromote).coerceIn(0f, 1f)
+
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(cardHeight)
+                    .pointerInput(items, cardWidthPx, overviewThresholdPx) {
+                        if (items.size <= 1) return@pointerInput
+                        detectHorizontalDragGestures(
+                            onDragStart = {
+                                overviewTriggered = false
+                                isDragging = true
+                                recentlySwitched = true
+                                interactionTick++
+                            },
+                            onHorizontalDrag = { _, delta ->
+                                if (overviewTriggered) return@detectHorizontalDragGestures
+                                val nextDrag = (drag.value + delta).coerceIn(-exitDistancePx, exitDistancePx)
+                                if (overviewOpener != null && nextDrag > overviewThresholdPx && delta > 0f) {
+                                    overviewTriggered = true
+                                    isDragging = false
+                                    recentlySwitched = true
+                                    interactionTick++
+                                    val liveBounds = if (cardBoundsInWindow.width > 0f) {
+                                        cardBoundsInWindow.translate(nextDrag, -with(density) { 7.dp.toPx() })
+                                    } else {
+                                        Rect.Zero
+                                    }
+                                    overviewOpener(
+                                        BannerOverviewRequest(
+                                            items = items,
+                                            initialIndex = safeIndex,
+                                            sourceBounds = liveBounds,
+                                            onSelectIndex = { selectedIdx ->
+                                                index = selectedIdx.coerceIn(0, items.lastIndex)
+                                                recentlySwitched = true
+                                                interactionTick++
+                                            },
+                                            onOpenItem = ::openBannerItem,
+                                        ),
+                                    )
+                                    scope.launch {
+                                        drag.snapTo(0f)
+                                        promote.snapTo(0f)
+                                    }
+                                    return@detectHorizontalDragGestures
+                                }
+                                scope.launch { drag.snapTo(nextDrag) }
+                            },
+                            onDragCancel = {
+                                isDragging = false
+                                interactionTick++
+                                if (overviewTriggered) {
+                                    overviewTriggered = false
+                                    return@detectHorizontalDragGestures
+                                }
+                                scope.launch {
+                                    coroutineScope {
+                                        launch { drag.animateTo(0f, spring(dampingRatio = 0.84f, stiffness = 420f)) }
+                                        launch { promote.animateTo(0f, tween(200)) }
+                                    }
+                                }
+                            },
+                            onDragEnd = {
+                                isDragging = false
+                                interactionTick++
+                                if (overviewTriggered) {
+                                    overviewTriggered = false
+                                    return@detectHorizontalDragGestures
+                                }
+                                scope.launch {
+                                    val deltaX = drag.value
+                                    if (kotlin.math.abs(deltaX) > swipeThresholdPx) {
+                                        val exitSign = if (deltaX < 0f) -1f else 1f
+                                        coroutineScope {
+                                            launch {
+                                                drag.animateTo(
+                                                    exitSign * exitDistancePx,
+                                                    tween(210, easing = FastOutSlowInEasing),
+                                                )
+                                            }
+                                            launch {
+                                                promote.animateTo(
+                                                    1f,
+                                                    tween(210, easing = FastOutSlowInEasing),
+                                                )
+                                            }
+                                        }
+                                        // WYSIWYG: always promote the exact card revealed directly beneath.
+                                        index = (index + 1) % items.size
+                                        drag.snapTo(0f)
+                                        promote.snapTo(0f)
+                                    } else {
+                                        coroutineScope {
+                                            launch { drag.animateTo(0f, spring(dampingRatio = 0.84f, stiffness = 420f)) }
+                                            launch { promote.animateTo(0f, tween(200)) }
+                                        }
+                                    }
+                                }
+                            },
+                        )
+                    },
+            ) {
+                val current = items[safeIndex]
+                val cardSlotModifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .height(cardHeight)
+
+                // Rest poses for 2nd and 3rd cards (interpolated between 5s-peek and drag-fan)
+                val rot1Base = lerpFloat(2.6f, 4.5f, dragFan) * peek
+                val tx1Base = lerpFloat(5f, 10f, dragFan) * peek
+                val ty1Base = lerpFloat(-2f, 13f, dragFan) * peek
+                val scale1Base = lerpFloat(0.97f, 0.965f, dragFan)
+                val alpha1Base = lerpFloat(0.90f, 0.94f, dragFan) * peek
+                val blur1Base = lerpFloat(2.5f, 2.2f, dragFan)
+
+                val rot2Base = lerpFloat(-3.2f, -5.5f, dragFan) * peek
+                val tx2Base = lerpFloat(-6f, -10f, dragFan) * peek
+                val ty2Base = lerpFloat(-3f, 17f, dragFan) * peek
+                val scale2Base = lerpFloat(0.94f, 0.935f, dragFan)
+                val alpha2Base = lerpFloat(0.76f, 0.84f, dragFan) * peek
+                val blur2Base = lerpFloat(7.5f, 6.8f, dragFan)
+
+                // 4th card fades in at 3rd-card pose during seamless promotion
+                if (items.size >= 4 && effectivePromote > 0.01f && peek > 0.01f) {
+                    val back3 = items[(safeIndex + 3) % items.size]
+                    val alpha3 = alpha2Base * effectivePromote
+                    CloudHomeBannerCard(
+                        item = back3,
+                        modifier = cardSlotModifier
+                            .zIndex(0f)
+                            .graphicsLayer {
+                                translationX = with(density) { tx2Base.dp.toPx() }
+                                translationY = with(density) { ty2Base.dp.toPx() }
+                                rotationZ = rot2Base
+                                scaleX = scale2Base
+                                scaleY = scale2Base
+                                alpha = alpha3
+                                shadowElevation = with(density) { 3.dp.toPx() }
+                                shape = RoundedCornerShape(18.dp)
+                                clip = true
+                            }
+                            .blur(blur2Base.dp),
+                    )
+                }
+
+                // 3rd card (stronger blur: 7.5dp -> smoothly unblurs to 2nd-card blur 2.5dp during promotion)
+                if (items.size >= 3 && peek > 0.01f) {
+                    val back2 = items[(safeIndex + 2) % items.size]
+                    val rot2 = lerpFloat(rot2Base, rot1Base, effectivePromote)
+                    val tx2 = with(density) { lerpFloat(tx2Base, tx1Base, effectivePromote).dp.toPx() }
+                    val ty2 = with(density) { lerpFloat(ty2Base, ty1Base, effectivePromote).dp.toPx() }
+                    val scale2 = lerpFloat(scale2Base, scale1Base, effectivePromote)
+                    val alpha2 = lerpFloat(alpha2Base, alpha1Base, effectivePromote)
+                    val blur2 = lerpFloat(blur2Base, blur1Base, effectivePromote).dp
+                    CloudHomeBannerCard(
+                        item = back2,
+                        modifier = cardSlotModifier
+                            .zIndex(1f)
+                            .graphicsLayer {
+                                translationX = tx2
+                                translationY = ty2
+                                rotationZ = rot2
+                                scaleX = scale2
+                                scaleY = scale2
+                                alpha = alpha2
+                                shadowElevation = with(density) { lerpFloat(4f, 6f, effectivePromote).dp.toPx() }
+                                shape = RoundedCornerShape(18.dp)
+                                clip = true
+                            }
+                            .then(if (blur2 > 0.1.dp) Modifier.blur(blur2) else Modifier),
+                    )
+                }
+
+                // 2nd card (lighter blur: 2.5dp -> smoothly unblurs to 0dp as it promotes to front)
+                if (items.size >= 2 && (peek > 0.01f || effectivePromote > 0.01f)) {
+                    val back1 = items[(safeIndex + 1) % items.size]
+                    val rot1 = lerpFloat(rot1Base, 0f, effectivePromote)
+                    val tx1 = with(density) { lerpFloat(tx1Base, 0f, effectivePromote).dp.toPx() }
+                    val ty1 = with(density) { lerpFloat(ty1Base, 0f, effectivePromote).dp.toPx() }
+                    val scale1 = lerpFloat(scale1Base, 1f, effectivePromote)
+                    val alpha1 = lerpFloat(alpha1Base, 1f, effectivePromote)
+                    val blur1 = lerpFloat(blur1Base, 0f, effectivePromote).dp
+                    CloudHomeBannerCard(
+                        item = back1,
+                        modifier = cardSlotModifier
+                            .zIndex(2f)
+                            .graphicsLayer {
+                                translationX = tx1
+                                translationY = ty1
+                                rotationZ = rot1
+                                scaleX = scale1
+                                scaleY = scale1
+                                alpha = alpha1
+                                shadowElevation = with(density) { lerpFloat(6f, 8f, effectivePromote).dp.toPx() }
+                                shape = RoundedCornerShape(18.dp)
+                                clip = true
+                            }
+                            .then(if (blur1 > 0.1.dp) Modifier.blur(blur1) else Modifier),
+                    )
+                }
+
+                // Front card (#1)
+                val dragRatio = (drag.value / cardWidthPx).coerceIn(-1f, 1f)
+                CloudHomeBannerCard(
+                    item = current,
+                    modifier = cardSlotModifier
+                        .zIndex(3f)
+                        .onGloballyPositioned { coords ->
+                            val pos = coords.positionInWindow()
+                            cardBoundsInWindow = Rect(pos.x, pos.y, pos.x + coords.size.width, pos.y + coords.size.height)
                         }
-                        drag.animateTo(0f, tween(220))
+                        .graphicsLayer {
+                            translationX = drag.value
+                            translationY = with(density) { (-7.dp * dragFan).toPx() }
+                            rotationZ = dragRatio * 5.5f
+                            val activeScale = 1f + 0.012f * dragFan
+                            scaleX = activeScale
+                            scaleY = activeScale
+                            alpha = 1f - kotlin.math.abs(dragRatio) * 0.14f
+                            shadowElevation = with(density) { (2.dp + 4.dp * peek + 6.dp * dragFan).toPx() }
+                            shape = RoundedCornerShape(18.dp)
+                            clip = true
+                        }
+                        .clickable(enabled = !isDragging && !overviewTriggered) {
+                            openBannerItem(current)
+                        },
+                )
+            }
+        }
+
+        if (items.size > 1 && peek > 0.01f) {
+            val compact = items.size > 8
+            val dotSpacing = if (compact) 5.dp else 6.dp
+            val activeDotColor = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+            val inactiveDotColor = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.22f)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(indicatorHeight)
+                    .graphicsLayer { alpha = peek },
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(dotSpacing),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    items.indices.forEach { dotIndex ->
+                        val active = dotIndex == safeIndex
+                        val dotSize by animateDpAsState(
+                            targetValue = when {
+                                active && compact -> 6.dp
+                                active -> 7.dp
+                                compact -> 4.5.dp
+                                else -> 5.dp
+                            },
+                            animationSpec = tween(180),
+                            label = "banner_dot_size",
+                        )
+                        Box(
+                            Modifier
+                                .size(dotSize)
+                                .clip(CircleShape)
+                                .background(if (active) activeDotColor else inactiveDotColor)
+                                .clickable(enabled = peek > 0.35f) {
+                                    if (dotIndex != safeIndex) {
+                                        index = dotIndex
+                                    }
+                                    recentlySwitched = true
+                                    interactionTick++
+                                },
+                        )
                     }
-                },
-            )
-        }) {
-            val next = items[(index + 1) % items.size]
-            val current = items[index]
-            CloudHomeBannerCard(next, Modifier.align(Alignment.Center).fillMaxWidth().height(146.dp).graphicsLayer { alpha = .68f; scaleX = .94f; scaleY = .94f }.blur(8.dp))
-            CloudHomeBannerCard(current, Modifier.align(Alignment.Center).fillMaxWidth().height(146.dp).clickable { model.openCloudHomeItem(current) }.graphicsLayer {
-                translationX = drag.value
-                alpha = 1f - (kotlin.math.abs(drag.value) / widthPx).coerceIn(0f, 1f) * .18f
-            }.blur((kotlin.math.abs(drag.value) / widthPx * 8f).dp))
+                }
+            }
         }
     }
 }
 
+private fun lerpFloat(start: Float, end: Float, fraction: Float): Float = start + (end - start) * fraction
+
 @Composable
-private fun CloudHomeBannerCard(item: CloudHomeItem, modifier: Modifier) {
-    Box(modifier.clip(RoundedCornerShape(18.dp))) {
+internal fun CloudHomeBannerCard(item: CloudHomeItem, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(MiuixTheme.colorScheme.surfaceContainerHigh),
+    ) {
         Artwork(item.artwork, Modifier.fillMaxSize(), cornerRadius = 18.dp)
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .72f)))))
-        Text(item.title, Modifier.align(Alignment.BottomStart).padding(14.dp), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
+        val badge = item.section.takeIf { it.isNotBlank() }
+        val showTitleLine = item.title.isNotBlank() && item.title != badge && item.title.length > 8
+        if (showTitleLine) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(64.dp)
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f)))),
+            )
+            Text(
+                text = item.title,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 14.dp, end = if (badge != null) 76.dp else 14.dp, bottom = 12.dp),
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        val tag = badge ?: item.title.takeIf { it.isNotBlank() && !showTitleLine }
+        if (tag != null) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(10.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color.Black.copy(alpha = 0.50f))
+                    .padding(horizontal = 9.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    text = tag,
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 

@@ -62,12 +62,12 @@ import kotlin.math.pow
 import kotlin.math.sin
 
 /** Derives a rich saturated accent color from artwork Monet palette for glow progress bars. */
-internal fun vibrantCoverGlowColor(palette: CorePalette): Color {
-    val raw = Color(palette.a1.tone(62))
+internal fun vibrantCoverGlowColor(palette: CorePalette, isLightSurface: Boolean = false): Color {
+    val raw = Color(palette.a1.tone(if (isLightSurface) 46 else 62))
     val hsv = FloatArray(3)
     android.graphics.Color.colorToHSV(raw.toArgb(), hsv)
-    hsv[1] = hsv[1].coerceAtLeast(0.58f)
-    hsv[2] = hsv[2].coerceIn(0.76f, 0.96f)
+    hsv[1] = hsv[1].coerceAtLeast(if (isLightSurface) 0.65f else 0.58f)
+    hsv[2] = hsv[2].coerceIn(if (isLightSurface) 0.54f else 0.76f, if (isLightSurface) 0.80f else 0.96f)
     return Color(android.graphics.Color.HSVToColor(hsv))
 }
 

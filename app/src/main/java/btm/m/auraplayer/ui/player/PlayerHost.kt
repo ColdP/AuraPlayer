@@ -93,6 +93,16 @@ private const val PlayerPaddingScale = 1.15f
 private const val PlayerChromeRevealStart = .12f
 internal const val PlayerIconScale = .85f
 
+@Immutable
+internal data class PlayerSurfaceStyle(
+    val isDark: Boolean = true,
+    val activeInk: Color = Color.White,
+    val secondaryInk: Color = Color.White.copy(alpha = .85f),
+    val glowAccent: Color? = null,
+)
+
+internal val LocalPlayerSurfaceStyle = staticCompositionLocalOf { PlayerSurfaceStyle() }
+
 private fun GraphicsLayerScope.setPlayerLayerBlur(radius: Dp) {
     val pixels = radius.toPx()
     clip = pixels > 0f
@@ -188,18 +198,43 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
     val dark = MiuixTheme.colorScheme.surface.luminance() < .5f
     val miniColor = if (dark) Color.White else Color.Black
     val style = model.settings.value.navigation
+    val colorStyle = LocalAuraColorStyle.current
     val playerBackdrop = rememberLayerBackdrop()
     val miuixBackdrop = rememberMiuixBackdrop()
     val isMaterialTheme = appearance.theme == PlayerTheme.MATERIAL
     val isOneTheme = appearance.theme == PlayerTheme.ONE
     val lyricThemeActiveOnScreen = appearance.lyricTheme != btm.m.auraplayer.playback.LyricTheme.BLUR && lyricsOpen && !queueOpen
-    val isDarkScheme = !isMaterialTheme || dark || appearance.materialBackground != MaterialPlayerBackground.MATERIAL || lyricThemeActiveOnScreen
-    val coverSeed = rememberPlayerArtworkSeed(song.artwork)
+    val effectivePlayerDark = appearance.resolveDarkTheme(dark) || lyricThemeActiveOnScreen
+    val coverSeed = rememberPlayerArtworkColorSeed(song.artwork, useOklab = colorStyle.isOklab)
     val coverPalette = remember(coverSeed) { CorePalette.of(coverSeed) }
-    val expressive = rememberPlayerExpressiveColors(coverSeed, isDark = isDarkScheme)
+    val oklabAmbient = remember(colorStyle, coverSeed, effectivePlayerDark) {
+        if (colorStyle.isOklab) {
+            OklabThemeEngine.generatePlayerAmbient(coverSeed, effectivePlayerDark, colorStyle.palette)
+        } else null
+    }
+    val expressive = rememberPlayerExpressiveColors(
+        seed = coverSeed,
+        isDark = effectivePlayerDark,
+        useOklab = colorStyle.isOklab,
+        paletteIndex = colorStyle.palette,
+    )
     val activeExpressive = if (isMaterialTheme) expressive else null
-    val oneUiColors = rememberPlayerOneUiColors(coverSeed, isDark = dark || lyricThemeActiveOnScreen)
+    val oneUiColors = rememberPlayerOneUiColors(
+        seed = coverSeed,
+        isDark = effectivePlayerDark,
+        useOklab = colorStyle.isOklab,
+        paletteIndex = colorStyle.palette,
+    )
     val activeOneUi = if (isOneTheme) oneUiColors else null
+    val resolvedMenuTint = oklabAmbient?.menuTint ?: Color(coverPalette.a2.tone(if (effectivePlayerDark) 20 else 95))
+    val baseActiveInk = oklabAmbient?.activeInk ?: if (effectivePlayerDark) Color.White else Color(coverPalette.n1.tone(10))
+    val baseSecondaryInk = oklabAmbient?.secondaryInk ?: if (effectivePlayerDark) Color.White.copy(alpha = .85f) else Color(coverPalette.n1.tone(32)).copy(alpha = .88f)
+    val surfaceStyle = PlayerSurfaceStyle(
+        isDark = effectivePlayerDark,
+        activeInk = activeExpressive?.activeInk ?: activeOneUi?.text ?: baseActiveInk,
+        secondaryInk = activeExpressive?.secondaryInk ?: activeOneUi?.subText ?: baseSecondaryInk,
+        glowAccent = oklabAmbient?.glowAccent,
+    )
     val shareActive = lyricShareTransition?.active == true
     val shareProgress = if (shareActive) lyricShareTransition.progress.coerceIn(0f, 1f) else 0f
     val shareBgAlpha = if (shareActive) 1f - lyricShareSmoothStep(0f, .86f, shareProgress) else 1f
@@ -447,7 +482,12 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                         oneUi = activeOneUi,
                         modifier = backgroundModifier,
                         visible = backgroundVisible,
-                        prepare = prepareBackground && foreground && miniVisible)
+                        prepare = prepareBackground && foreground && miniVisible,
+                        isDark = effectivePlayerDark,
+                        useOklab = colorStyle.isOklab,
+                        oklabPaletteIndex = colorStyle.palette,
+                        seed = coverSeed)
+                    CompositionLocalProvider(LocalPlayerSurfaceStyle provides surfaceStyle) {
                     FullPlayer(model, lyricProgress.value, expansion = morphProgress, miniColor = miniColor, miniSwipe = miniSwipeOffset.value + miniDrag.horizontalOffset,
                         miniWidth = miniWidth, miniHeight = miniHeight,
                         miniControlClearance = 110.dp - 50.dp * dock,
@@ -461,7 +501,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                         onSwipeDelta = { swipeDistance = (swipeDistance + it).coerceIn(0f, swipeRange) },
                         onSwipeRelease = { settleSwipe(it, false) }, onSwipeCancel = { settleSwipe(0f, true) },
                         onLyrics = onLyricsToggle, queueOpen = queueOpen,
-                        lyricsOpen = lyricsOpen, queueBlend = queueBlend.value, backdrop = playerBackdrop, menuTint = Color(coverPalette.a2.tone(20)),
+                        lyricsOpen = lyricsOpen, queueBlend = queueBlend.value, backdrop = playerBackdrop, menuTint = resolvedMenuTint,
                         coverPalette = coverPalette,
                         expressive = activeExpressive,
                         oneUi = activeOneUi,
@@ -521,6 +561,7 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
                                 }
                             }
                         })
+                    }
                 }
             }
             val miniAlpha = (1f - e / .34f).coerceIn(0f, 1f)
@@ -555,7 +596,16 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
         }
     }
     if (activeOneUi != null) {
-        val oneSheetPalette = rememberOneUiPalette(isDark = activeOneUi.dark, useMonet = true, customSeed = coverSeed)
+        val oneSheetPalette = if (colorStyle.isOklab) {
+            val tones = remember(coverSeed, activeOneUi.dark, colorStyle.palette) {
+                OklabThemeEngine.generateScheme(coverSeed, activeOneUi.dark, colorStyle.palette).toOneUiMonetTones()
+            }
+            remember(context, activeOneUi.dark, tones) {
+                dev.pascal.oneuikit.OneUiPalette(context = context, forceDark = activeOneUi.dark, useMonet = true, overrideTones = tones)
+            }
+        } else {
+            rememberOneUiPalette(isDark = activeOneUi.dark, useMonet = true, customSeed = coverSeed)
+        }
         CompositionLocalProvider(
             LocalDialogBackdrop provides playerBackdrop,
             LocalAppUiStyle provides AppUiStyle.ONE,
@@ -602,8 +652,9 @@ private fun FullPlayer(model: AuraViewModel, progress: Float, expansion: State<F
     val context = LocalContext.current
     val activity = context as? android.app.Activity
     val isMultiWindow = activity?.isInMultiWindowMode == true
-    val activeInk = expressive?.activeInk ?: oneUi?.text ?: Color.White
-    val secondaryInk = expressive?.secondaryInk ?: oneUi?.subText ?: Color.White.copy(alpha = .85f)
+    val surfaceStyle = LocalPlayerSurfaceStyle.current
+    val activeInk = expressive?.activeInk ?: oneUi?.text ?: surfaceStyle.activeInk
+    val secondaryInk = expressive?.secondaryInk ?: oneUi?.subText ?: surfaceStyle.secondaryInk
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     val p = progress.coerceIn(0f, 1f)
@@ -1229,6 +1280,7 @@ private fun FullPlayerGlassCardLayer(
     val localTouch = touchPoint - Offset(cardLeftPx, cardTopPx)
     val touchInside = touching && localTouch.x in 0f..cardWidthPx && localTouch.y in 0f..cardHeightPx
     val useFullscreenGlass = appearance.fullscreenGlass && btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled.current
+    val isLightGlass = !LocalPlayerSurfaceStyle.current.isDark
     val touchLight by animateFloatAsState(
         if (useFullscreenGlass && touchInside) .19f else 0f,
         tween(if (touchInside) 100 else 320),
@@ -1243,8 +1295,8 @@ private fun FullPlayerGlassCardLayer(
                 backdropBlur(5.dp.toPx())
                 lens(28.dp.toPx(), 42.dp.toPx(), chromaticAberration = true)
             },
-            highlight = { Highlight.Default.copy(alpha = .60f) },
-            onDrawSurface = { drawRect(menuTint.copy(alpha = .18f)) },
+            highlight = { Highlight.Default.copy(alpha = if (isLightGlass) .75f else .60f) },
+            onDrawSurface = { drawRect(menuTint.copy(alpha = if (isLightGlass) .46f else .18f)) },
         )
     } else {
         Modifier.playerMenuMaterial(miuixBackdrop, menuTint, 30.dp)
@@ -1370,10 +1422,11 @@ private fun FullPlayerArtworkLayer(
         )
         val immScrimStrength = m.alpha * (1f - m.effLyricsProgress) * (1f - m.coverflowReveal)
         if (immScrimStrength > 0.001f) {
+            val isLightPlayer = !LocalPlayerSurfaceStyle.current.isDark
             val scrimTone = when {
                 expressive != null -> expressive.surface
                 oneUi != null -> oneUi.background
-                else -> Color(coverPalette.a2.tone(14))
+                else -> Color(coverPalette.a2.tone(if (isLightPlayer) 94 else 14))
             }
             if (landscapeGeom != null) {
                 val scrimLeft = immGeom.coverWidth * 0.46f
@@ -1627,7 +1680,10 @@ private fun FullPlayerChromeAndLyricsLayer(
             when {
                 expressive != null -> Box(Modifier.width(48.dp).height(4.5.dp).clip(RoundedCornerShape(50)).background(expressive.dragHandleColor))
                 oneUi != null -> Box(Modifier.width(48.dp).height(4.5.dp).clip(RoundedCornerShape(50)).background(oneUi.track))
-                else -> Box(Modifier.width(pillWidth).height(pillHeight).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = .36f)))
+                else -> {
+                    val handleAlpha = if (LocalPlayerSurfaceStyle.current.isDark) .36f else .24f
+                    Box(Modifier.width(pillWidth).height(pillHeight).clip(RoundedCornerShape(50)).background(m.activeInk.copy(alpha = handleAlpha)))
+                }
             }
         }
         if (queueBlend > .001f && m.p > 0f) {
@@ -2109,7 +2165,7 @@ private fun FullPlayerMetadataAndActionsLayer(
     }
     val textWidth = (miniTextWidth + (fullTextWidth - miniTextWidth) * m.e) / textScale
     val textColor = lerp(miniColor, m.lyricInk, m.e)
-    val baseArtistColor = oneUi?.subText ?: expressive?.secondaryInk ?: Color.White.copy(alpha = .8f)
+    val baseArtistColor = oneUi?.subText ?: expressive?.secondaryInk ?: m.secondaryInk
     val artistColor = lerp(
         miniColor.copy(alpha = .8f),
         if (m.lyricChromeBlend > 0f) lerp(baseArtistColor, m.lyricSubInk, m.lyricChromeBlend) else baseArtistColor,
@@ -2395,16 +2451,18 @@ internal fun PlayerProgressSection(
         .height(sliderHeight)
         .then(if (queueOpen) Modifier.clearAndSetSemantics {} else Modifier)
     Column(modifier) {
+        val surfaceStyle = LocalPlayerSurfaceStyle.current
         when {
             appearance.glowProgress != GlowProgressStyle.OFF -> {
-                val isLightGlowSurface = (expressive?.dark == false) || (oneUi?.dark == false)
+                val isLightGlowSurface = (expressive?.dark == false) || (oneUi?.dark == false) || (!surfaceStyle.isDark && expressive == null && oneUi == null)
                 val glowAccent = oneUi?.accentDeep
                     ?: expressive?.primary
-                    ?: vibrantCoverGlowColor(coverPalette)
+                    ?: surfaceStyle.glowAccent
+                    ?: vibrantCoverGlowColor(coverPalette, isLightSurface = isLightGlowSurface)
                 val glowTrack = when {
                     oneUi != null -> oneUi.track.copy(alpha = if (oneUi.dark) .75f else .85f)
                     expressive != null -> expressive.surfaceContainerHighest.copy(alpha = if (expressive.dark) .55f else .85f)
-                    else -> Color.White.copy(alpha = .28f)
+                    else -> surfaceStyle.activeInk.copy(alpha = if (isLightGlowSurface) .18f else .28f)
                 }
                 GlowProgressSlider(
                     style = appearance.glowProgress,
@@ -2449,6 +2507,7 @@ internal fun PlayerProgressSection(
                 onChange = { scrub = it },
                 onFinished = { model.seekTo(((scrub ?: value) * model.duration).toLong()); scrub = null },
                 enabled = model.duration > 0 && !queueOpen,
+                inkColor = surfaceStyle.activeInk,
             )
         }
         Box(
@@ -2457,7 +2516,7 @@ internal fun PlayerProgressSection(
                 .fillMaxWidth()
                 .heightIn(min = maxOf(footerHeight, 24.dp)),
         ) {
-            val timeColor = expressive?.timeInk ?: oneUi?.subText ?: Color.White.copy(alpha = .85f)
+            val timeColor = expressive?.timeInk ?: oneUi?.subText ?: surfaceStyle.secondaryInk
             val timeStyle = if (expressive != null || oneUi != null) {
                 androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
             } else {
@@ -2620,16 +2679,17 @@ private fun PlayerTransportSection(
                 onClick = model::next,
             )
         } else {
-            PlayerButton(R.drawable.ic_player_previous, tr("previous_track", "上一首"), Color.White, 48.dp * scale, 76.dp * scale, model::previous)
+            val ink = LocalPlayerSurfaceStyle.current.activeInk
+            PlayerButton(R.drawable.ic_player_previous, tr("previous_track", "上一首"), ink, 48.dp * scale, 76.dp * scale, model::previous)
             PlayerButton(
                 if (model.playbackRequested) R.drawable.ic_player_pause else R.drawable.ic_player_play,
                 if (model.playbackRequested) tr("pause", "暂停") else tr("play", "播放"),
-                Color.White,
+                ink,
                 60.dp * .88f * scale,
                 96.dp * scale,
                 model::togglePlayback,
             )
-            PlayerButton(R.drawable.ic_player_next, tr("next_track", "下一首"), Color.White, 48.dp * scale, 76.dp * scale, model::next)
+            PlayerButton(R.drawable.ic_player_next, tr("next_track", "下一首"), ink, 48.dp * scale, 76.dp * scale, model::next)
         }
     }
 }
@@ -2726,19 +2786,20 @@ private fun PlayerBottomActionsSection(
                 )
             }
         } else {
+            val ink = LocalPlayerSurfaceStyle.current.activeInk.copy(alpha = .9f)
             Box(Modifier.size(bottomTouch).semantics { selected = lyricsOpen }) {
-                PlayerButton(if (lyricsOpen) R.drawable.ic_player_lyrics_on else R.drawable.ic_player_lyrics, tr("lyrics", "歌词"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, onLyrics)
+                PlayerButton(if (lyricsOpen) R.drawable.ic_player_lyrics_on else R.drawable.ic_player_lyrics, tr("lyrics", "歌词"), ink, bottomIcon, bottomTouch, onLyrics)
             }
-            PlayerButton(modeIcon, modeDescription, Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, model::cyclePlaybackMode)
+            PlayerButton(modeIcon, modeDescription, ink, bottomIcon, bottomTouch, model::cyclePlaybackMode)
             PlayerButton(
                 if (favorite) R.drawable.ic_player_favorite_on else R.drawable.ic_player_favorite,
                 if (favorite) tr("unfavorite", "取消收藏") else tr("favorite", "收藏"),
-                Color.White.copy(alpha = .9f),
+                ink,
                 bottomIcon,
                 bottomTouch,
             ) { model.toggleFavorite(song) }
             Box(Modifier.semantics { selected = queueOpen }) {
-                PlayerButton(if (queueOpen) R.drawable.ic_player_queue_on else R.drawable.ic_player_queue, tr("play_queue", "播放队列"), Color.White.copy(alpha = .9f), bottomIcon, bottomTouch, onQueue)
+                PlayerButton(if (queueOpen) R.drawable.ic_player_queue_on else R.drawable.ic_player_queue, tr("play_queue", "播放队列"), ink, bottomIcon, bottomTouch, onQueue)
             }
         }
     }
@@ -2773,12 +2834,13 @@ private fun PlayerMoreActionButton(
                 onClick = onMore,
             )
             else -> Box(Modifier.fillMaxSize().clickable(enabled = enabled, onClick = onMore), contentAlignment = Alignment.Center) {
+                val ink = LocalPlayerSurfaceStyle.current.activeInk
                 Box(Modifier.size(46.dp * .85f * .92f).playerMenuMaterial(miuixBackdrop, menuTint, 50.dp)) {
                     Image(
                         AuraMoreHorizontalIcon,
                         tr("more", "更多"),
                         Modifier.align(Alignment.Center).size(24.dp * PlayerIconScale * .92f),
-                        colorFilter = ColorFilter.tint(Color.White),
+                        colorFilter = ColorFilter.tint(ink),
                     )
                 }
             }
@@ -2808,12 +2870,13 @@ private fun PlayerSpatialCubeButton(
         animationSpec = tween(220),
         label = "spatialCubeIconAlpha",
     )
+    val isDarkSurface = LocalPlayerSurfaceStyle.current.isDark
     val bgTint = when {
         expressive != null && active -> expressive.primaryContainer
         expressive != null -> expressive.surfaceContainerHigh
         oneUi != null && active -> oneUi.chip
         oneUi != null -> oneUi.cardAlt
-        active -> Color.White.copy(alpha = 0.24f)
+        active -> inkColor.copy(alpha = if (isDarkSurface) 0.24f else 0.14f)
         else -> menuTint
     }
     val tintColor = when {
@@ -2821,7 +2884,7 @@ private fun PlayerSpatialCubeButton(
         expressive != null -> inkColor
         oneUi != null && active -> oneUi.onChip
         oneUi != null -> inkColor
-        else -> Color.White
+        else -> inkColor
     }.copy(alpha = iconAlpha)
     Box(
         modifier
@@ -3123,14 +3186,14 @@ private fun QueueSwipeRow(song: btm.m.auraplayer.data.Song, current: Boolean, in
                           dragging: Boolean, onDragState: (Boolean) -> Unit, reorderHandle: (Modifier) -> Modifier,
                           expressive: PlayerExpressiveColors? = null,
                           oneUi: PlayerOneUiColors? = null) {
-    val ink = expressive?.activeInk ?: oneUi?.text ?: Color.White
+    val ink = expressive?.activeInk ?: oneUi?.text ?: LocalPlayerSurfaceStyle.current.activeInk
     val rowHighlight = when {
         expressive != null && dragging -> expressive.surfaceContainerHighest.copy(alpha = .75f)
         expressive != null && current -> expressive.secondaryContainer.copy(alpha = .85f)
         oneUi != null && dragging -> oneUi.cardAlt
         oneUi != null && current -> oneUi.chip
-        dragging -> Color.White.copy(alpha = .14f)
-        current -> Color.White.copy(alpha = .10f)
+        dragging -> ink.copy(alpha = .14f)
+        current -> ink.copy(alpha = .10f)
         else -> Color.Transparent
     }
     val rowTitleInk = when {
@@ -3275,7 +3338,9 @@ internal fun PlayerButton(icon: Int, label: String, color: Color, iconSize: Dp, 
 
 @Composable
 private fun PillSlider(value: Float, label: String, modifier: Modifier, onChange: (Float) -> Unit,
-                       onFinished: () -> Unit, enabled: Boolean = true) {
+                       onFinished: () -> Unit, enabled: Boolean = true,
+                       inkColor: Color = LocalPlayerSurfaceStyle.current.activeInk) {
+    val isDark = LocalPlayerSurfaceStyle.current.isDark
     val change by rememberUpdatedState(onChange); val finish by rememberUpdatedState(onFinished)
     Canvas(modifier.semantics {
         contentDescription = label; progressBarRangeInfo = ProgressBarRangeInfo(value.coerceIn(0f, 1f), 0f..1f)
@@ -3293,9 +3358,9 @@ private fun PillSlider(value: Float, label: String, modifier: Modifier, onChange
     }) {
         val thickness = min(8.dp.toPx(), size.height)
         val top = (size.height - thickness) / 2
-        drawRoundRect(Color.White.copy(alpha = .32f), Offset(0f, top), Size(size.width, thickness), CornerRadius(thickness / 2))
+        drawRoundRect(inkColor.copy(alpha = if (isDark) .32f else .18f), Offset(0f, top), Size(size.width, thickness), CornerRadius(thickness / 2))
         val fill = size.width * value.coerceIn(0f, 1f)
-        if (fill > 0) drawRoundRect(Color.White.copy(alpha = .82f), Offset(0f, top), Size(fill, thickness), CornerRadius(thickness / 2))
+        if (fill > 0) drawRoundRect(inkColor.copy(alpha = if (isDark) .82f else .78f), Offset(0f, top), Size(fill, thickness), CornerRadius(thickness / 2))
     }
 }
 
@@ -3381,11 +3446,12 @@ private fun VolumeControl(modifier: Modifier) {
 
 @Composable
 private fun Speaker(loud: Boolean, modifier: Modifier) {
+    val ink = LocalPlayerSurfaceStyle.current.activeInk
     Image(
         painter = painterResource(if (loud) R.drawable.ic_player_volume_full else R.drawable.ic_player_volume_muted),
         contentDescription = if (loud) tr("volume_up", "增大音量") else tr("volume_down", "减小音量"),
         modifier = modifier.padding(10.dp).size(24.dp * PlayerIconScale),
-        colorFilter = ColorFilter.tint(Color.White.copy(alpha = .72f)),
+        colorFilter = ColorFilter.tint(ink.copy(alpha = .72f)),
     )
 }
 

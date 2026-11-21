@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.blur.*
 import top.yukonga.miuix.kmp.blur.highlight.Highlight
@@ -17,14 +18,19 @@ import top.yukonga.miuix.kmp.blur.highlight.Highlight
 @Composable
 internal fun Modifier.playerMenuMaterial(backdrop: Backdrop, tint: Color, radius: androidx.compose.ui.unit.Dp = 26.dp): Modifier {
     val shape = RoundedCornerShape(radius)
+    val isLight = tint.luminance() >= 0.5f
     if (!btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled.current) {
-        val solidColor = if (tint.alpha >= .99f) tint else lerp(Color(0xFF222226), tint.copy(alpha = 1f), tint.alpha)
+        val fallbackBase = if (isLight) Color(0xFFF3F3F7) else Color(0xFF222226)
+        val solidColor = if (tint.alpha >= .99f) tint else lerp(fallbackBase, tint.copy(alpha = 1f), tint.alpha)
         return background(solidColor, shape)
     }
-    val colors = BlurDefaults.blurColors(listOf(BlendColorEntry(tint.copy(alpha = .62f))), saturation = 1.12f)
+    val colors = BlurDefaults.blurColors(listOf(BlendColorEntry(tint.copy(alpha = if (isLight) .72f else .62f))), saturation = 1.12f)
     return drawBackdrop(backdrop, shape = { shape }, effects = {
         blur(7.dp.toPx()); blendColors(colors); noiseDither(.004f)
-    }, highlight = { Highlight.GlassStrokeMiddleDark.copy(alpha = .32f) })
+    }, highlight = {
+        if (isLight) Highlight.Default.copy(alpha = .55f)
+        else Highlight.GlassStrokeMiddleDark.copy(alpha = .32f)
+    })
 }
 
 /** Draws a native MIUIX [Highlight] rim via its public [HighlightStyle.createShader] contract. */
