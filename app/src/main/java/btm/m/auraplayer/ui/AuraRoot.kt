@@ -88,7 +88,54 @@ fun AuraRoot(model: AuraViewModel) {
     val settings = model.settings.value
     SideEffect { I18n.language = settings.language }
     ProvideAuraAppTheme(settings = settings, previewColor = model.settings.previewColor) {
-        AuraAdaptiveLayout { AuraShell(model) }
+        AuraAdaptiveLayout {
+            val context = LocalContext.current
+            val oobePreferences = remember(context) { context.getSharedPreferences("oobe", android.content.Context.MODE_PRIVATE) }
+            var showOobe by rememberSaveable {
+                mutableStateOf(!oobePreferences.getBoolean("completed", false))
+            }
+            val surface = MiuixTheme.colorScheme.surface
+            val advancedMaterial = LocalAdvancedMaterialEnabled.current
+            AnimatedContent(
+                targetState = showOobe,
+                transitionSpec = {
+                    if (targetState) {
+                        (slideInHorizontally(tween(520, easing = FastOutSlowInEasing)) { -it / 3 } + fadeIn(tween(380)) + scaleIn(tween(520), initialScale = .975f)) togetherWith
+                            (slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { it / 7 } + fadeOut(tween(320)) + scaleOut(tween(420), targetScale = .985f))
+                    } else {
+                        (slideInHorizontally(tween(560, easing = FastOutSlowInEasing)) { it / 7 } + fadeIn(tween(420)) + scaleIn(tween(560), initialScale = .985f)) togetherWith
+                            (slideOutHorizontally(tween(460, easing = FastOutSlowInEasing)) { -it / 3 } + fadeOut(tween(360)) + scaleOut(tween(460), targetScale = .975f))
+                    }
+                },
+                label = "oobeRootTransition",
+                modifier = Modifier.fillMaxSize().background(surface),
+            ) { oobeVisible ->
+                val rootBlurRadius by transition.animateFloat(
+                    transitionSpec = { tween(560, easing = FastOutSlowInEasing) },
+                    label = "oobeRootBlur",
+                ) { state ->
+                    if (!advancedMaterial) 0f
+                    else if (showOobe) {
+                        if (state == EnterExitState.PostExit) 14f else 0f
+                    } else {
+                        if (state == EnterExitState.PreEnter) 14f else 0f
+                    }
+                }
+                Box(Modifier.fillMaxSize().then(if (rootBlurRadius > 0.1f) Modifier.blur(rootBlurRadius.dp) else Modifier)) {
+                    if (oobeVisible) {
+                        OobeFlow(
+                            model = model,
+                            onFinished = {
+                                oobePreferences.edit().putBoolean("completed", true).apply()
+                                showOobe = false
+                            },
+                        )
+                    } else {
+                        AuraShell(model, onEnterOobe = { showOobe = true })
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -119,7 +166,7 @@ internal fun ProvideAuraCouiTheme(monet: Boolean, content: @Composable () -> Uni
 
 /** HyperChanger Shell ownership: retained page stack, delayed pop, per-page gesture owner. */
 @Composable
-private fun AuraShell(model: AuraViewModel) {
+private fun AuraShell(model: AuraViewModel, onEnterOobe: () -> Unit = {}) {
     val context = LocalContext.current
     val settings = model.settings.value
     val miniBlurRadius = playerMiniBlurRadius(settings.navigation,
@@ -482,7 +529,7 @@ private fun AuraShell(model: AuraViewModel) {
                             Box(Modifier.fillMaxSize().blur((coveredBlur + transitionBlur).dp).then(
                                 if (isTop && entry == null && momentumOwner == (index to stackPage)) Modifier.momentumBackTransform(backState) else Modifier)) {
                                 SeamlessPageFrame(entry) {
-                                    DetailPage(stackPage, model, if (isTop) dismissPage else ({}), open, isActive = isTop && closingIndex != index)
+                                    DetailPage(stackPage, model, if (isTop) dismissPage else ({}), open, isActive = isTop && closingIndex != index, onEnterOobe = onEnterOobe)
                                 }
                             }
                         }
@@ -584,7 +631,7 @@ private fun auraContentPadding(padding: PaddingValues, bottom: Int) = PaddingVal
     padding.calculateTopPadding() + 4.dp, LocalAuraLayout.current.pageMargin, padding.calculateBottomPadding() + bottom.dp)
 
 @Composable
-private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, open: (String) -> Unit, isActive: Boolean) {
+private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, open: (String) -> Unit, isActive: Boolean, onEnterOobe: () -> Unit = {}) {
     var presetTab by rememberSaveable { mutableIntStateOf(0) }
     var materialTab by rememberSaveable {
         mutableIntStateOf(NavigationMaterialSettings.styles.indexOf(NavigationStyle.fromPreference(model.settings.value.navigation)).coerceAtLeast(0))
@@ -844,7 +891,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             "spatial_cover_downloads" -> SpatialCoverDownloadsPage(contentPadding)
             "spatial_cover_cache" -> SpatialCoverCachePage(contentPadding, open)
             "rear_screen" -> RearScreenSettingsPage(contentPadding)
-            "about" -> AboutPage(model, contentPadding, open)
+            "about" -> AboutPage(model, contentPadding, open, onEnterOobe)
             "software_update" -> SoftwareUpdatePage(contentPadding, open)
             "update_log" -> UpdateLogPage(contentPadding)
             "donate" -> DonatePage(contentPadding)

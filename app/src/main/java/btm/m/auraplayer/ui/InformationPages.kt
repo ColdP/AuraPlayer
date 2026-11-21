@@ -55,7 +55,12 @@ private fun DeviceInfoItem(title: String, summary: String) {
 }
 
 @Composable
-fun AboutPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Unit) {
+fun AboutPage(
+    model: AuraViewModel,
+    padding: PaddingValues,
+    open: (String) -> Unit,
+    onEnterOobe: () -> Unit = {},
+) {
     val context = LocalContext.current
     val unavailable = tr("not_detected", "未检测到")
     val marketName = remember { systemProperty("ro.product.marketname").ifBlank { Build.MODEL.ifBlank { unavailable } } }
@@ -101,6 +106,7 @@ fun AboutPage(model: AuraViewModel, padding: PaddingValues, open: (String) -> Un
                     Preference(tr("disclaimer", "免责声明")) { open("disclaimer") }
                     Preference(tr("privacy", "隐私政策")) { open("privacy") }
                     Preference(tr("open_source", "开源代码声明")) { open("opensource") }
+                    Preference(tr("enter_oobe", "进入 OOBE")) { onEnterOobe() }
                 }
             }
             item { Text("© ${Year.now().value} btm_m", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .56f), modifier = Modifier.padding(start = 12.dp)) }

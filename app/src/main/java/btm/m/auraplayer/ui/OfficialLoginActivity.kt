@@ -66,7 +66,7 @@ class OfficialLoginActivity : ComponentActivity() {
         const val EXTRA_CLEAR_COOKIES = "clear_cookies"
         const val EXTRA_COOKIE = "cookie"
         const val EXTRA_PROVIDER = "provider"
-        private const val LOGIN_URL = "https://music.163.com/m/login"
+        private const val LOGIN_URL = "https://music.163.com/login"
         private const val QQ_LOGIN_URL = "https://y.qq.com/n/ryqq/profile"
         private const val DESKTOP_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -106,7 +106,7 @@ class OfficialLoginActivity : ComponentActivity() {
                     return origMM.call(window, q);
                   };
                 }
-                if (location.hostname === 'y.qq.com') {
+                if (location.hostname === 'y.qq.com' || location.hostname === 'music.163.com') {
                   var applyViewport = function() {
                     var head = document.head || document.documentElement;
                     if (!head) return;
@@ -243,15 +243,13 @@ class OfficialLoginActivity : ComponentActivity() {
             this.settings.allowFileAccess = false
             this.settings.allowContentAccess = false
             this.settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            if (isQq) {
-                this.settings.userAgentString = DESKTOP_UA
-                this.settings.useWideViewPort = true
-                this.settings.loadWithOverviewMode = true
-                this.settings.setSupportZoom(true)
-                this.settings.builtInZoomControls = true
-                this.settings.displayZoomControls = false
-                setInitialScale(0)
-            }
+            this.settings.userAgentString = DESKTOP_UA
+            this.settings.useWideViewPort = true
+            this.settings.loadWithOverviewMode = true
+            this.settings.setSupportZoom(true)
+            this.settings.builtInZoomControls = true
+            this.settings.displayZoomControls = false
+            setInitialScale(0)
             val cookieManager = CookieManager.getInstance()
             cookieManager.setAcceptCookie(true)
             cookieManager.setAcceptThirdPartyCookies(this, isQq)
@@ -267,6 +265,12 @@ class OfficialLoginActivity : ComponentActivity() {
                         view.loadUrl(QQ_LOGIN_URL, DESKTOP_HEADERS)
                         return true
                     }
+                    if (!isQq && request.isForMainFrame &&
+                        ((host == "music.163.com" && (path == "/m" || path.startsWith("/m/"))) || host == "y.music.163.com")
+                    ) {
+                        view.loadUrl(LOGIN_URL, DESKTOP_HEADERS)
+                        return true
+                    }
                     val allowed = if (isQq) {
                         host == "qq.com" || host.endsWith(".qq.com") || host == "open.weixin.qq.com"
                     } else {
@@ -276,7 +280,7 @@ class OfficialLoginActivity : ComponentActivity() {
                 }
 
                 override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
-                    if (isQq) view.evaluateJavascript(FORCE_DESKTOP_JS, null)
+                    view.evaluateJavascript(FORCE_DESKTOP_JS, null)
                 }
 
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -284,7 +288,7 @@ class OfficialLoginActivity : ComponentActivity() {
                 }
 
                 override fun onPageFinished(view: WebView, url: String?) {
-                    if (isQq) view.evaluateJavascript(FORCE_DESKTOP_JS, null)
+                    view.evaluateJavascript(FORCE_DESKTOP_JS, null)
                     checkLoginCookie()
                 }
             }
@@ -296,7 +300,7 @@ class OfficialLoginActivity : ComponentActivity() {
         setContentView(root)
 
         fun loadLogin() {
-            if (isQq) view.loadUrl(loginUrl, DESKTOP_HEADERS) else view.loadUrl(loginUrl)
+            view.loadUrl(loginUrl, DESKTOP_HEADERS)
         }
         val clearCookies = intent.getBooleanExtra(EXTRA_CLEAR_COOKIES, false)
         if (clearCookies) {
