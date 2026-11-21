@@ -51,10 +51,16 @@ import btm.m.auraplayer.data.CloudPlaylist
 import btm.m.auraplayer.data.CloudHomeItem
 import btm.m.auraplayer.data.HomeBackgroundStyle
 import btm.m.auraplayer.data.HomeBannerTarget
+import btm.m.auraplayer.data.HomeSectionTarget
 import btm.m.auraplayer.data.LocalBannerStyle
 import btm.m.auraplayer.data.MusicCollection
 import btm.m.auraplayer.data.Song
 import btm.m.auraplayer.data.cloudSection
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawPlainBackdrop
+import com.kyant.backdrop.effects.blur as backdropBlur
+import com.kyant.backdrop.effects.vibrancy
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -120,6 +126,20 @@ internal fun CloudHomePage(
         recentSongs.filterNot { it.key in recommendedKeys }.take(CloudRecentCount)
     }
     val spotlightCards = rememberSpotlightCards(model, user != null, feature, radar)
+    val homeLayout = settings.homeLayout(HomeSectionTarget.NETEASE)
+    val renderedSections = homeLayout.order.filter { sectionId ->
+        if (sectionId in homeLayout.hidden) return@filter false
+        when (sectionId) {
+            "daily_radar" -> spotlightCards.isNotEmpty()
+            "singles" -> true
+            "recent" -> recentDisplaySongs.isNotEmpty()
+            "recommend" -> playlists.isNotEmpty()
+            "banners" -> model.cloudPublicBanners.isNotEmpty()
+            "follow" -> model.cloudFollowedAlbums.isNotEmpty()
+            "discover_albums" -> albums.isNotEmpty()
+            else -> false
+        }
+    }
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item("welcome") {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -142,74 +162,104 @@ internal fun CloudHomePage(
                 }
             }
         }
-        if (spotlightCards.isNotEmpty()) item("daily_radar") {
-            LazyRow(contentPadding = rowContentPadding, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(spotlightCards, key = { it.key }) { card ->
-                    CloudSpotlightTile(card, bannerTheme = activeBannerTheme, isBlurBg = isBlurBg)
-                }
-            }
-        }
-        item("singles") { CloudSinglesSection(model, singles, horizontalPadding = itemHorizontalPadding, accentOverride = activeBannerTheme?.takeIf { it.isCustom }?.accent) }
         if (model.cloudHomeFailed) item("load_error") {
             Box(Modifier.padding(horizontal = itemHorizontalPadding)) { CloudPagingFooter(false, true) { homeRefresh++ } }
         }
-        if (recentDisplaySongs.isNotEmpty()) item("recent") {
-            val sectionAccent = activeBannerTheme?.takeIf { it.isCustom }?.accent ?: MiuixTheme.colorScheme.primary
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.fillMaxWidth().padding(horizontal = itemHorizontalPadding)) {
-                    CloudHomeHeader(
-                        title = tr("recently_listened", "最近常听"),
-                        trailing = if (user != null) {
-                            {
-                                ListeningReportCapsuleButton(
-                                    accent = sectionAccent,
-                                    bannerTheme = activeBannerTheme,
-                                    isBlurBg = isBlurBg,
-                                    onClick = onReport,
-                                )
+        renderedSections.forEachIndexed { visibleIndex, sectionId ->
+            val showTitle = visibleIndex > 0
+            when (sectionId) {
+                "daily_radar" -> item("daily_radar") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (showTitle) {
+                            Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                                CloudHomeHeader(tr("today_for_you", "今日精选"))
                             }
-                        } else null,
+                        }
+                        LazyRow(contentPadding = rowContentPadding, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items(spotlightCards, key = { it.key }) { card ->
+                                CloudSpotlightTile(card, bannerTheme = activeBannerTheme, isBlurBg = isBlurBg)
+                            }
+                        }
+                    }
+                }
+                "singles" -> item("singles") {
+                    CloudSinglesSection(
+                        model = model,
+                        state = singles,
+                        horizontalPadding = itemHorizontalPadding,
+                        accentOverride = activeBannerTheme?.takeIf { it.isCustom }?.accent,
+                        showTitle = showTitle,
                     )
                 }
-                PopularSongStrip(
-                    songs = recentDisplaySongs,
-                    model = model,
-                    margin = itemHorizontalPadding,
-                    accent = sectionAccent,
-                    subtitle = { it.artist },
-                    rowsPerColumn = 3,
-                    columnMajor = true,
-                ) { index ->
-                    model.play(recentDisplaySongs, index)
+                "recent" -> item("recent") {
+                    val sectionAccent = activeBannerTheme?.takeIf { it.isCustom }?.accent ?: MiuixTheme.colorScheme.primary
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (showTitle) {
+                            Box(Modifier.fillMaxWidth().padding(horizontal = itemHorizontalPadding)) {
+                                CloudHomeHeader(
+                                    title = tr("recently_listened", "最近常听"),
+                                    trailing = if (user != null) {
+                                        {
+                                            ListeningReportCapsuleButton(
+                                                accent = sectionAccent,
+                                                bannerTheme = activeBannerTheme,
+                                                isBlurBg = isBlurBg,
+                                                onClick = onReport,
+                                            )
+                                        }
+                                    } else null,
+                                )
+                            }
+                        }
+                        PopularSongStrip(
+                            songs = recentDisplaySongs,
+                            model = model,
+                            margin = itemHorizontalPadding,
+                            accent = sectionAccent,
+                            subtitle = { it.artist },
+                            rowsPerColumn = 3,
+                            columnMajor = true,
+                        ) { index ->
+                            model.play(recentDisplaySongs, index)
+                        }
+                    }
                 }
-            }
-        }
-        if (playlists.isNotEmpty()) item("recommend_title") {
-            Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
-                CloudHomeHeader(tr("recommended_playlists", "推荐歌单"), arrow = true, accentOverride = activeBannerTheme?.takeIf { it.isCustom }?.accent, onClick = onRecommended)
-            }
-        }
-        if (playlists.isNotEmpty()) item("recommend") { CloudHomeItemRow(playlists.take(6), model, contentPadding = rowContentPadding) }
-        if (model.cloudPublicBanners.isNotEmpty()) item("banners") {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
-                    CloudHomeHeader(tr("netease_banners", "网易云音乐推荐"))
+                "recommend" -> {
+                    if (showTitle) item("recommend_title") {
+                        Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                            CloudHomeHeader(tr("recommended_playlists", "推荐歌单"), arrow = true, accentOverride = activeBannerTheme?.takeIf { it.isCustom }?.accent, onClick = onRecommended)
+                        }
+                    }
+                    item("recommend") { CloudHomeItemRow(playlists.take(6), model, contentPadding = rowContentPadding) }
                 }
-                Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
-                    CloudHomeBannerStack(model.cloudPublicBanners, model)
+                "banners" -> item("banners") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (showTitle) {
+                            Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                                CloudHomeHeader(tr("netease_banners", "网易云音乐推荐"))
+                            }
+                        }
+                        Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                            CloudHomeBannerStack(model.cloudPublicBanners, model)
+                        }
+                    }
                 }
-            }
-        }
-        if (model.cloudFollowedAlbums.isNotEmpty()) item("follow_title") {
-            Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
-                CloudHomeHeader(tr("followed_artist_updates", "你关注的艺人的新动向"))
-            }
-        }
-        if (model.cloudFollowedAlbums.isNotEmpty()) item("follow") { CloudHomeItemRow(model.cloudFollowedAlbums.take(8), model, contentPadding = rowContentPadding) }
-        if (albums.isNotEmpty()) item("discover_albums") {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.padding(horizontal = itemHorizontalPadding)) { CloudHomeHeader(tr("discover_albums", "发现专辑")) }
-                CloudHomeItemRow(albums.take(8), model, contentPadding = rowContentPadding)
+                "follow" -> {
+                    if (showTitle) item("follow_title") {
+                        Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                            CloudHomeHeader(tr("followed_artist_updates", "你关注的艺人的新动向"))
+                        }
+                    }
+                    item("follow") { CloudHomeItemRow(model.cloudFollowedAlbums.take(8), model, contentPadding = rowContentPadding) }
+                }
+                "discover_albums" -> item("discover_albums") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (showTitle) {
+                            Box(Modifier.padding(horizontal = itemHorizontalPadding)) { CloudHomeHeader(tr("discover_albums", "发现专辑")) }
+                        }
+                        CloudHomeItemRow(albums.take(8), model, contentPadding = rowContentPadding)
+                    }
+                }
             }
         }
     }
@@ -250,16 +300,19 @@ private fun CloudSinglesSection(
     state: CloudSinglesState,
     horizontalPadding: Dp = 0.dp,
     accentOverride: Color? = null,
+    showTitle: Boolean = true,
 ) {
     val tracks = state.tracks
     val loading = state.loading
     val refreshTint = accentOverride ?: MiuixTheme.colorScheme.primary
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.padding(horizontal = horizontalPadding), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { CloudHomeHeader(tr("recommended_singles", "为你推荐的单曲")) }
-            IconButton(onClick = { if (!loading) state.refresh++ }, modifier = Modifier.size(44.dp)) {
-                Image(MiuixIcons.Regular.Refresh, tr("refresh", "刷新"), Modifier.size(22.dp),
-                    colorFilter = ColorFilter.tint(refreshTint.copy(alpha = if (loading) .45f else 1f)))
+        if (showTitle) {
+            Row(Modifier.padding(horizontal = horizontalPadding), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { CloudHomeHeader(tr("recommended_singles", "为你推荐的单曲")) }
+                IconButton(onClick = { if (!loading) state.refresh++ }, modifier = Modifier.size(44.dp)) {
+                    Image(MiuixIcons.Regular.Refresh, tr("refresh", "刷新"), Modifier.size(22.dp),
+                        colorFilter = ColorFilter.tint(refreshTint.copy(alpha = if (loading) .45f else 1f)))
+                }
             }
         }
         if (tracks.isNotEmpty()) PopularSongStrip(tracks, model, margin = horizontalPadding, accent = refreshTint, subtitle = { it.artist }, scrollState = state.scrollState) { model.play(tracks, it) }
@@ -320,15 +373,32 @@ internal fun QqHomePage(
             }
         }
         if (singles != null) {
-            item("qq_singles") { CloudSinglesSection(model, singles, horizontalPadding = itemHorizontalPadding, accentOverride = activeBannerTheme?.takeIf { it.isCustom }?.accent) }
-            item("qq_playlists") {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
-                        CloudHomeHeader(tr("recommended_playlists", "推荐歌单"))
+            val qqHomeLayout = settings.homeLayout(HomeSectionTarget.QQ)
+            val qqRenderedSections = qqHomeLayout.order.filter { it !in qqHomeLayout.hidden }
+            qqRenderedSections.forEachIndexed { visibleIndex, sectionId ->
+                val showTitle = visibleIndex > 0
+                when (sectionId) {
+                    "singles" -> item("qq_singles") {
+                        CloudSinglesSection(
+                            model = model,
+                            state = singles,
+                            horizontalPadding = itemHorizontalPadding,
+                            accentOverride = activeBannerTheme?.takeIf { it.isCustom }?.accent,
+                            showTitle = showTitle,
+                        )
                     }
-                    LazyRow(contentPadding = rowContentPadding, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(recommended.take(12), key = { it.id }) { playlist ->
-                            CloudFeatureCard(playlist.name, playlist.artwork, Modifier.width(142.dp)) { model.openCloudPlaylist(playlist) }
+                    "playlists" -> item("qq_playlists") {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (showTitle) {
+                                Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                                    CloudHomeHeader(tr("recommended_playlists", "推荐歌单"))
+                                }
+                            }
+                            LazyRow(contentPadding = rowContentPadding, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                items(recommended.take(12), key = { it.id }) { playlist ->
+                                    CloudFeatureCard(playlist.name, playlist.artwork, Modifier.width(142.dp)) { model.openCloudPlaylist(playlist) }
+                                }
+                            }
                         }
                     }
                 }
@@ -640,7 +710,7 @@ private fun CloudSpotlightTile(
 @Composable
 private fun CloudFeatureCard(title: String, artwork: String, modifier: Modifier, onClick: () -> Unit) {
     Box(modifier.height(174.dp).clip(RoundedCornerShape(18.dp)).clickable(onClick = onClick)) {
-        Artwork(artwork, Modifier.fillMaxSize(), cornerRadius = 18.dp)
+        Artwork(artwork, Modifier.fillMaxSize(), cornerRadius = 18.dp, adaptIrregular = false)
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, Color.Black.copy(alpha = .78f)))))
         Text(title, Modifier.align(Alignment.BottomStart).padding(13.dp), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
@@ -1019,22 +1089,31 @@ private fun lerpFloat(start: Float, end: Float, fraction: Float): Float = start 
 
 @Composable
 internal fun CloudHomeBannerCard(item: CloudHomeItem, modifier: Modifier = Modifier) {
+    val surfaceColor = MiuixTheme.colorScheme.surfaceContainerHigh
+    val tagBackdrop = rememberLayerBackdrop {
+        drawRect(surfaceColor)
+        drawContent()
+    }
     Box(
         modifier
             .clip(RoundedCornerShape(18.dp))
-            .background(MiuixTheme.colorScheme.surfaceContainerHigh),
+            .background(surfaceColor),
     ) {
-        Artwork(item.artwork, Modifier.fillMaxSize(), cornerRadius = 18.dp)
         val badge = item.section.takeIf { it.isNotBlank() }
         val showTitleLine = item.title.isNotBlank() && item.title != badge && item.title.length > 8
+        Box(Modifier.fillMaxSize().layerBackdrop(tagBackdrop)) {
+            Artwork(item.artwork, Modifier.fillMaxSize(), cornerRadius = 18.dp)
+            if (showTitleLine) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(64.dp)
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f)))),
+                )
+            }
+        }
         if (showTitleLine) {
-            Box(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(64.dp)
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f)))),
-            )
             Text(
                 text = item.title,
                 modifier = Modifier
@@ -1048,12 +1127,26 @@ internal fun CloudHomeBannerCard(item: CloudHomeItem, modifier: Modifier = Modif
         }
         val tag = badge ?: item.title.takeIf { it.isNotBlank() && !showTitleLine }
         if (tag != null) {
+            val tagShape = RoundedCornerShape(999.dp)
+            val tagBgModifier = if (LocalAdvancedMaterialEnabled.current) {
+                Modifier.drawPlainBackdrop(
+                    backdrop = tagBackdrop,
+                    shape = { tagShape },
+                    effects = {
+                        vibrancy()
+                        backdropBlur(14.dp.toPx())
+                    },
+                    onDrawSurface = { drawRect(Color.Black.copy(alpha = 0.22f)) },
+                )
+            } else {
+                Modifier.background(Color.Black.copy(alpha = 0.50f), tagShape)
+            }
             Box(
                 Modifier
                     .align(Alignment.BottomEnd)
                     .padding(10.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Color.Black.copy(alpha = 0.50f))
+                    .clip(tagShape)
+                    .then(tagBgModifier)
                     .padding(horizontal = 9.dp, vertical = 3.dp),
             ) {
                 Text(

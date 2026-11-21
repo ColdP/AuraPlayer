@@ -648,6 +648,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         route.startsWith("song_credits:") -> "song_credits"
         route.startsWith("collection:") -> "collection"
         route.startsWith("spatial_cover_preview:") -> "spatial_cover_preview"
+        route.startsWith("home_order:") -> "home_order"
         route.substringBefore(':') in setOf("albumInfo", "artistInfo", "artistSongs", "artistAlbums", "artistSingles") -> route.substringBefore(':')
         else -> route
     }
@@ -704,6 +705,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "navigation_material" -> tr("nav_material_title", "底部导航栏材质参数调整")
         "login" -> tr("netease", "网易云音乐")
         "qq_login" -> tr("qq_music", "QQ音乐")
+        "home_order" -> tr("home_section_order", "首页排序")
         "switch_user", "qq_switch_user" -> tr("switch_user", "切换账号")
         "cloud_recommended" -> tr("recommended_playlists", "推荐歌单")
         "cloud_follows" -> tr("my_follows", "我的关注")
@@ -784,7 +786,16 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         )
         return
     }
-    val playlistSearchSupported = page == "collection" && !catalog && collection != null
+    val playlistPage = page == "collection" && !catalog && effectiveCollection != null
+    val playlistSearchSupported = playlistPage
+    val playlistRevision = model.history.revision
+    val playlistCoverUri = if (playlistPage && effectiveCollection != null) {
+        remember(effectiveCollection.key, effectiveCollection.artwork, destination?.cloud?.songs, model.songs, playlistRevision) {
+            resolvePlaylistCoverUri(model, effectiveCollection, destination?.cloud)
+        }
+    } else ""
+    val playlistHeroTheme = if (playlistPage) rememberHomeBannerTheme(playlistCoverUri) else null
+    var playlistAddSongs by remember(effectiveCollection?.key) { mutableStateOf(false) }
     var playlistSearchQuery by rememberSaveable { mutableStateOf("") }
     var playlistSearchExpanded by rememberSaveable { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -798,10 +809,19 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         enabled = playlistSearchSupported && (playlistSearchExpanded || playlistSearchQuery.isNotEmpty()),
         onBack = closePlaylistSearch,
     )
-    AppPage(title, back, showLargeTitle = page != "about" && (!catalog || page in setOf("artistSongs", "artistAlbums", "artistSingles")),
+    AppPage(title, back, showLargeTitle = page != "about" && page != "collection" && (!catalog || page in setOf("artistSongs", "artistAlbums", "artistSingles")),
         actions = {
             if (page == "cloud_report") {
                 GlassToolbarIconButton(MiuixIcons.Regular.Refresh, tr("refresh", "刷新")) { reportRefreshNonce++ }
+            } else if (playlistPage && effectiveCollection != null) {
+                val cloud = destination?.cloud
+                if (effectiveCollection.key.startsWith("playlist:")) {
+                    GlassToolbarIconButton(MiuixIcons.Regular.Add, tr("add_songs", "添加歌曲")) { playlistAddSongs = true }
+                } else if (cloud != null) {
+                    GlassToolbarIconButton(MiuixIcons.Regular.Refresh, tr("refresh", "刷新")) {
+                        if (!cloud.loading) model.refreshCloudSongs()
+                    }
+                }
             }
         },
         header = {
@@ -840,7 +860,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             }
         },
         useLegacyTopBarBackdrop = page == "about",
-        topBarTint = catalogTopBarTint,
+        topBarTint = catalogTopBarTint ?: playlistHeroTheme?.topBarTint,
         pageBackground = when {
             page in setOf("albumInfo", "artistInfo") && effectiveCollection != null -> ({ AlbumInfoBackground(effectiveCollection, Modifier.matchParentSize()) })
             catalog && page !in setOf("artistSongs", "artistAlbums", "artistSingles") -> ({
@@ -850,6 +870,9 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
                     nowPlayingConfig = nowPlayingConfig,
                     immersiveAlbum = immersiveAlbumCatalog,
                 )
+            })
+            playlistHeroTheme != null -> ({
+                Box(Modifier.matchParentSize().background(playlistHeroTheme.surfaceColor))
             })
             page == "about" -> ({ AboutMaterialBackground(Modifier.matchParentSize(), model.settings.value.dynamicColorEnabled) })
             else -> null
@@ -866,6 +889,11 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             "navigation_material" -> NavigationMaterialPage(model, contentPadding, NavigationMaterialSettings.styles[materialTab])
             "login" -> LoginPage(model, contentPadding, open)
             "qq_login" -> QqMusicPage(model, contentPadding, open)
+            "home_order" -> HomeOrderPage(
+                model = model,
+                target = if (route.substringAfter(':') == "qq") btm.m.auraplayer.data.HomeSectionTarget.QQ else btm.m.auraplayer.data.HomeSectionTarget.NETEASE,
+                padding = contentPadding,
+            )
             "switch_user" -> SwitchUserPage(model, contentPadding)
             "qq_switch_user" -> SwitchUserPage(model, contentPadding, isQq = true)
             "cloud_recommended" -> CloudRecommendedPage(model, contentPadding)
@@ -913,12 +941,16 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
                     appleMusicRecordLabel = catalogAlbumRecordLabel,
                 )
                 else CollectionPage(
-                    model,
-                    contentPadding,
-                    effectiveCollection,
-                    destination.cloud,
+                    model = model,
+                    padding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
+                    collection = effectiveCollection,
+                    cloud = destination.cloud,
                     searchQuery = playlistSearchQuery,
                     searchExpanded = playlistSearchExpanded,
+                    immersiveTopPadding = padding.calculateTopPadding(),
+                    bannerTheme = playlistHeroTheme,
+                    addToPlaylist = playlistAddSongs,
+                    onDismissAddToPlaylist = { playlistAddSongs = false },
                 )
             }
             "artistSongs", "artistAlbums", "artistSingles" -> if (collection != null && albumInfoDestination != null) {

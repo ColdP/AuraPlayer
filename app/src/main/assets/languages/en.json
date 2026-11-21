@@ -4,6 +4,8 @@
     "about": "About",
     "account": "Account",
     "account_manage": "Manage account and connection",
+    "adapt_irregular_covers": "Adapt irregular covers",
+    "adapt_irregular_covers_summary": "Allow non-1:1 covers to fit their natural aspect ratio instead of forcing a square container",
     "add": "Add",
     "add_account": "Add account",
     "add_eq_band": "Add EQ band",
@@ -1258,6 +1260,8 @@
     "oobe_feat_widget_desc": "Multi-size interactive home screen widgets paired with immersive rear-screen controls for effortless playback.",
     "oobe_feat_share_badge": "Crafted Details",
     "oobe_feat_share_title": "Lyric Share Cards & Tag Editor",
-    "oobe_feat_share_desc": "Generate minimalist lyric cards from built-in templates and edit lossless audio metadata and cover art locally."
+    "oobe_feat_share_desc": "Generate minimalist lyric cards from built-in templates and edit lossless audio metadata and cover art locally.",
+    "home_section_order": "Home section order",
+    "hide": "Hide"
   }
 }

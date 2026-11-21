@@ -94,8 +94,11 @@ import btm.m.auraplayer.rear.RearScreenDevice
 import btm.m.auraplayer.rear.resolveAppearance
 import btm.m.auraplayer.ui.AppUiStyle
 import btm.m.auraplayer.ui.GlassToolbarIconButton
+import btm.m.auraplayer.ui.LocalAdaptIrregularCovers
 import btm.m.auraplayer.ui.LocalAppUiStyle
 import btm.m.auraplayer.ui.LocalToolbarBackdrop
+import btm.m.auraplayer.ui.fitCoverAspectRatio
+import btm.m.auraplayer.ui.rememberCoverAspectRatio
 import btm.m.auraplayer.ui.tr
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -757,28 +760,38 @@ fun RearPlayerScreen(
             }
 
             val coverShape = RoundedCornerShape(coverCorner)
-            // Shared seamless Cover (1:1 aspect ratio, moderate corners, clickable to toggle lyrics)
+            val adaptIrregular = LocalAdaptIrregularCovers.current && song.artwork.isNotBlank()
+            val rearCoverRatio = rememberCoverAspectRatio(song.artwork, enabled = adaptIrregular)
+            var measuredRearRatio by remember(song.artwork, adaptIrregular) { mutableStateOf<Float?>(null) }
+            val effectiveRearRatio = measuredRearRatio ?: rearCoverRatio
+            // Shared seamless Cover (adapts aspect ratio when irregular cover adaptation is enabled)
             Box(
                 modifier = Modifier
                     .offset { IntOffset(0, coverY.roundToPx()) }
-                    .size(coverSize)
-                    .aspectRatio(1f)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        enabled = displayMode != RearDisplayMode.AOD,
-                        role = Role.Button,
-                        onClick = { rearLyricsMode = !rearLyricsMode },
-                    )
-                    .semantics { contentDescription = tr("lyrics", "歌词") },
+                    .size(coverSize),
+                contentAlignment = Alignment.Center,
             ) {
-                AnimatedPlayerArtwork(
-                    artwork = song.artwork,
-                    transitionKey = song.id.toString(),
-                    animation = resolvedAppearance.coverAnimation,
-                    enabled = true,
-                    shape = coverShape,
-                )
+                Box(
+                    modifier = Modifier
+                        .then(if (adaptIrregular) Modifier.fitCoverAspectRatio(effectiveRearRatio) else Modifier.fillMaxSize())
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            enabled = displayMode != RearDisplayMode.AOD,
+                            role = Role.Button,
+                            onClick = { rearLyricsMode = !rearLyricsMode },
+                        )
+                        .semantics { contentDescription = tr("lyrics", "歌词") },
+                ) {
+                    AnimatedPlayerArtwork(
+                        artwork = song.artwork,
+                        transitionKey = song.id.toString(),
+                        animation = resolvedAppearance.coverAnimation,
+                        enabled = true,
+                        shape = coverShape,
+                        onAspectRatioResolved = if (adaptIrregular) ({ measuredRearRatio = it }) else null,
+                    )
+                }
             }
 
             // Shared seamless Title + Artist block (scales & translates between Control / Lyrics / AOD)

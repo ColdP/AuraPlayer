@@ -432,6 +432,75 @@ internal fun AlbumInfoBackground(collection: MusicCollection, modifier: Modifier
 }
 
 @Composable
+private fun AlbumHeroActions(
+    tracks: List<Song>,
+    destinationId: Long,
+    iconButtonFill: Color,
+    foreground: Color,
+    accent: Color,
+    onAccent: Color,
+    onInfo: () -> Unit,
+    onPlay: () -> Unit,
+    onShuffle: () -> Unit,
+) {
+    val enabled = tracks.isNotEmpty()
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(
+            Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                .clickable(enabled = destinationId > 0, onClick = onInfo)
+                .background(iconButtonFill),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painterResource(R.drawable.ic_album_info),
+                tr("album_details", "专辑详情"),
+                Modifier.size(26.dp),
+                colorFilter = ColorFilter.tint(foreground),
+            )
+        }
+        Box(
+            Modifier
+                .height(42.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .alpha(if (enabled) 1f else 0.45f)
+                .clickable(enabled = enabled, onClick = onPlay)
+                .background(accent)
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    painterResource(R.drawable.ic_player_play),
+                    tr("play", "播放"),
+                    Modifier.size(18.dp),
+                    colorFilter = ColorFilter.tint(onAccent),
+                )
+                Spacer(Modifier.width(5.dp))
+                Text(tr("play", "播放"), color = onAccent)
+            }
+        }
+        Box(
+            Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                .alpha(if (enabled) 1f else 0.45f)
+                .clickable(enabled = enabled, onClick = onShuffle)
+                .background(iconButtonFill),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painterResource(R.drawable.ic_player_shuffle),
+                tr("shuffle", "随机播放"),
+                Modifier.size(20.dp),
+                colorFilter = ColorFilter.tint(foreground),
+            )
+        }
+    }
+}
+
+@Composable
 internal fun CatalogDetailPage(
     model: AuraViewModel,
     padding: PaddingValues,
@@ -703,49 +772,45 @@ internal fun CatalogDetailPage(
                         Text(albumArtist, color = muted,
                             modifier = Modifier.padding(top = 4.dp).clickable { tracks.firstOrNull()?.let(model::openSongArtist) }, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Box(Modifier.size(42.dp).clip(CircleShape).clickable { if (destinationId > 0) open("albumInfo:$destinationId") }
-                        .background(heroCardFill), contentAlignment = Alignment.Center) {
-                        Image(painterResource(R.drawable.ic_album_info), tr("album_details", "专辑详情"), Modifier.size(26.dp),
-                            colorFilter = ColorFilter.tint(foreground))
-                    }
-                    Spacer(Modifier.width(14.dp))
-                    Box(Modifier.height(42.dp).clip(RoundedCornerShape(999.dp)).clickable(enabled = tracks.isNotEmpty()) {
-                        model.playCollection(tracks, content = cloud)
-                    }.background(accent).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Image(painterResource(R.drawable.ic_player_play), tr("play", "播放"), Modifier.size(18.dp),
-                                colorFilter = ColorFilter.tint(onAccent))
-                            Spacer(Modifier.width(5.dp))
-                            Text(tr("play", "播放"), color = onAccent)
-                        }
-                    }
+                    AlbumHeroActions(
+                        tracks = tracks,
+                        destinationId = destinationId,
+                        iconButtonFill = heroCardFill,
+                        foreground = foreground,
+                        accent = accent,
+                        onAccent = onAccent,
+                        onInfo = { open("albumInfo:$destinationId") },
+                        onPlay = { model.playCollection(tracks, content = cloud) },
+                        onShuffle = { model.playCollection(tracks, content = cloud, shuffle = true) },
+                    )
                 }
             }
         } else item("album_header") {
             Column(Modifier.fillMaxWidth().padding(top = padding.calculateTopPadding(), start = margin, end = margin)) {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Artwork(collection.artwork, Modifier.widthIn(max = 420.dp).fillMaxWidth().aspectRatio(1f)) }
+                val adaptIrregular = LocalAdaptIrregularCovers.current && collection.artwork.isNotBlank()
+                val headerArtModifier = if (adaptIrregular) {
+                    Modifier.widthIn(max = 420.dp).fillMaxWidth().heightIn(max = 420.dp)
+                } else {
+                    Modifier.widthIn(max = 420.dp).fillMaxWidth().aspectRatio(1f)
+                }
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Artwork(collection.artwork, headerArtModifier) }
                 Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).padding(end = 12.dp)) {
                         Text(collection.title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold, color = foreground, maxLines = 2)
                         Text(albumArtist, color = muted,
                             modifier = Modifier.padding(top = 4.dp).clickable { tracks.firstOrNull()?.let(model::openSongArtist) }, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Box(Modifier.size(42.dp).clip(CircleShape).clickable { if (destinationId > 0) open("albumInfo:$destinationId") }
-                        .background(foreground.copy(alpha = .12f)), contentAlignment = Alignment.Center) {
-                        Image(painterResource(R.drawable.ic_album_info), tr("album_details", "专辑详情"), Modifier.size(26.dp),
-                            colorFilter = ColorFilter.tint(foreground))
-                    }
-                    Spacer(Modifier.width(14.dp))
-                    Box(Modifier.height(42.dp).clip(RoundedCornerShape(999.dp)).clickable(enabled = tracks.isNotEmpty()) {
-                        model.playCollection(tracks, content = cloud)
-                    }.background(accent).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Image(painterResource(R.drawable.ic_player_play), tr("play", "播放"), Modifier.size(18.dp),
-                                colorFilter = ColorFilter.tint(onAccent))
-                            Spacer(Modifier.width(5.dp))
-                            Text(tr("play", "播放"), color = onAccent)
-                        }
-                    }
+                    AlbumHeroActions(
+                        tracks = tracks,
+                        destinationId = destinationId,
+                        iconButtonFill = foreground.copy(alpha = .12f),
+                        foreground = foreground,
+                        accent = accent,
+                        onAccent = onAccent,
+                        onInfo = { open("albumInfo:$destinationId") },
+                        onPlay = { model.playCollection(tracks, content = cloud) },
+                        onShuffle = { model.playCollection(tracks, content = cloud, shuffle = true) },
+                    )
                 }
             }
         }

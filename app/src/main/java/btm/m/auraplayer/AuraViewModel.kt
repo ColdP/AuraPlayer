@@ -689,10 +689,18 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         roamingLoadMoreJob?.cancel()
         if (playbackMode == HEARTBEAT_PLAYBACK_MODE || playbackMode == ROAMING_PLAYBACK_MODE) playbackMode = 0
         cloudQueue = null
-        val ordered = if (shuffle) queue.shuffled() else queue
-        knownSongs.putAll(ordered.associateBy { it.key })
-        val items = ordered.map { mediaItem(it, sourceId) }
-        player.setMediaItems(items, if (shuffle) 0 else start.coerceIn(0, items.lastIndex), 0)
+        knownSongs.putAll(queue.associateBy { it.key })
+        val items = queue.map { mediaItem(it, sourceId) }
+        val startIndex = if (shuffle) items.indices.random() else start.coerceIn(0, items.lastIndex)
+        if (shuffle) {
+            player.repeatMode = Player.REPEAT_MODE_ALL
+            player.shuffleModeEnabled = true
+            playbackMode = 1
+        } else {
+            setListRepeat(player)
+            playbackMode = 0
+        }
+        player.setMediaItems(items, startIndex, 0)
         player.prepare()
         player.play()
     }
@@ -1131,12 +1139,18 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                     cloudQueue === content && queueIndex >= queue.size - 5)) loadCloudSongs(content)
         }
     }
-    fun playCollection(tracks: List<Song>, index: Int = 0, content: CloudPlaylistContent? = cloudCollection) {
+    fun playCollection(
+        tracks: List<Song>,
+        index: Int = 0,
+        content: CloudPlaylistContent? = cloudCollection,
+        shuffle: Boolean = false,
+    ) {
         val sourceId = content?.playlist?.id?.takeIf { content.source in setOf("playlist", "album") } ?: 0L
-        play(tracks, index, sourceId = sourceId)
+        play(tracks, index, shuffle = shuffle, sourceId = sourceId)
         if (controller != null && tracks.isNotEmpty() && content != null) {
             cloudQueue = content
-            if (index >= tracks.size - 5) loadCloudSongs(content)
+            val activeIndex = controller?.currentMediaItemIndex ?: index
+            if (shuffle || activeIndex >= tracks.size - 5) loadCloudSongs(content)
         }
     }
     /** Cloud search uses its own provider preference, independent of the Cloud tab's display. */

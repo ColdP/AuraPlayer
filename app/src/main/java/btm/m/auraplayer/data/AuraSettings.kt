@@ -62,6 +62,51 @@ enum class HomeBannerTarget(val imagePrefix: String) {
     QQ("qq-banner"),
 }
 
+enum class HomeSectionTarget {
+    NETEASE,
+    QQ,
+}
+
+internal val NETEASE_HOME_SECTION_IDS = listOf(
+    "daily_radar",
+    "singles",
+    "recent",
+    "recommend",
+    "banners",
+    "follow",
+    "discover_albums",
+)
+
+internal val QQ_HOME_SECTION_IDS = listOf(
+    "singles",
+    "playlists",
+)
+
+internal fun defaultHomeSectionOrder(target: HomeSectionTarget): List<String> = when (target) {
+    HomeSectionTarget.NETEASE -> NETEASE_HOME_SECTION_IDS
+    HomeSectionTarget.QQ -> QQ_HOME_SECTION_IDS
+}
+
+data class HomeSectionLayoutConfig(
+    val order: List<String> = emptyList(),
+    val hidden: Set<String> = emptySet(),
+) {
+    fun normalized(target: HomeSectionTarget): HomeSectionLayoutConfig {
+        val defaults = defaultHomeSectionOrder(target)
+        val valid = defaults.toSet()
+        val seen = LinkedHashSet<String>(defaults.size)
+        order.forEach { if (it in valid) seen.add(it) }
+        defaults.forEach { seen.add(it) }
+        val normalizedHidden = hidden.filterTo(LinkedHashSet()) { it in valid }
+        val visibleOrder = seen.filter { it !in normalizedHidden }
+        val hiddenOrder = seen.filter { it in normalizedHidden }
+        return HomeSectionLayoutConfig(
+            order = visibleOrder + hiddenOrder,
+            hidden = normalizedHidden,
+        )
+    }
+}
+
 data class HomeBannerConfig(
     val style: LocalBannerStyle = LocalBannerStyle.NONE,
     val imagePath: String = "",
@@ -135,6 +180,7 @@ data class Appearance(
     val blacklist: Set<String> = emptySet(),
     val filenameBlockRules: FilenameBlockRules = FilenameBlockRules(),
     val disableAdvancedMaterial: Boolean = false,
+    val adaptIrregularCovers: Boolean = false,
     /** Which cloud provider(s) the Cloud tab shows: "netease", "qq" or "all". */
     val cloudSource: String = "all",
     /** Cloud search provider, independent of the providers displayed in the Cloud tab. */
@@ -158,6 +204,8 @@ data class Appearance(
     val localBannerStyleConfigs: Map<LocalBannerStyle, LocalBannerStyleConfig> = emptyMap(),
     val neteaseBannerConfig: HomeBannerConfig = HomeBannerConfig(),
     val qqBannerConfig: HomeBannerConfig = HomeBannerConfig(),
+    val neteaseHomeLayout: HomeSectionLayoutConfig = HomeSectionLayoutConfig().normalized(HomeSectionTarget.NETEASE),
+    val qqHomeLayout: HomeSectionLayoutConfig = HomeSectionLayoutConfig().normalized(HomeSectionTarget.QQ),
 ) {
     val monet: Boolean get() = colorExtractionMode == ColorExtractionMode.MONET
     val isOklabColor: Boolean get() = colorExtractionMode == ColorExtractionMode.OKLAB
@@ -206,6 +254,23 @@ data class Appearance(
             val next = transform(qqBannerConfig)
             copy(qqBannerConfig = next.copy(styleConfigs = next.styleConfigs.mapValues { (_, cfg) -> cfg.normalized() }))
         }
+    }
+
+    fun homeLayout(target: HomeSectionTarget): HomeSectionLayoutConfig = when (target) {
+        HomeSectionTarget.NETEASE -> neteaseHomeLayout.normalized(HomeSectionTarget.NETEASE)
+        HomeSectionTarget.QQ -> qqHomeLayout.normalized(HomeSectionTarget.QQ)
+    }
+
+    fun withHomeLayout(
+        target: HomeSectionTarget,
+        transform: (HomeSectionLayoutConfig) -> HomeSectionLayoutConfig,
+    ): Appearance = when (target) {
+        HomeSectionTarget.NETEASE -> copy(
+            neteaseHomeLayout = transform(homeLayout(HomeSectionTarget.NETEASE)).normalized(HomeSectionTarget.NETEASE),
+        )
+        HomeSectionTarget.QQ -> copy(
+            qqHomeLayout = transform(homeLayout(HomeSectionTarget.QQ)).normalized(HomeSectionTarget.QQ),
+        )
     }
 }
 
@@ -266,6 +331,7 @@ class AuraSettings(context: Context) {
                 patterns = prefs.getString("filenameBlockPatterns", "").orEmpty(),
             ),
             disableAdvancedMaterial = prefs.getBoolean("disableAdvancedMaterial", false),
+            adaptIrregularCovers = prefs.getBoolean("adaptIrregularCovers", false),
             cloudSource = prefs.getString("cloudSource", "all")!!.takeIf { it in setOf("netease", "qq", "all") } ?: "all",
             cloudSearchSource = normalizeCloudSearchSource(prefs.getString("cloudSearchSource", null), prefs.getString("cloudSource", "all")),
             cloudDisabled = prefs.getBoolean("cloudDisabled", false),
@@ -289,6 +355,8 @@ class AuraSettings(context: Context) {
             localBannerStyleConfigs = styleConfigs,
             neteaseBannerConfig = decodeHomeBannerConfig(prefs.getString("neteaseBannerConfig", null)),
             qqBannerConfig = decodeHomeBannerConfig(prefs.getString("qqBannerConfig", null)),
+            neteaseHomeLayout = decodeHomeSectionLayout(prefs.getString("neteaseHomeLayout", null), HomeSectionTarget.NETEASE),
+            qqHomeLayout = decodeHomeSectionLayout(prefs.getString("qqHomeLayout", null), HomeSectionTarget.QQ),
         )
     }
     fun update(transform: (Appearance) -> Appearance) {
@@ -307,7 +375,9 @@ class AuraSettings(context: Context) {
                 ),
                 qqBannerConfig = it.qqBannerConfig.copy(
                     styleConfigs = it.qqBannerConfig.styleConfigs.mapValues { (_, cfg) -> cfg.normalized() },
-                ))
+                ),
+                neteaseHomeLayout = it.neteaseHomeLayout.normalized(HomeSectionTarget.NETEASE),
+                qqHomeLayout = it.qqHomeLayout.normalized(HomeSectionTarget.QQ))
         }
         prefs.edit().putString("navigation", v.navigation).putString("labels", v.labels)
             .putInt("navigationOffsetDp", v.navigationOffsetDp)
@@ -325,6 +395,7 @@ class AuraSettings(context: Context) {
             .putString("filenameBlockKeywords", v.filenameBlockRules.keywords)
             .putString("filenameBlockPatterns", v.filenameBlockRules.patterns)
             .putBoolean("disableAdvancedMaterial", v.disableAdvancedMaterial)
+            .putBoolean("adaptIrregularCovers", v.adaptIrregularCovers)
             .putString("cloudSource", v.cloudSource).putString("cloudSearchSource", v.cloudSearchSource)
             .putBoolean("cloudDisabled", v.cloudDisabled).putBoolean("heartbeatEnabled", v.heartbeatEnabled)
             .putBoolean("neteaseScrobbleEnabled", v.neteaseScrobbleEnabled)
@@ -343,6 +414,8 @@ class AuraSettings(context: Context) {
             .putString("localBannerStyleConfigs", encodeBannerStyleConfigs(v.localBannerStyleConfigs))
             .putString("neteaseBannerConfig", encodeHomeBannerConfig(v.neteaseBannerConfig))
             .putString("qqBannerConfig", encodeHomeBannerConfig(v.qqBannerConfig))
+            .putString("neteaseHomeLayout", encodeHomeSectionLayout(v.neteaseHomeLayout, HomeSectionTarget.NETEASE))
+            .putString("qqHomeLayout", encodeHomeSectionLayout(v.qqHomeLayout, HomeSectionTarget.QQ))
             .apply()
         value = v
         btm.m.auraplayer.widget.WidgetUpdateCoordinator.requestUpdate(appContext)
@@ -427,6 +500,36 @@ class AuraSettings(context: Context) {
                 put("motionPlayMode", config.motionPlayMode.name)
                 put("styleConfigs", encodeBannerStyleConfigsJson(config.styleConfigs))
             }.toString()
+
+        internal fun decodeHomeSectionLayout(raw: String?, target: HomeSectionTarget): HomeSectionLayoutConfig {
+            val json = raw?.takeIf { it.isNotBlank() }?.let { runCatching { JSONObject(it) }.getOrNull() }
+                ?: return HomeSectionLayoutConfig().normalized(target)
+            val orderArray = json.optJSONArray("order")
+            val order = buildList {
+                if (orderArray != null) {
+                    for (i in 0 until orderArray.length()) {
+                        orderArray.optString(i).takeIf { it.isNotBlank() }?.let(::add)
+                    }
+                }
+            }
+            val hiddenArray = json.optJSONArray("hidden")
+            val hidden = buildSet {
+                if (hiddenArray != null) {
+                    for (i in 0 until hiddenArray.length()) {
+                        hiddenArray.optString(i).takeIf { it.isNotBlank() }?.let(::add)
+                    }
+                }
+            }
+            return HomeSectionLayoutConfig(order = order, hidden = hidden).normalized(target)
+        }
+
+        internal fun encodeHomeSectionLayout(config: HomeSectionLayoutConfig, target: HomeSectionTarget): String {
+            val normalized = config.normalized(target)
+            return JSONObject().apply {
+                put("order", JSONArray(normalized.order))
+                put("hidden", JSONArray(normalized.hidden.toList()))
+            }.toString()
+        }
         fun normalizeCloudSearchSource(raw: String?, previousDisplaySource: String? = null): String = when (raw) {
             "qq" -> "qq"
             "netease" -> "netease"

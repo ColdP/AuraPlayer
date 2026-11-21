@@ -2,9 +2,35 @@ package btm.m.auraplayer.ui
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.unit.dp
+
+/**
+ * Shared three-bar drag handle icon used for section reordering.
+ */
+internal val AuraDragHandleIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        name = "AuraDragHandle",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f,
+    ).apply {
+        val stroke = SolidColor(Color.Black)
+        for (y in floatArrayOf(7f, 12f, 17f)) {
+            path(
+                stroke = stroke,
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+            ) {
+                moveTo(4.5f, y)
+                lineTo(19.5f, y)
+            }
+        }
+    }.build()
+}
 
 /**
  * Shared horizontal three-dot overflow icon matching Apple Music / MIUIX action triggers.

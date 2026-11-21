@@ -20,7 +20,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.*
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
@@ -32,18 +35,21 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import btm.m.auraplayer.AuraViewModel
+import btm.m.auraplayer.R
 import btm.m.auraplayer.data.*
 import btm.m.auraplayer.ui.navigation.InteractiveHighlight
 import btm.m.auraplayer.ui.player.findCachedArtworkMemoryEntry
 import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
+import coil3.size.Precision
 import com.itos.coui.search.CouiSearchBarDefaults
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -80,8 +86,18 @@ fun AuraTabIcon(index: Int, color: Color) {
 internal val ListArtworkCornerRadius = 11.dp
 
 @Composable
-fun Artwork(uri: String, modifier: Modifier = Modifier, circular: Boolean = false, cornerRadius: Dp = 16.dp) {
+fun Artwork(
+    uri: String,
+    modifier: Modifier = Modifier,
+    circular: Boolean = false,
+    cornerRadius: Dp = 16.dp,
+    adaptIrregular: Boolean = !circular,
+) {
     val context = LocalContext.current
+    val adapt = adaptIrregular && !circular && LocalAdaptIrregularCovers.current && uri.isNotBlank()
+    val cachedRatio = rememberCoverAspectRatio(uri, enabled = adapt)
+    var measuredRatio by remember(uri, adapt) { mutableStateOf<Float?>(null) }
+    val aspectRatio = measuredRatio ?: cachedRatio
     val request = remember(uri, context) {
         if (uri.isBlank()) null
         else {
@@ -92,10 +108,29 @@ fun Artwork(uri: String, modifier: Modifier = Modifier, circular: Boolean = fals
                 .build()
         }
     }
-    Box(modifier.clip(if (circular) CircleShape else RoundedCornerShape(cornerRadius))
-        .background(Brush.linearGradient(listOf(MiuixTheme.colorScheme.primaryContainer, MiuixTheme.colorScheme.surfaceContainer))), contentAlignment = Alignment.Center) {
-        Text("♫", fontSize = 28.sp, color = MiuixTheme.colorScheme.primary.copy(alpha = .7f))
-        if (request != null) AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+    val shape = if (circular) CircleShape else RoundedCornerShape(cornerRadius)
+    val cardModifier = (if (adapt) Modifier.fitCoverAspectRatio(aspectRatio) else Modifier.fillMaxSize())
+        .clip(shape)
+        .background(Brush.linearGradient(listOf(MiuixTheme.colorScheme.primaryContainer, MiuixTheme.colorScheme.surfaceContainer)))
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Box(cardModifier, contentAlignment = Alignment.Center) {
+            Text("♫", fontSize = 28.sp, color = MiuixTheme.colorScheme.primary.copy(alpha = .7f))
+            if (request != null) AsyncImage(
+                model = request,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                onSuccess = { state ->
+                    if (adapt) {
+                        recordCoverAspectRatio(
+                            uri,
+                            state.result.image.width.toFloat(),
+                            state.result.image.height.toFloat(),
+                        )?.let { measuredRatio = it }
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
 }
 
@@ -216,11 +251,19 @@ fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction:
 @Composable
 fun SectionTitle(title: String) { Text(title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold) }
 
-private fun LazyListScope.songRows(tracks: List<Song>, model: AuraViewModel, columns: Int,
-                                   onRemove: ((Song) -> Unit)? = null,
-                                   onPlay: ((Int) -> Unit)? = null) {
+private fun LazyListScope.songRows(
+    tracks: List<Song>,
+    model: AuraViewModel,
+    columns: Int,
+    horizontalPadding: Dp = 0.dp,
+    onRemove: ((Song) -> Unit)? = null,
+    onPlay: ((Int) -> Unit)? = null,
+) {
     items(tracks.chunked(columns), key = { it.first().key }) { row ->
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = horizontalPadding),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             row.forEach { song ->
                 Box(Modifier.weight(1f)) {
                     SongRow(song, model, { onPlay?.invoke(tracks.indexOf(song)) ?: model.play(tracks, tracks.indexOf(song)) }, onRemove?.let { { it(song) } })
@@ -754,16 +797,213 @@ internal fun PlaylistHeaderSearchBar(
     }
 }
 
+internal fun resolvePlaylistCoverUri(
+    model: AuraViewModel,
+    collection: MusicCollection,
+    cloud: CloudPlaylistContent?,
+): String {
+    if (collection.artwork.isNotBlank()) return collection.artwork
+    val localPlaylist = model.history.playlists().find { "playlist:${it.id}" == collection.key }
+    val tracks = if (localPlaylist != null) {
+        model.songs.filter { it.key in localPlaylist.songKeys }
+    } else {
+        cloud?.songs ?: collection.songs
+    }
+    return tracks.firstOrNull { it.artwork.isNotBlank() }?.artwork.orEmpty()
+}
+
 @Composable
-fun CollectionPage(
+private fun BlurredPlaylistCoverBackdrop(
+    coverUri: String,
+    bannerTheme: HomeBannerTheme,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val surface = MiuixTheme.colorScheme.surface
+    val dark = surface.luminance() < 0.5f
+    val advancedMaterial = LocalAdvancedMaterialEnabled.current
+    if (coverUri.isBlank()) {
+        Box(
+            modifier.background(
+                Brush.linearGradient(
+                    listOf(
+                        MiuixTheme.colorScheme.primaryContainer,
+                        MiuixTheme.colorScheme.tertiaryContainer,
+                        MiuixTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                ),
+            ),
+        )
+        return
+    }
+    val request = remember(coverUri, context) {
+        val placeholderKey = findCachedArtworkMemoryEntry(SingletonImageLoader.get(context), coverUri)?.key
+        ImageRequest.Builder(context)
+            .data(coverUri)
+            .size(384)
+            .precision(Precision.INEXACT)
+            .apply { if (placeholderKey != null) placeholderMemoryCacheKey(placeholderKey) }
+            .build()
+    }
+    Box(modifier.clipToBounds().background(bannerTheme.surfaceColor)) {
+        AsyncImage(
+            model = request,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .matchParentSize()
+                .graphicsLayer {
+                    scaleX = 1.16f
+                    scaleY = 1.16f
+                }
+                .then(if (advancedMaterial) Modifier.blur(24.dp) else Modifier),
+        )
+        val scrimAlpha = when {
+            !advancedMaterial -> if (dark) 0.62f else 0.68f
+            dark -> 0.22f
+            else -> 0.26f
+        }
+        Box(Modifier.matchParentSize().background(bannerTheme.surfaceColor.copy(alpha = scrimAlpha)))
+    }
+}
+
+@Composable
+private fun PlaylistHeroHeader(
+    title: String,
+    coverUri: String,
+    metaText: String,
+    bannerTheme: HomeBannerTheme,
+    immersiveTopPadding: Dp,
+    pageMargin: Dp,
+    playEnabled: Boolean,
+    onPlay: () -> Unit,
+    onShuffle: () -> Unit,
+) {
+    val layout = LocalAuraLayout.current
+    val coverSize = if (layout.tablet) 132.dp else 116.dp
+    val adaptiveTextColors = rememberAdaptiveBannerTextColors(
+        bannerUri = coverUri,
+        bannerStyle = LocalBannerStyle.IMMERSIVE,
+        styleConfig = LocalBannerStyleConfig(backgroundStyle = HomeBackgroundStyle.COLOR),
+        bannerTheme = bannerTheme,
+    )
+    val titleColor = if (bannerTheme.isCustom) adaptiveTextColors.titleColor else MiuixTheme.colorScheme.onSurface
+    val subtitleColor = if (bannerTheme.isCustom) adaptiveTextColors.subtitleColor else MiuixTheme.colorScheme.onSurfaceVariantSummary
+    val playAccent = if (bannerTheme.isCustom) bannerTheme.accent else MiuixTheme.colorScheme.primary
+    val playOnAccent = if (bannerTheme.isCustom) bannerTheme.onAccent else MiuixTheme.colorScheme.onPrimary
+    val shuffleBg = titleColor.copy(alpha = 0.14f)
+    val topPad = immersiveTopPadding + 10.dp
+
+    Box(Modifier.fillMaxWidth()) {
+        ImmersiveBannerSurfaceBackdrop(
+            bannerTheme = bannerTheme,
+            backgroundStyle = HomeBackgroundStyle.COLOR,
+            modifier = Modifier.matchParentSize(),
+        ) {
+            BlurredPlaylistCoverBackdrop(
+                coverUri = coverUri,
+                bannerTheme = bannerTheme,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = topPad, start = pageMargin, end = pageMargin, bottom = 28.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val coverModifier = if (LocalAdaptIrregularCovers.current && coverUri.isNotBlank()) {
+                Modifier.width(coverSize).heightIn(max = coverSize)
+            } else {
+                Modifier.size(coverSize)
+            }
+            Artwork(coverUri, coverModifier, cornerRadius = 16.dp)
+            Spacer(Modifier.width(16.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = title,
+                    style = MiuixTheme.textStyles.title3,
+                    fontWeight = FontWeight.Bold,
+                    color = titleColor,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = metaText,
+                    style = MiuixTheme.textStyles.body2,
+                    color = subtitleColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(
+                    modifier = Modifier.padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .height(42.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .alpha(if (playEnabled) 1f else 0.45f)
+                            .clickable(enabled = playEnabled, onClick = onPlay)
+                            .background(playAccent)
+                            .padding(horizontal = 18.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(R.drawable.ic_player_play),
+                                contentDescription = tr("play", "播放"),
+                                modifier = Modifier.size(18.dp),
+                                colorFilter = ColorFilter.tint(playOnAccent),
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                text = tr("play", "播放"),
+                                color = playOnAccent,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .alpha(if (playEnabled) 1f else 0.45f)
+                            .clickable(enabled = playEnabled, onClick = onShuffle)
+                            .background(shuffleBg),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Image(
+                            painter = painterResource(R.drawable.ic_player_shuffle),
+                            contentDescription = tr("shuffle", "随机播放"),
+                            modifier = Modifier.size(20.dp),
+                            colorFilter = ColorFilter.tint(titleColor),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun CollectionPage(
     model: AuraViewModel,
     padding: PaddingValues,
     collection: MusicCollection,
     cloud: CloudPlaylistContent?,
     searchQuery: String = "",
     searchExpanded: Boolean = false,
+    immersiveTopPadding: Dp = 0.dp,
+    bannerTheme: HomeBannerTheme? = null,
+    addToPlaylist: Boolean = false,
+    onDismissAddToPlaylist: () -> Unit = {},
 ) {
-    var addToPlaylist by remember { mutableStateOf(false) }
     val revision = model.history.revision
     val localPlaylist = remember(collection.key, revision) { model.history.playlists().find { "playlist:${it.id}" == collection.key } }
     val visible = remember(model.songs) { model.songs.map { it.key }.toSet() }
@@ -784,48 +1024,63 @@ fun CollectionPage(
         }
     }
     val filteredTracks = remember(tracks, searchQuery) { filterPlaylistSongs(tracks, searchQuery) }
+    val coverUri = remember(collection.artwork, tracks) {
+        collection.artwork.ifBlank { tracks.firstOrNull { it.artwork.isNotBlank() }?.artwork.orEmpty() }
+    }
+    val resolvedTheme = bannerTheme ?: rememberHomeBannerTheme(coverUri)
     val listeningRank = cloud?.source == "rank"
     val rankByKey = remember(tracks, listeningRank) {
         if (listeningRank) tracks.mapIndexed { index, song -> song.key to (index + 1) }.toMap() else emptyMap()
     }
-    val columns = LocalAuraLayout.current.listColumns
+    val layout = LocalAuraLayout.current
+    val pageMargin = layout.pageMargin
+    val columns = layout.listColumns
     val listState = rememberLazyListState()
     LaunchedEffect(searchQuery) { listState.scrollToItem(0) }
-    LazyColumn(pageContentModifier().imePadding(), state = listState, contentPadding = padding) {
-        item {
-            Row(Modifier.fillMaxWidth().padding(bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                Artwork(collection.artwork.ifBlank { tracks.firstOrNull()?.artwork.orEmpty() }, Modifier.size(90.dp))
-                Column(Modifier.padding(start = 18.dp)) {
-                    val countText = if (filtering) "${filteredTracks.size} / ${cloud?.total ?: tracks.size} ${tr("song_count", "首歌曲")}"
-                        else "${cloud?.total ?: tracks.size} ${tr("song_count", "首歌曲")}"
-                    Text(countText, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 12.dp)) {
-                        GlassDialogButton(
-                            { model.playCollection(filteredTracks, content = if (filtering) null else cloud) },
-                            enabled = filteredTracks.isNotEmpty(),
-                            colors = ButtonDefaults.buttonColorsPrimary(),
-                        ) { Text(tr("play_all", "播放全部")) }
-                        if (localPlaylist != null) GlassDialogButton({ addToPlaylist = true }) { Text(tr("add", "添加")) }
-                        if (cloud != null) GlassDialogButton(model::refreshCloudSongs, enabled = !cloud.loading) { Text(tr("refresh", "刷新")) }
-                    }
-                }
-            }
+    val activeTopPadding = if (immersiveTopPadding > 0.dp) immersiveTopPadding else padding.calculateTopPadding()
+    val countText = if (filtering) "${filteredTracks.size} / ${cloud?.total ?: tracks.size} ${tr("song_count", "首歌曲")}"
+        else "${cloud?.total ?: tracks.size} ${tr("song_count", "首歌曲")}"
+    val durationText = formatAlbumTotalDuration(if (filtering) filteredTracks else tracks)
+    val metaText = listOfNotNull(countText, durationText).joinToString(" · ")
+    LazyColumn(
+        pageContentModifier().imePadding(),
+        state = listState,
+        contentPadding = PaddingValues(bottom = padding.calculateBottomPadding()),
+    ) {
+        item("playlist_hero") {
+            PlaylistHeroHeader(
+                title = collection.title,
+                coverUri = coverUri,
+                metaText = metaText,
+                bannerTheme = resolvedTheme,
+                immersiveTopPadding = activeTopPadding,
+                pageMargin = pageMargin,
+                playEnabled = filteredTracks.isNotEmpty(),
+                onPlay = { model.playCollection(filteredTracks, content = if (filtering) null else cloud) },
+                onShuffle = { model.playCollection(filteredTracks, content = if (filtering) null else cloud, shuffle = true) },
+            )
         }
-        if (filteredTracks.isEmpty() && (cloud == null || !cloud.loading && !cloud.failed && !cloud.hasMore)) item { EmptyState(tr("no_songs", "没有找到歌曲")) }
+        if (filteredTracks.isEmpty() && (cloud == null || !cloud.loading && !cloud.failed && !cloud.hasMore)) item {
+            Box(Modifier.padding(horizontal = pageMargin)) { EmptyState(tr("no_songs", "没有找到歌曲")) }
+        }
         if (listeningRank) {
             itemsIndexed(filteredTracks, key = { _, song -> "rank-${song.key}" }) { index, song ->
                 val rank = rankByKey[song.key] ?: (index + 1)
-                RankSongRow(rank, song, model) { model.playCollection(filteredTracks, index, if (filtering) null else cloud) }
+                Box(Modifier.padding(horizontal = pageMargin)) {
+                    RankSongRow(rank, song, model) { model.playCollection(filteredTracks, index, if (filtering) null else cloud) }
+                }
             }
-        } else songRows(filteredTracks, model, columns, onRemove = localPlaylist?.let { playlist -> { song ->
+        } else songRows(filteredTracks, model, columns, horizontalPadding = pageMargin, onRemove = localPlaylist?.let { playlist -> { song ->
                 model.history.savePlaylists(model.history.playlists().map { if (it.id == playlist.id) it.copy(songKeys = it.songKeys - song.key) else it })
         } }, onPlay = { model.playCollection(filteredTracks, it, if (filtering) null else cloud) })
         if (cloud != null && (cloud.hasMore || cloud.loading || cloud.failed)) item("cloud_song_paging") {
             val detail = if (searchActive && cloud.total > 0) "(${cloud.songs.size}/${cloud.total})" else ""
-            CloudPagingFooter(cloud.loading, cloud.failed, detail) { model.loadMoreCloudSongsFor(cloud) }
+            Box(Modifier.padding(horizontal = pageMargin)) {
+                CloudPagingFooter(cloud.loading, cloud.failed, detail) { model.loadMoreCloudSongsFor(cloud) }
+            }
         }
     }
-    if (addToPlaylist && localPlaylist != null) PlaylistSongPicker(model, localPlaylist) { addToPlaylist = false }
+    if (addToPlaylist && localPlaylist != null) PlaylistSongPicker(model, localPlaylist, onDismissAddToPlaylist)
 }
 
 @Composable

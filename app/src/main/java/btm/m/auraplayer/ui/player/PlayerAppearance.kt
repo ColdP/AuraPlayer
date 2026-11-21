@@ -431,6 +431,7 @@ internal fun AnimatedPlayerArtwork(
     enabled: Boolean,
     shape: Shape = RectangleShape,
     placeholderBackgroundColor: Color = Color.Transparent,
+    onAspectRatioResolved: ((Float) -> Unit)? = null,
 ) {
     var current by remember { mutableStateOf(artwork) }
     var currentKey by remember { mutableStateOf(transitionKey) }
@@ -532,6 +533,13 @@ internal fun AnimatedPlayerArtwork(
                 .zIndex(if (previousOnTop) 0f else 1f)
                 .frame(true),
             contentScale = ContentScale.Crop,
+            onSuccess = { state ->
+                btm.m.auraplayer.ui.recordCoverAspectRatio(
+                    current,
+                    state.result.image.width.toFloat(),
+                    state.result.image.height.toFloat(),
+                )?.let { ratio -> onAspectRatioResolved?.invoke(ratio) }
+            },
         )
     }
 }

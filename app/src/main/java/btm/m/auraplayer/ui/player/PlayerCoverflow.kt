@@ -52,7 +52,10 @@ import btm.m.auraplayer.playback.CoverTheme
 import btm.m.auraplayer.playback.GlowProgressStyle
 import btm.m.auraplayer.playback.NowPlayingConfig
 import btm.m.auraplayer.spatialcover.SpatialCoverResolveState
+import btm.m.auraplayer.ui.LocalAdaptIrregularCovers
 import btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled
+import btm.m.auraplayer.ui.fitCoverAspectRatio
+import btm.m.auraplayer.ui.rememberCoverAspectRatio
 import btm.m.auraplayer.ui.tr
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
@@ -1307,9 +1310,16 @@ internal fun PlayerCoverflowStage(
                     Spacer(Modifier.height(stageTopOffset))
                     val centerFocus = (1f - (absOffset / 1.5f).coerceIn(0f, 1f))
                     val gyroTiltScale = 0.65f + 0.35f * centerFocus
+                    val effectiveUri = if (isActiveTrack) song.artwork.ifBlank { track.artwork } else track.artwork
+                    val adaptIrregular = LocalAdaptIrregularCovers.current && effectiveUri.isNotBlank()
+                    val cardRatio = rememberCoverAspectRatio(effectiveUri, enabled = adaptIrregular)
+                    Box(
+                        modifier = Modifier.size(metrics.cardSize),
+                        contentAlignment = Alignment.BottomCenter,
+                    ) {
                     Box(
                         modifier = Modifier
-                            .size(metrics.cardSize)
+                            .then(if (adaptIrregular) Modifier.fitCoverAspectRatio(cardRatio) else Modifier.fillMaxSize())
                             .graphicsLayer {
                                 transformOrigin = TransformOrigin.Center
                                 if (appearance.coverflowParallax) {
@@ -1330,7 +1340,6 @@ internal fun PlayerCoverflowStage(
                             )
                             .clip(cardShape),
                     ) {
-                        val effectiveUri = if (isActiveTrack) song.artwork.ifBlank { track.artwork } else track.artwork
                         // Single persistent Cover composable keyed by card page/track so toggling isActiveTrack never drops the bitmap.
                         Cover(
                             uri = effectiveUri,
@@ -1388,6 +1397,7 @@ internal fun PlayerCoverflowStage(
                             )
                         }
                     }
+                    }
 
                     val reflectionArt = if (isActiveTrack) {
                         mixVisual?.toArtwork ?: song.artwork.ifBlank { track.artwork }
@@ -1401,10 +1411,20 @@ internal fun PlayerCoverflowStage(
                             .precision(Precision.INEXACT)
                             .build()
                     }
+                    val reflectionWidth = if (adaptIrregular && cardRatio < 1f) {
+                        metrics.cardSize * cardRatio
+                    } else {
+                        metrics.cardSize
+                    }
+                    val reflectionImageHeight = if (adaptIrregular && cardRatio > 1f) {
+                        metrics.cardSize / cardRatio
+                    } else {
+                        metrics.cardSize
+                    }
                     Box(
                         modifier = Modifier
                             .padding(top = 6.dp)
-                            .size(metrics.cardSize, metrics.reflectionHeight)
+                            .size(reflectionWidth, metrics.reflectionHeight)
                             .graphicsLayer {
                                 if (appearance.coverflowParallax) {
                                     cameraDistance = 8.0f * density.density
@@ -1435,7 +1455,7 @@ internal fun PlayerCoverflowStage(
                             alignment = Alignment.BottomCenter,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(metrics.cardSize)
+                                .height(reflectionImageHeight)
                                 .align(Alignment.TopCenter)
                                 .graphicsLayer { scaleY = -1f }
                                 .blur(reflectionBlur, BlurredEdgeTreatment.Rectangle),

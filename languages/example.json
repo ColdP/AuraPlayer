@@ -4,6 +4,8 @@
     "about": "关于",
     "account": "账号",
     "account_manage": "管理账号与连接",
+    "adapt_irregular_covers": "适配不规则封面",
+    "adapt_irregular_covers_summary": "非 1:1 比例的封面将按原图比例自适应容器尺寸，不再强制裁剪为正方形",
     "add": "添加",
     "add_eq_band": "添加均衡频段",
     "add_songs": "添加歌曲",
@@ -824,6 +826,8 @@
     "oobe_feat_widget_desc": "提供多尺寸桌面灵动小组件，并适配背屏沉浸播放控制，息屏或桌面均可随手切歌。",
     "oobe_feat_share_badge": "精雕细节",
     "oobe_feat_share_title": "歌词分享卡片与标签编辑",
-    "oobe_feat_share_desc": "内置多套极简排版模板一键生成歌词分享图，并支持本地无损音频元数据与封面编辑。"
+    "oobe_feat_share_desc": "内置多套极简排版模板一键生成歌词分享图，并支持本地无损音频元数据与封面编辑。",
+    "home_section_order": "首页排序",
+    "hide": "隐藏"
   }
 }

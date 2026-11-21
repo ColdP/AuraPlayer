@@ -14,6 +14,7 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,9 +25,12 @@ import androidx.compose.ui.*
 import androidx.compose.ui.draw.*
 import androidx.compose.ui.geometry.*
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.res.painterResource
@@ -65,6 +69,7 @@ import coil3.size.Precision
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.*
 import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.drawPlainBackdrop
 import com.kyant.backdrop.effects.blur as backdropBlur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
@@ -1687,6 +1692,7 @@ private fun FullPlayerChromeAndLyricsLayer(
             }
         }
         if (queueBlend > .001f && m.p > 0f) {
+            val queueInnerHorizontalPad = 8.dp
             val queueMod = if (landscapeGeom != null) {
                 Modifier
                     .offset(x = landscapeGeom.rightPaneX, y = landscapeGeom.usableTop)
@@ -1700,10 +1706,12 @@ private fun FullPlayerChromeAndLyricsLayer(
                     .offset(y = qTop)
                     .fillMaxWidth()
                     .height((m.seekY + 50.dp - qTop - 8.dp).coerceAtLeast(1.dp))
-                    .padding(horizontal = m.smallX)
+                    .padding(horizontal = (m.smallX - queueInnerHorizontalPad).coerceAtLeast(0.dp))
             }
             PlayerQueue(
                 model,
+                backdrop = backdrop,
+                horizontalPadding = if (landscapeGeom != null) 4.dp else queueInnerHorizontalPad,
                 expressive = expressive,
                 oneUi = oneUi,
                 modifier = queueMod
@@ -3031,12 +3039,21 @@ internal fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp
     }
     val coverShape = RoundedCornerShape(topStart = radius, topEnd = topEndRadius, bottomStart = bottomRadius, bottomEnd = bottomEndRadius)
     val placeholderColor = if (showPlaceholderBackground) Color.White.copy(alpha = .12f * (1f - feather)) else Color.Transparent
+    val adaptIrregular = LocalAdaptIrregularCovers.current && feather <= 0.001f && !immersiveHorizontal && uri.isNotBlank()
+    val cachedRatio = rememberCoverAspectRatio(uri, enabled = adaptIrregular)
+    var measuredRatio by remember(uri, adaptIrregular) { mutableStateOf<Float?>(null) }
+    val coverAspectRatio = measuredRatio ?: cachedRatio
     Box(
-        modifier
-            .then(if (onClick == null) Modifier else Modifier.playerSurfaceClick(onClick, coverShape))
-            .then(featherMask),
+        modifier,
         contentAlignment = Alignment.Center,
     ) {
+        Box(
+            Modifier
+                .then(if (adaptIrregular) Modifier.fitCoverAspectRatio(coverAspectRatio) else Modifier.fillMaxSize())
+                .then(if (onClick == null) Modifier else Modifier.playerSurfaceClick(onClick, coverShape))
+                .then(featherMask),
+            contentAlignment = Alignment.Center,
+        ) {
         if (mixVisual == null) {
             Box(
                 Modifier
@@ -3058,6 +3075,7 @@ internal fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp
                             enabled = animate,
                             shape = coverShape,
                             placeholderBackgroundColor = placeholderColor,
+                            onAspectRatioResolved = if (adaptIrregular) ({ measuredRatio = it }) else null,
                         )
                     } else if (showPlaceholderBackground) {
                         Box(
@@ -3178,22 +3196,70 @@ internal fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp
                 if (toReq != null) AsyncImage(toReq, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             }
         }
+        }
     }
 }
 
+private data class QueueDisplayItem(
+    val id: String,
+    val originalIndex: Int,
+    val song: btm.m.auraplayer.data.Song,
+)
+
+private fun buildQueueDisplayItems(songs: List<btm.m.auraplayer.data.Song>): List<QueueDisplayItem> {
+    val counts = HashMap<String, Int>(songs.size)
+    return songs.mapIndexed { index, song ->
+        val occurrence = counts.getOrDefault(song.key, 0)
+        counts[song.key] = occurrence + 1
+        QueueDisplayItem(
+            id = "${song.key}#$occurrence",
+            originalIndex = index,
+            song = song,
+        )
+    }
+}
+
+private fun swapQueueDisplayItems(
+    items: List<QueueDisplayItem>,
+    firstId: String,
+    secondId: String,
+): List<QueueDisplayItem> {
+    val mutable = items.toMutableList()
+    val a = mutable.indexOfFirst { it.id == firstId }
+    val b = mutable.indexOfFirst { it.id == secondId }
+    if (a < 0 || b < 0 || a == b) return items
+    val tmp = mutable[a]
+    mutable[a] = mutable[b]
+    mutable[b] = tmp
+    return mutable
+}
+
 @Composable
-private fun QueueSwipeRow(song: btm.m.auraplayer.data.Song, current: Boolean, index: Int, model: AuraViewModel,
-                          dragging: Boolean, onDragState: (Boolean) -> Unit, reorderHandle: (Modifier) -> Modifier,
-                          expressive: PlayerExpressiveColors? = null,
-                          oneUi: PlayerOneUiColors? = null) {
-    val ink = expressive?.activeInk ?: oneUi?.text ?: LocalPlayerSurfaceStyle.current.activeInk
+private fun QueueSwipeRow(
+    song: btm.m.auraplayer.data.Song,
+    current: Boolean,
+    index: Int,
+    model: AuraViewModel,
+    dragging: Boolean,
+    backdrop: Backdrop?,
+    rowModifier: Modifier = Modifier,
+    reorderHandle: (Modifier) -> Modifier,
+    expressive: PlayerExpressiveColors? = null,
+    oneUi: PlayerOneUiColors? = null,
+) {
+    val surfaceStyle = LocalPlayerSurfaceStyle.current
+    val ink = expressive?.activeInk ?: oneUi?.text ?: surfaceStyle.activeInk
+    val advancedMaterial = LocalAdvancedMaterialEnabled.current
+    val rowShape = RoundedCornerShape(14.dp)
     val rowHighlight = when {
-        expressive != null && dragging -> expressive.surfaceContainerHighest.copy(alpha = .75f)
-        expressive != null && current -> expressive.secondaryContainer.copy(alpha = .85f)
-        oneUi != null && dragging -> oneUi.cardAlt
-        oneUi != null && current -> oneUi.chip
-        dragging -> ink.copy(alpha = .14f)
-        current -> ink.copy(alpha = .10f)
+        expressive != null && dragging -> expressive.surfaceContainerHighest.copy(alpha = if (backdrop != null && advancedMaterial) .48f else .85f)
+        expressive != null && current -> expressive.secondaryContainer.copy(alpha = if (backdrop != null && advancedMaterial) .55f else .85f)
+        oneUi != null && dragging -> oneUi.cardAlt.copy(alpha = if (backdrop != null && advancedMaterial) .52f else 1f)
+        oneUi != null && current -> oneUi.chip.copy(alpha = if (backdrop != null && advancedMaterial) .56f else 1f)
+        dragging -> if (surfaceStyle.isDark) Color.White.copy(alpha = if (backdrop != null && advancedMaterial) .12f else .22f)
+            else Color.White.copy(alpha = if (backdrop != null && advancedMaterial) .36f else .56f)
+        current -> if (surfaceStyle.isDark) Color.White.copy(alpha = if (backdrop != null && advancedMaterial) .08f else .14f)
+            else Color.White.copy(alpha = if (backdrop != null && advancedMaterial) .26f else .38f)
         else -> Color.Transparent
     }
     val rowTitleInk = when {
@@ -3201,13 +3267,32 @@ private fun QueueSwipeRow(song: btm.m.auraplayer.data.Song, current: Boolean, in
         oneUi != null && current -> oneUi.onChip
         else -> ink
     }
+    val rowBgModifier = if ((dragging || current) && backdrop != null && advancedMaterial) {
+        Modifier.drawPlainBackdrop(
+            backdrop = backdrop,
+            shape = { rowShape },
+            effects = {
+                vibrancy()
+                backdropBlur(22.dp.toPx())
+            },
+            onDrawSurface = { drawRect(rowHighlight) },
+        )
+    } else {
+        Modifier.background(rowHighlight, rowShape)
+    }
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val currentIndex by rememberUpdatedState(index)
     val deleteWidth = with(density) { 92.dp.toPx() }
     val offset = remember(song.key) { Animatable(0f) }
     val progress = (-offset.value / deleteWidth).coerceIn(0f, 1f)
-    val scale by animateFloatAsState(if (dragging) 0.975f else 1f, spring(dampingRatio = .72f, stiffness = 430f), label = "queueRowScale")
-    Box(Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(14.dp))) {
+    Box(
+        rowModifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .clip(rowShape)
+            .then(if (dragging) Modifier.border(0.65.dp, ink.copy(alpha = 0.20f), rowShape) else Modifier),
+    ) {
         Box(Modifier.fillMaxSize().background(ink.copy(alpha = if (progress > .001f) .08f + progress * .22f else 0f)), contentAlignment = Alignment.CenterEnd) {
             Box(Modifier.padding(end = 16.dp).size(38.dp).graphicsLayer {
                 scaleX = .72f + .28f * progress; scaleY = .72f + .28f * progress
@@ -3216,19 +3301,21 @@ private fun QueueSwipeRow(song: btm.m.auraplayer.data.Song, current: Boolean, in
                 Image(MiuixIcons.Regular.Delete, tr("delete", "删除"), Modifier.size(21.dp), colorFilter = ColorFilter.tint(ink))
             }
         }
-        Row(Modifier.fillMaxWidth().graphicsLayer { translationX = offset.value; scaleX = scale; scaleY = scale }
-            .clip(RoundedCornerShape(14.dp)).background(rowHighlight)
-            .pointerInput(song.key) {
+        Row(Modifier.fillMaxWidth().graphicsLayer { translationX = offset.value }
+            .clip(rowShape)
+            .then(rowBgModifier)
+            .pointerInput(song.key, dragging) {
+                if (dragging) return@pointerInput
                 detectHorizontalDragGestures(
                     onHorizontalDrag = { change, amount ->
-                        if (amount < 0f || offset.value < -1f) { change.consume(); onDragState(true); scope.launch { offset.snapTo((offset.value + amount).coerceIn(-deleteWidth, 0f)) } }
+                        if (amount < 0f || offset.value < -1f) { change.consume(); scope.launch { offset.snapTo((offset.value + amount).coerceIn(-deleteWidth, 0f)) } }
                     },
                     onDragEnd = {
-                        scope.launch { if (offset.value <= -deleteWidth * .78f) { offset.animateTo(-deleteWidth, spring(.78f, 520f)); model.removeQueue(index) } else offset.animateTo(0f, spring(.82f, 380f)); onDragState(false) }
+                        scope.launch { if (offset.value <= -deleteWidth * .78f) { offset.animateTo(-deleteWidth, spring(.78f, 520f)); model.removeQueue(currentIndex) } else offset.animateTo(0f, spring(.82f, 380f)) }
                     },
-                    onDragCancel = { scope.launch { offset.animateTo(0f, spring(.82f, 380f)); onDragState(false) } },
+                    onDragCancel = { scope.launch { offset.animateTo(0f, spring(.82f, 380f)) } },
                 )
-            }.clickable { if (offset.value > -1f) model.queueTo(index) }
+            }.clickable(enabled = !dragging) { if (offset.value > -1f) model.queueTo(currentIndex) }
             .padding(vertical = 6.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Cover(song.artwork, Modifier.size(44.dp), 8.dp)
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
@@ -3236,11 +3323,11 @@ private fun QueueSwipeRow(song: btm.m.auraplayer.data.Song, current: Boolean, in
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(song.artist, color = rowTitleInk.copy(alpha = .66f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Box(reorderHandle(Modifier.size(40.dp, 44.dp)).semantics {
+            Box(reorderHandle(Modifier.size(40.dp, 44.dp).clip(CircleShape)).semantics {
                 contentDescription = tr("reorder_queue", "调整播放顺序")
                 customActions = listOf(
-                    CustomAccessibilityAction(tr("move_up", "上移")) { if (index > 0) { model.moveQueue(index, index - 1); true } else false },
-                    CustomAccessibilityAction(tr("move_down", "下移")) { if (index < model.queue.lastIndex) { model.moveQueue(index, index + 1); true } else false },
+                    CustomAccessibilityAction(tr("move_up", "上移")) { if (currentIndex > 0) { model.moveQueue(currentIndex, currentIndex - 1); true } else false },
+                    CustomAccessibilityAction(tr("move_down", "下移")) { if (currentIndex < model.queue.lastIndex) { model.moveQueue(currentIndex, currentIndex + 1); true } else false },
                 )
             }, contentAlignment = Alignment.Center) {
                 Image(painterResource(R.drawable.ic_player_reorder), null, Modifier.size(22.dp * PlayerIconScale), colorFilter = ColorFilter.tint(ink.copy(alpha = .42f)))
@@ -3250,7 +3337,14 @@ private fun QueueSwipeRow(song: btm.m.auraplayer.data.Song, current: Boolean, in
 }
 
 @Composable
-private fun PlayerQueue(model: AuraViewModel, modifier: Modifier = Modifier, expressive: PlayerExpressiveColors? = null, oneUi: PlayerOneUiColors? = null) {
+private fun PlayerQueue(
+    model: AuraViewModel,
+    modifier: Modifier = Modifier,
+    backdrop: Backdrop? = null,
+    horizontalPadding: Dp = 0.dp,
+    expressive: PlayerExpressiveColors? = null,
+    oneUi: PlayerOneUiColors? = null,
+) {
     val visibleQueue = remember(model.queue, model.queueIndex, model.playbackMode) {
         if (model.playbackMode == btm.m.auraplayer.ROAMING_PLAYBACK_MODE) {
             model.queue.take((model.queueIndex + 1).coerceIn(0, model.queue.size))
@@ -3260,9 +3354,104 @@ private fun PlayerQueue(model: AuraViewModel, modifier: Modifier = Modifier, exp
     }
     val list = rememberLazyListState(initialFirstVisibleItemIndex = model.queueIndex.coerceIn(0, visibleQueue.lastIndex.coerceAtLeast(0)))
     val density = LocalDensity.current
-    val rowStep = with(density) { 58.dp.toPx() }
-    val queueSize by rememberUpdatedState(visibleQueue.size)
-    var draggingIndex by remember { mutableIntStateOf(-1) }
+    val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    val itemSpacing = 2.dp
+    val itemSpacingPx = with(density) { itemSpacing.toPx() }
+    val rowShape = RoundedCornerShape(14.dp)
+
+    var displayItems by remember { mutableStateOf(buildQueueDisplayItems(visibleQueue)) }
+    var draggingId by remember { mutableStateOf<String?>(null) }
+    var dragStartIndex by remember { mutableIntStateOf(-1) }
+    var draggingOffsetY by remember { mutableFloatStateOf(0f) }
+    var settlingId by remember { mutableStateOf<String?>(null) }
+    val settlingOffset = remember { Animatable(0f) }
+    var pendingExpectedKeys by remember { mutableStateOf<List<String>?>(null) }
+
+    LaunchedEffect(visibleQueue) {
+        if (draggingId != null) return@LaunchedEffect
+        val incomingKeys = visibleQueue.map { it.key }
+        val expected = pendingExpectedKeys
+        if (expected != null && incomingKeys != expected) {
+            delay(380L)
+            if (draggingId != null) return@LaunchedEffect
+        }
+        pendingExpectedKeys = null
+        displayItems = buildQueueDisplayItems(visibleQueue)
+    }
+
+    val currentItems by rememberUpdatedState(displayItems)
+
+    fun startDrag(id: String) {
+        val startIdx = currentItems.indexOfFirst { it.id == id }
+        if (startIdx < 0) return
+        settlingId = null
+        scope.launch { settlingOffset.snapTo(0f) }
+        draggingId = id
+        dragStartIndex = startIdx
+        draggingOffsetY = 0f
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+    }
+
+    fun updateDrag(id: String, deltaY: Float) {
+        if (draggingId != id) return
+        draggingOffsetY += deltaY
+        val activeItems = currentItems
+        val currentIndex = activeItems.indexOfFirst { it.id == id }
+        if (currentIndex < 0) return
+
+        val visibleItems = list.layoutInfo.visibleItemsInfo
+        val draggedInfo = visibleItems.firstOrNull { it.key == id } ?: return
+        val layoutSynced = draggedInfo.index == currentIndex &&
+            activeItems.getOrNull(currentIndex)?.id == id
+        if (!layoutSynced) return
+
+        val draggedCenterY = draggedInfo.offset + draggingOffsetY + draggedInfo.size / 2f
+
+        if (draggingOffsetY > 0f && currentIndex < activeItems.lastIndex) {
+            val nextItem = activeItems[currentIndex + 1]
+            val nextInfo = visibleItems.firstOrNull { it.key == nextItem.id }
+            if (nextInfo != null && draggedCenterY > nextInfo.offset + nextInfo.size / 2f) {
+                displayItems = swapQueueDisplayItems(activeItems, id, nextItem.id)
+                draggingOffsetY -= (nextInfo.size + itemSpacingPx)
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                return
+            }
+        }
+
+        if (draggingOffsetY < 0f && currentIndex > 0) {
+            val prevItem = activeItems[currentIndex - 1]
+            val prevInfo = visibleItems.firstOrNull { it.key == prevItem.id }
+            if (prevInfo != null && draggedCenterY < prevInfo.offset + prevInfo.size / 2f) {
+                displayItems = swapQueueDisplayItems(activeItems, id, prevItem.id)
+                draggingOffsetY += (prevInfo.size + itemSpacingPx)
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            }
+        }
+    }
+
+    fun finishDrag(id: String) {
+        if (draggingId != id) return
+        val settledFrom = draggingOffsetY
+        val from = dragStartIndex
+        val to = currentItems.indexOfFirst { it.id == id }
+        draggingId = null
+        dragStartIndex = -1
+        draggingOffsetY = 0f
+        if (from >= 0 && to >= 0 && from != to) {
+            pendingExpectedKeys = currentItems.map { it.song.key }
+            model.moveQueue(from, to)
+        }
+        if (abs(settledFrom) > 0.5f) {
+            settlingId = id
+            scope.launch {
+                settlingOffset.snapTo(settledFrom)
+                settlingOffset.animateTo(0f, spring(dampingRatio = 0.86f, stiffness = 420f))
+                if (settlingId == id) settlingId = null
+            }
+        }
+    }
+
     Box(modifier) {
     LazyColumn(
         state = list,
@@ -3278,32 +3467,137 @@ private fun PlayerQueue(model: AuraViewModel, modifier: Modifier = Modifier, exp
                 blendMode = BlendMode.DstIn,
             )
         },
-        contentPadding = PaddingValues(top = 8.dp, bottom = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        contentPadding = PaddingValues(start = horizontalPadding, end = horizontalPadding, top = 8.dp, bottom = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(itemSpacing),
+        userScrollEnabled = draggingId == null,
     ) {
-        itemsIndexed(visibleQueue) { index, song ->
-            val current = index == model.queueIndex
-            QueueSwipeRow(song, current, index, model, draggingIndex == index,
-                onDragState = { draggingIndex = if (it) index else -1 },
-                reorderHandle = { base -> base.pointerInput(rowStep) {
-                    var remainder = 0f
-                    var from = index
-                    detectVerticalDragGestures(
-                        onDragStart = { from = index; draggingIndex = from; remainder = 0f },
-                        onDragEnd = { draggingIndex = -1 }, onDragCancel = { draggingIndex = -1 },
-                    ) { change, amount ->
-                        change.consume(); remainder += amount
-                        while (abs(remainder) >= rowStep) {
-                            val direction = if (remainder > 0f) 1 else -1
-                            val to = (from + direction).coerceIn(0, (queueSize - 1).coerceAtLeast(0))
-                            if (to == from) { remainder = 0f; break }
-                            model.moveQueue(from, to); from = to; draggingIndex = to
-                            remainder -= direction * rowStep
-                        }
+        itemsIndexed(displayItems, key = { _, item -> item.id }) { index, item ->
+            val isDragging = draggingId == item.id
+            val isSettling = settlingId == item.id
+            val activeOffsetY = when {
+                isDragging -> draggingOffsetY
+                isSettling -> settlingOffset.value
+                else -> 0f
+            }
+            val dragScale by animateFloatAsState(
+                targetValue = if (isDragging) 1.02f else 1f,
+                animationSpec = spring(dampingRatio = 0.82f, stiffness = 460f),
+                label = "queue_drag_scale_${item.id}",
+            )
+            val dragAlpha by animateFloatAsState(
+                targetValue = if (isDragging) 0.98f else 1f,
+                animationSpec = tween(150),
+                label = "queue_drag_alpha_${item.id}",
+            )
+            val placementModifier = if (isDragging) {
+                Modifier
+            } else {
+                Modifier.animateItem(
+                    fadeInSpec = tween(220),
+                    fadeOutSpec = tween(200),
+                    placementSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow,
+                    ),
+                )
+            }
+            val current = if (draggingId != null || pendingExpectedKeys != null) {
+                item.originalIndex == model.queueIndex
+            } else {
+                index == model.queueIndex
+            }
+            val activeIndex = if (draggingId != null || pendingExpectedKeys != null) {
+                item.originalIndex
+            } else {
+                index
+            }
+            var rowCoords by remember(item.id) { mutableStateOf<LayoutCoordinates?>(null) }
+            var handleCoords by remember(item.id) { mutableStateOf<LayoutCoordinates?>(null) }
+            var lastRowWindowY by remember(item.id) { mutableFloatStateOf(0f) }
+            var lastHandleWindowY by remember(item.id) { mutableFloatStateOf(0f) }
+
+            QueueSwipeRow(
+                song = item.song,
+                current = current,
+                index = activeIndex,
+                model = model,
+                dragging = isDragging,
+                backdrop = backdrop,
+                rowModifier = Modifier
+                    .zIndex(if (isDragging) 10f else if (isSettling) 5f else 0f)
+                    .then(placementModifier)
+                    .graphicsLayer {
+                        translationY = activeOffsetY
+                        scaleX = dragScale
+                        scaleY = dragScale
+                        alpha = dragAlpha
+                        shape = rowShape
+                        clip = true
                     }
-                } },
+                    .clip(rowShape)
+                    .onGloballyPositioned { rowCoords = it }
+                    .pointerInput(item.id) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { startOffset ->
+                                val coords = rowCoords
+                                lastRowWindowY = if (coords != null && coords.isAttached) {
+                                    coords.localToWindow(startOffset).y
+                                } else {
+                                    startOffset.y
+                                }
+                                startDrag(item.id)
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                val coords = rowCoords
+                                val deltaY = if (coords != null && coords.isAttached) {
+                                    val windowY = coords.localToWindow(change.position).y
+                                    val d = windowY - lastRowWindowY
+                                    lastRowWindowY = windowY
+                                    d
+                                } else {
+                                    dragAmount.y
+                                }
+                                updateDrag(item.id, deltaY)
+                            },
+                            onDragEnd = { finishDrag(item.id) },
+                            onDragCancel = { finishDrag(item.id) },
+                        )
+                    },
+                reorderHandle = { base ->
+                    base
+                        .onGloballyPositioned { handleCoords = it }
+                        .pointerInput(item.id) {
+                            detectVerticalDragGestures(
+                                onDragStart = { startOffset ->
+                                    val coords = handleCoords
+                                    lastHandleWindowY = if (coords != null && coords.isAttached) {
+                                        coords.localToWindow(startOffset).y
+                                    } else {
+                                        startOffset.y
+                                    }
+                                    startDrag(item.id)
+                                },
+                                onDragEnd = { finishDrag(item.id) },
+                                onDragCancel = { finishDrag(item.id) },
+                            ) { change, amount ->
+                                change.consume()
+                                val coords = handleCoords
+                                val deltaY = if (coords != null && coords.isAttached) {
+                                    val windowY = coords.localToWindow(change.position).y
+                                    val d = windowY - lastHandleWindowY
+                                    lastHandleWindowY = windowY
+                                    d
+                                } else {
+                                    amount
+                                }
+                                updateDrag(item.id, deltaY)
+                            }
+                        }
+                },
                 expressive = expressive,
-                oneUi = oneUi)
+                oneUi = oneUi,
+            )
         }
     }
     }

@@ -551,9 +551,30 @@ private fun ImmersiveHomeBannerBackdrop(
     backgroundStyle: HomeBackgroundStyle,
     modifier: Modifier = Modifier,
 ) {
+    val bannerTheme = rememberHomeBannerTheme(bannerUri)
+    ImmersiveBannerSurfaceBackdrop(
+        bannerTheme = bannerTheme,
+        backgroundStyle = backgroundStyle,
+        modifier = modifier,
+    ) {
+        HomeBannerBackdrop(
+            bannerUri = bannerUri,
+            motionPlayMode = motionPlayMode,
+            replayNonce = replayNonce,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+internal fun ImmersiveBannerSurfaceBackdrop(
+    bannerTheme: HomeBannerTheme,
+    backgroundStyle: HomeBackgroundStyle = HomeBackgroundStyle.COLOR,
+    modifier: Modifier = Modifier,
+    backdropContent: @Composable BoxScope.() -> Unit,
+) {
     val surface = MiuixTheme.colorScheme.surface
     val dark = surface.luminance() < .5f
-    val bannerTheme = rememberHomeBannerTheme(bannerUri)
     val accentMix = bannerTheme.heroMixTint
     val fadeTarget = when (backgroundStyle) {
         HomeBackgroundStyle.DEFAULT -> surface
@@ -584,14 +605,7 @@ private fun ImmersiveHomeBannerBackdrop(
         modifier
     }
     Box(featheredModifier) {
-        Box(Modifier.matchParentSize().miuixLayerBackdrop(heroBackdrop)) {
-            HomeBannerBackdrop(
-                bannerUri = bannerUri,
-                motionPlayMode = motionPlayMode,
-                replayNonce = replayNonce,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+        Box(Modifier.matchParentSize().miuixLayerBackdrop(heroBackdrop), content = backdropContent)
         if (LocalAdvancedMaterialEnabled.current) {
             Box(
                 Modifier

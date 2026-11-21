@@ -149,6 +149,8 @@ val LocalAppUiStyle = staticCompositionLocalOf { AppUiStyle.HYPER }
 
 val LocalAdvancedMaterialEnabled = staticCompositionLocalOf { true }
 
+val LocalAdaptIrregularCovers = staticCompositionLocalOf { false }
+
 /** 底部导航栏、导航搜索按钮及胶囊迷你播放器仅跟随导航栏样式，不随 One/Material 界面风格变化。 */
 internal fun resolveBottomBarChromeUiStyle(navigationStyle: String): AppUiStyle = when (navigationStyle) {
     "one" -> AppUiStyle.ONE
@@ -387,6 +389,7 @@ internal fun ProvideAuraAppTheme(
     }
     CompositionLocalProvider(
         LocalAdvancedMaterialEnabled provides !settings.disableAdvancedMaterial,
+        LocalAdaptIrregularCovers provides settings.adaptIrregularCovers,
         LocalAuraColorStyle provides colorStyle,
     ) {
         AuraUiTheme(

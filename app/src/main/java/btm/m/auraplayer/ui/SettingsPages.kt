@@ -67,6 +67,12 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
                 SwitchPreference(tr("predictive_back", "预测性返回动画"), checked = value.predictive, onCheckedChange = { checked -> model.updateSettings { it.copy(predictive = checked) } })
                 SliderPreference(tr("back_maximum", "预测性返回动画最大进度"), value.maxBackProgress, .1f..1f,
                     "${(value.maxBackProgress * 100).roundToInt()}%", value.predictive, steps = 89, defaultValue = .9f) { progress -> model.updateSettings { it.copy(maxBackProgress = progress) } }
+                SwitchPreference(
+                    title = tr("adapt_irregular_covers", "适配不规则封面"),
+                    summary = tr("adapt_irregular_covers_summary", "非 1:1 比例的封面将按原图比例自适应容器尺寸，不再强制裁剪为正方形"),
+                    checked = value.adaptIrregularCovers,
+                    onCheckedChange = { checked -> model.updateSettings { it.copy(adaptIrregularCovers = checked) } },
+                )
             }
         }
         item {
@@ -467,6 +473,11 @@ private fun LazyListScope.neteaseCloudItems(
             HomeBannerSettings(model, HomeBannerTarget.NETEASE)
         }
     }
+    item(key = "netease_home_order") {
+        SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+            Preference(tr("home_section_order", "首页排序")) { open("home_order:netease") }
+        }
+    }
     item(key = "netease_advanced_toggle") {
         SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
             Preference(tr("advanced_connection", "高级连接设置"), tr("advanced_connection_summary", "可选：使用自建 API 服务")) { state.advanced = !state.advanced }
@@ -527,6 +538,11 @@ private fun LazyListScope.qqCloudItems(
     item(key = "qq_banner") {
         Group(tr("home_banner_settings", "首页横幅")) {
             HomeBannerSettings(model, HomeBannerTarget.QQ)
+        }
+    }
+    item(key = "qq_home_order") {
+        SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+            Preference(tr("home_section_order", "首页排序")) { open("home_order:qq") }
         }
     }
     item(key = "qq_advanced_toggle") {

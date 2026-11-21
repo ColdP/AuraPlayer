@@ -4,6 +4,8 @@
     "about": "このアプリについて",
     "account": "アカウント",
     "account_manage": "アカウントと接続を管理",
+    "adapt_irregular_covers": "非正方形ジャケットに対応",
+    "adapt_irregular_covers_summary": "1:1 以外のジャケットを正方形に強制せず、元の縦横比に合わせて表示します",
     "add": "追加",
     "add_account": "アカウントを追加",
     "add_eq_band": "EQバンドを追加",
@@ -1258,6 +1260,8 @@
     "oobe_feat_widget_desc": "複数サイズのホーム画面ウィジェットと背面ディスプレイ操作に対応し、いつでも手軽に選曲できます。",
     "oobe_feat_share_badge": "細部へのこだわり",
     "oobe_feat_share_title": "歌詞シェアカード＆タグ編集",
-    "oobe_feat_share_desc": "豊富なミニマルテンプレートで歌詞カードを即座に作成でき、ローカル音源のタグやカバー編集にも対応します。"
+    "oobe_feat_share_desc": "豊富なミニマルテンプレートで歌詞カードを即座に作成でき、ローカル音源のタグやカバー編集にも対応します。",
+    "home_section_order": "ホーム画面の並び替え",
+    "hide": "非表示"
   }
 }
