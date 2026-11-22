@@ -110,14 +110,23 @@ internal fun PopularSongStrip(
                     for (index in indices) {
                         val song = songs[index]
                         val detail = subtitle(song)
+                        val showVip = song.shouldShowVipBadge(model.settings.value)
                         Row(Modifier.fillMaxWidth().heightIn(min = rowHeight).clickable { onPlay(index) },
                             verticalAlignment = Alignment.CenterVertically) {
                             Artwork(song.artwork, Modifier.size(40.dp * 1.35f * .88f * .93f), cornerRadius = ListArtworkCornerRadius)
                             Column(Modifier.weight(1f).padding(start = 10.dp, end = 4.dp)) {
                                 Text(song.title, color = if (model.current?.key == song.key) accent else foreground,
                                     fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (detail.isNotEmpty()) Text(detail, color = muted, fontSize = 12.sp, maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                                if (detail.isNotEmpty() || showVip) {
+                                    Row(
+                                        modifier = Modifier.padding(top = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    ) {
+                                        if (showVip) SongVipBadge(accent)
+                                        if (detail.isNotEmpty()) Text(detail, color = muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
                             }
                             IconButton(onClick = { openSongActions(SongActionRequest(song, backdrop)) }, modifier = Modifier.size(44.dp)) {
                                 Image(AuraMoreHorizontalIcon, tr("more", "更多"), Modifier.size(20.dp), colorFilter = ColorFilter.tint(muted))
@@ -844,13 +853,30 @@ internal fun CatalogDetailPage(
                 Row(Modifier.fillMaxWidth().clickable { model.playCollection(tracks, index, cloud) }.padding(vertical = trackPadding), verticalAlignment = Alignment.CenterVertically) {
                     if (artist) Artwork(song.artwork, Modifier.size(42.dp), cornerRadius = ListArtworkCornerRadius)
                     else Text("${index + 1}", color = muted, fontSize = 13.sp, modifier = Modifier.width(28.dp))
+                    val showVip = song.shouldShowVipBadge(model.settings.value)
                     Column(Modifier.weight(1f).padding(start = if (artist) 12.dp else 0.dp)) {
                         Text(song.title, color = if (model.current?.key == song.key) accent else foreground, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                        if (artist) Text(formatArtistSongAlbumYear(song),
-                            color = muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        else if (showTrackArtist) Text(song.artist.trim(), color = foreground.copy(alpha = .56f), fontSize = 11.sp,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 1.dp))
+                        if (artist) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
+                                if (showVip) SongVipBadge(accent)
+                                Text(formatArtistSongAlbumYear(song), color = muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        } else if (showTrackArtist || showVip) {
+                            Row(
+                                modifier = Modifier.padding(top = 1.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
+                                if (showVip) SongVipBadge(accent)
+                                val artistLabel = if (showTrackArtist) song.artist.trim() else song.artist.trim().ifEmpty { albumArtist }
+                                if (artistLabel.isNotEmpty()) Text(artistLabel, color = foreground.copy(alpha = .56f), fontSize = 11.sp,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
                     }
                     IconButton(onClick = { openSongActions(SongActionRequest(song, songActionsBackdrop)) }, modifier = Modifier.size(44.dp)) {
                         Image(AuraMoreHorizontalIcon, tr("more", "更多"), Modifier.size(20.dp), colorFilter = ColorFilter.tint(muted))

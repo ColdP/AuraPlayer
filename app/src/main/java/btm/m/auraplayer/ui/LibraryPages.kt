@@ -136,6 +136,22 @@ fun Artwork(
 
 private fun durationText(ms: Long): String = "${ms / 60000}:${(ms / 1000 % 60).toString().padStart(2, '0')}"
 
+internal fun Song.shouldShowVipBadge(settings: btm.m.auraplayer.data.Appearance): Boolean =
+    cloud && vip && if (provider == btm.m.auraplayer.data.PROVIDER_QQ) settings.qqShowVipBadge else settings.neteaseShowVipBadge
+
+@Composable
+internal fun SongVipBadge(
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    Image(
+        painter = painterResource(R.drawable.ic_vip_badge),
+        contentDescription = "VIP",
+        modifier = modifier.width(26.dp).height(13.5.dp),
+        colorFilter = ColorFilter.tint(tint),
+    )
+}
+
 @Composable
 fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction: (() -> Unit)? = null) {
     val layout = LocalAuraLayout.current
@@ -143,6 +159,7 @@ fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction:
     val openActions = LocalSongActions.current
     val backdrop = LocalToolbarBackdrop.current
     val isCurrent = model.current?.key == song.key
+    val showVip = song.shouldShowVipBadge(model.settings.value)
     when (LocalAppUiStyle.current) {
         AppUiStyle.ONE -> {
             val palette = rememberActiveOneUiPalette()
@@ -168,14 +185,20 @@ fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction:
                         fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
                         color = titleColor,
                     )
-                    Text(
-                        "${song.artist} · ${song.album}",
-                        fontSize = 13.sp,
-                        color = subColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    Row(
                         modifier = Modifier.padding(top = 2.dp),
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        if (showVip) SongVipBadge(Color(palette.accentDeep))
+                        Text(
+                            "${song.artist} · ${song.album}",
+                            fontSize = 13.sp,
+                            color = subColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(durationText(song.duration), fontSize = 12.sp, color = subColor)
@@ -191,6 +214,7 @@ fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction:
             val rowBg = if (isCurrent) scheme.secondaryContainer else Color.Transparent
             val titleColor = if (isCurrent) scheme.onSecondaryContainer else scheme.onSurface
             val subColor = if (isCurrent) scheme.onSecondaryContainer.copy(alpha = 0.78f) else scheme.onSurfaceVariant
+            val vipTint = if (isCurrent) scheme.onSecondaryContainer else scheme.primary
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -210,14 +234,20 @@ fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction:
                         fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
                         color = titleColor,
                     )
-                    Text(
-                        "${song.artist} · ${song.album}",
-                        fontSize = 13.sp,
-                        color = subColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    Row(
                         modifier = Modifier.padding(top = 3.dp),
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        if (showVip) SongVipBadge(vipTint)
+                        Text(
+                            "${song.artist} · ${song.album}",
+                            fontSize = 13.sp,
+                            color = subColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(durationText(song.duration), fontSize = 12.sp, color = subColor)
@@ -236,8 +266,15 @@ fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction:
             Text(song.title.ifBlank { tr("unknown_title", "未命名歌曲") }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 15.sp,
                 fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
                 color = if (isCurrent) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface)
-            Text("${song.artist} · ${song.album}", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+            Row(
+                modifier = Modifier.padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                if (showVip) SongVipBadge(MiuixTheme.colorScheme.primary)
+                Text("${song.artist} · ${song.album}", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(durationText(song.duration), style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
@@ -1093,8 +1130,15 @@ private fun RankSongRow(rank: Int, song: Song, model: AuraViewModel, onClick: ()
         Column(Modifier.weight(1f).padding(horizontal = 11.dp)) {
             Text(song.title.ifBlank { tr("unknown_title", "未命名歌曲") }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 15.sp,
                 fontWeight = if (model.current?.key == song.key) FontWeight.Bold else FontWeight.Medium)
-            Text("${song.artist} · ${song.album}", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+            Row(
+                modifier = Modifier.padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                if (song.shouldShowVipBadge(model.settings.value)) SongVipBadge(MiuixTheme.colorScheme.primary)
+                Text("${song.artist} · ${song.album}", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
         Text("${song.playCount} ${tr("play_count", "次")}", style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
         IconButton(onClick = { openActions(SongActionRequest(song, backdrop)) }, modifier = Modifier.size(44.dp)) {

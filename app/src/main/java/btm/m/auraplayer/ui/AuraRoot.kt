@@ -576,6 +576,7 @@ private fun AuraShell(model: AuraViewModel, onEnterOobe: () -> Unit = {}) {
                     CompositionLocalProvider(LocalToolbarBackdrop provides backdrop) {
                         val results = model.searchHits.map { hit -> HomeSearchResult(hit.key, hit.title,
                             hit.subtitle, searchCategoryLabel(hit.kind), artwork = hit.artwork,
+                            showVipBadge = hit.song?.shouldShowVipBadge(settings) == true,
                             requiresService = false, onClick = {
                                 model.openSearchHit(hit)
                                 if (hit.kind in listOf(btm.m.auraplayer.data.SearchCategory.ALBUM, btm.m.auraplayer.data.SearchCategory.ARTIST, btm.m.auraplayer.data.SearchCategory.BLOG)) searchOpen = false

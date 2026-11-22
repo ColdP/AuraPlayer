@@ -1759,6 +1759,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             NeteaseChartItem(
                 spec = spec,
                 artwork = meta?.artwork?.takeIf { it.isNotBlank() } ?: prev?.artwork.orEmpty(),
+                topSongArtwork = meta?.topSongArtwork?.takeIf { it.isNotBlank() } ?: prev?.topSongArtwork.orEmpty(),
                 updateFrequency = meta?.updateFrequency?.takeIf { it.isNotBlank() }
                     ?: prev?.updateFrequency?.takeIf { it.isNotBlank() }
                     ?: spec.defaultFrequency,
@@ -1875,21 +1876,49 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 }.awaitAll().toMap()
                 ensureActive()
                 if (generation != cloudGeneration) return@launch
-                val updatedGenre = cloudChartsByGroup[NeteaseChartGroup.GENRE].orEmpty().map { item ->
-                    if (item.spec.source != NeteaseChartSource.STYLE_TAG) item
-                    else {
-                        val songs = styleHydration[item.spec.id].orEmpty()
-                        if (songs.isEmpty()) item
-                        else item.copy(
-                            artwork = songs.firstOrNull { it.artwork.isNotBlank() }?.artwork
-                                ?.replaceFirst("http://", "https://")
-                                ?: item.artwork,
-                            tracks = songs.take(3).map { NeteaseChartTrackPreview(it.title, it.artist) },
-                        )
+                val currentById = cloudChartsByGroup.values.flatten().associateBy { it.spec.id }
+                val playlistsNeedingTopSong = NeteaseChartCatalog.topSongCoverPlaylistSpecs.filter { spec ->
+                    force || currentById[spec.id]?.let { it.topSongArtwork.isBlank() || it.tracks.isEmpty() } != false
+                }
+                val playlistTopSongHydration = playlistsNeedingTopSong.map { spec ->
+                    async {
+                        spec.id to cloudSection { app.api.playlistSongs(spec.id, offset = 0, limit = 1, refresh = force).items.firstOrNull() }
+                    }
+                }.awaitAll().toMap()
+                ensureActive()
+                if (generation != cloudGeneration) return@launch
+                cloudChartsByGroup = cloudChartsByGroup.mapValues { (_, list) ->
+                    list.map { item ->
+                        when (item.spec.source) {
+                            NeteaseChartSource.STYLE_TAG -> {
+                                val songs = styleHydration[item.spec.id].orEmpty()
+                                if (songs.isEmpty()) item
+                                else {
+                                    val cover = songs.firstOrNull { it.artwork.isNotBlank() }?.artwork
+                                        ?.replaceFirst("http://", "https://")
+                                        ?: item.artwork
+                                    item.copy(
+                                        artwork = cover,
+                                        topSongArtwork = cover,
+                                        tracks = songs.take(3).map { NeteaseChartTrackPreview(it.title, it.artist) },
+                                    )
+                                }
+                            }
+                            NeteaseChartSource.PLAYLIST -> {
+                                val topSong = playlistTopSongHydration[item.spec.id]
+                                if (topSong == null) item
+                                else {
+                                    val topCover = topSong.artwork.replaceFirst("http://", "https://")
+                                    item.copy(
+                                        topSongArtwork = topCover.ifBlank { item.topSongArtwork },
+                                        tracks = if (item.tracks.isNotEmpty()) item.tracks else listOf(NeteaseChartTrackPreview(topSong.title, topSong.artist)),
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
-                cloudChartsByGroup = cloudChartsByGroup + (NeteaseChartGroup.GENRE to updatedGenre)
-                val anyHydrated = meta.isNotEmpty() || styleHydration.values.any { !it.isNullOrEmpty() }
+                val anyHydrated = meta.isNotEmpty() || styleHydration.values.any { !it.isNullOrEmpty() } || playlistTopSongHydration.values.any { it != null }
                 cloudChartsHydrated = anyHydrated
                 cloudChartsFailed = !anyHydrated
             } catch (e: CancellationException) {

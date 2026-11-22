@@ -202,9 +202,11 @@ class QqMusicApi(
         val albumMid = o.optString("albummid", o.optJSONObject("album")?.optString("mid").orEmpty())
         val album = o.optString("albumname", o.optJSONObject("album")?.optString("name").orEmpty())
         val seconds = o.optLong("interval", 0L)
+        val pay = o.optJSONObject("pay")
+        val vip = pay?.optInt("pay_play", pay.optInt("payplay", 0)) == 1 || o.optInt("isvip", 0) == 1
         Song(id, o.optString("songname", o.optString("name", o.optString("title"))), artist, album, 0, 0, seconds * 1000L,
             "aura://qqmusic/$mid", albumMid.takeIf { it.isNotBlank() }?.let { "https://y.qq.com/music/photo_new/T002R500x500M000$it.jpg" }.orEmpty(),
-            cloud = true, provider = PROVIDER_QQ)
+            cloud = true, provider = PROVIDER_QQ, vip = vip)
     }
 
     private fun String.https() = if (startsWith("http://")) "https://" + removePrefix("http://") else this

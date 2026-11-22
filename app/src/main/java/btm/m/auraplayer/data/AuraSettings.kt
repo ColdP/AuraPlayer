@@ -190,6 +190,8 @@ data class Appearance(
     val cloudDisabled: Boolean = false,
     val heartbeatEnabled: Boolean = true,
     val neteaseScrobbleEnabled: Boolean = true,
+    val neteaseShowVipBadge: Boolean = false,
+    val qqShowVipBadge: Boolean = false,
     val localAvatarPath: String = "",
     val localUserName: String = "",
     val localHomeSignature: String = "",
@@ -338,6 +340,8 @@ class AuraSettings(context: Context) {
             cloudDisabled = prefs.getBoolean("cloudDisabled", false),
             heartbeatEnabled = prefs.getBoolean("heartbeatEnabled", true),
             neteaseScrobbleEnabled = prefs.getBoolean("neteaseScrobbleEnabled", true),
+            neteaseShowVipBadge = prefs.getBoolean("neteaseShowVipBadge", false),
+            qqShowVipBadge = prefs.getBoolean("qqShowVipBadge", false),
             localAvatarPath = prefs.getString("localAvatarPath", "").orEmpty(),
             localUserName = prefs.getString("localUserName", "").orEmpty(),
             localHomeSignature = prefs.getString("localHomeSignature", "").orEmpty(),
@@ -400,6 +404,8 @@ class AuraSettings(context: Context) {
             .putString("cloudSource", v.cloudSource).putString("cloudSearchSource", v.cloudSearchSource)
             .putBoolean("cloudDisabled", v.cloudDisabled).putBoolean("heartbeatEnabled", v.heartbeatEnabled)
             .putBoolean("neteaseScrobbleEnabled", v.neteaseScrobbleEnabled)
+            .putBoolean("neteaseShowVipBadge", v.neteaseShowVipBadge)
+            .putBoolean("qqShowVipBadge", v.qqShowVipBadge)
             .putString("localAvatarPath", v.localAvatarPath)
             .putString("localUserName", v.localUserName)
             .putString("localHomeSignature", v.localHomeSignature)

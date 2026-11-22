@@ -466,6 +466,11 @@ private fun LazyListScope.neteaseCloudItems(
                 checked = model.settings.value.neteaseScrobbleEnabled,
                 onCheckedChange = { enabled -> model.updateSettings { it.copy(neteaseScrobbleEnabled = enabled) } },
             )
+            SwitchPreference(
+                title = tr("show_vip_badge", "显示 VIP 歌曲标识"),
+                checked = model.settings.value.neteaseShowVipBadge,
+                onCheckedChange = { enabled -> model.updateSettings { it.copy(neteaseShowVipBadge = enabled) } },
+            )
         }
     }
     item(key = "netease_banner") {
@@ -533,6 +538,15 @@ private fun LazyListScope.qqCloudItems(
                 state.cookie = ""
                 model.logoutQq()
             }
+        }
+    }
+    item(key = "qq_features") {
+        SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+            SwitchPreference(
+                title = tr("show_vip_badge", "显示 VIP 歌曲标识"),
+                checked = model.settings.value.qqShowVipBadge,
+                onCheckedChange = { enabled -> model.updateSettings { it.copy(qqShowVipBadge = enabled) } },
+            )
         }
     }
     item(key = "qq_banner") {

@@ -159,9 +159,10 @@ private fun CloudHomeChartCard(
             CloudChartArtwork(
                 chart = chart,
                 title = title,
+                artworkUri = chart.artwork,
                 modifier = Modifier.size(56.dp),
                 cornerRadius = 14.dp,
-                showStyleBadge = false,
+                showEditorialOverlay = false,
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
@@ -458,21 +459,42 @@ private fun CloudChartFeaturedCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(13.dp),
         ) {
+            val thumbBackdrop = rememberLayerBackdrop {
+                drawRect(cardColor)
+                drawContent()
+            }
             Box(Modifier.size(84.dp)) {
-                CloudChartArtwork(
-                    chart = chart,
-                    title = title,
-                    modifier = Modifier.fillMaxSize(),
-                    cornerRadius = 16.dp,
-                    showStyleBadge = false,
-                )
+                Box(Modifier.fillMaxSize().layerBackdrop(thumbBackdrop)) {
+                    CloudChartArtwork(
+                        chart = chart,
+                        title = title,
+                        artworkUri = chart.artwork,
+                        modifier = Modifier.fillMaxSize(),
+                        cornerRadius = 16.dp,
+                        showEditorialOverlay = false,
+                    )
+                }
+                val playShape = RoundedCornerShape(10.dp)
+                val playBg = if (LocalAdvancedMaterialEnabled.current) {
+                    Modifier.drawPlainBackdrop(
+                        backdrop = thumbBackdrop,
+                        shape = { playShape },
+                        effects = {
+                            vibrancy()
+                            backdropBlur(12.dp.toPx())
+                        },
+                        onDrawSurface = { drawRect(Color.Black.copy(alpha = 0.24f)) },
+                    )
+                } else {
+                    Modifier.background(Color.Black.copy(alpha = 0.50f), playShape)
+                }
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(6.dp)
                         .size(28.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.52f))
+                        .clip(playShape)
+                        .then(playBg)
                         .clickable { model.playCloudChart(chart, title) },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -604,6 +626,12 @@ private fun CloudChartGridCard(
     }
     val cardColor = lerp(baseSurface, accentColor, if (dark) 0.06f else 0.035f)
     val summaryColor = MiuixTheme.colorScheme.onSurfaceVariantSummary
+    val usesTopSongCover = NeteaseChartCatalog.usesTopSongCoverCard(chart.spec)
+    val coverUri = if (usesTopSongCover) {
+        chart.topSongArtwork.ifBlank { chart.artwork }
+    } else {
+        chart.artwork
+    }
     val firstTrack = chart.tracks.firstOrNull()
     val subtitle = when {
         firstTrack != null && firstTrack.artist.isNotBlank() -> "#1 ${firstTrack.title} · ${firstTrack.artist}"
@@ -634,9 +662,10 @@ private fun CloudChartGridCard(
                 CloudChartArtwork(
                     chart = chart,
                     title = title,
+                    artworkUri = coverUri,
                     modifier = Modifier.fillMaxSize(),
                     cornerRadius = 14.dp,
-                    showStyleBadge = chart.spec.source == NeteaseChartSource.STYLE_TAG,
+                    showEditorialOverlay = usesTopSongCover,
                 )
             }
             if (frequency.isNotBlank()) {
@@ -671,13 +700,27 @@ private fun CloudChartGridCard(
                     )
                 }
             }
+            val playShape = RoundedCornerShape(12.dp)
+            val playBg = if (LocalAdvancedMaterialEnabled.current) {
+                Modifier.drawPlainBackdrop(
+                    backdrop = tagBackdrop,
+                    shape = { playShape },
+                    effects = {
+                        vibrancy()
+                        backdropBlur(12.dp.toPx())
+                    },
+                    onDrawSurface = { drawRect(Color.Black.copy(alpha = 0.24f)) },
+                )
+            } else {
+                Modifier.background(Color.Black.copy(alpha = 0.48f), playShape)
+            }
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(8.dp)
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.52f))
+                    .size(34.dp)
+                    .clip(playShape)
+                    .then(playBg)
                     .clickable { model.playCloudChart(chart, title) },
                 contentAlignment = Alignment.Center,
             ) {
@@ -719,9 +762,10 @@ private fun CloudChartGridCard(
 private fun CloudChartArtwork(
     chart: NeteaseChartItem,
     title: String,
+    artworkUri: String,
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 14.dp,
-    showStyleBadge: Boolean = false,
+    showEditorialOverlay: Boolean = false,
 ) {
     val accent = Color(chart.spec.accentHex)
     val deep = lerp(accent, Color(0xFF0E1118), 0.52f)
@@ -732,14 +776,14 @@ private fun CloudChartArtwork(
             .clip(shape)
             .background(Brush.linearGradient(listOf(bright, accent, deep))),
     ) {
-        if (chart.artwork.isNotBlank()) {
+        if (artworkUri.isNotBlank()) {
             Artwork(
-                uri = chart.artwork,
+                uri = artworkUri,
                 modifier = Modifier.fillMaxSize(),
                 cornerRadius = cornerRadius,
                 adaptIrregular = false,
             )
-            if (showStyleBadge && chart.spec.styleBadge.isNotBlank()) {
+            if (showEditorialOverlay) {
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -756,17 +800,19 @@ private fun CloudChartArtwork(
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .padding(start = 10.dp, end = 44.dp, bottom = 10.dp),
+                        .padding(start = 10.dp, end = 48.dp, bottom = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(1.dp),
                 ) {
-                    Text(
-                        text = chart.spec.styleBadge,
-                        color = Color.White.copy(alpha = 0.84f),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp,
-                        maxLines = 1,
-                    )
+                    if (chart.spec.styleBadge.isNotBlank()) {
+                        Text(
+                            text = chart.spec.styleBadge,
+                            color = Color.White.copy(alpha = 0.84f),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp,
+                            maxLines = 1,
+                        )
+                    }
                     Text(
                         text = title,
                         color = Color.White,

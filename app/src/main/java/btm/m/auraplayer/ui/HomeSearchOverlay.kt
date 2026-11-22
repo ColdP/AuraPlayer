@@ -42,6 +42,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import btm.m.auraplayer.ui.navigation.InteractiveHighlight
@@ -82,6 +83,7 @@ internal data class HomeSearchResult(
     val scopes: String,
     val iconRes: Int? = null,
     val artwork: String = "",
+    val showVipBadge: Boolean = false,
     val requiresService: Boolean = true,
     val onClick: () -> Unit,
 )
@@ -303,13 +305,25 @@ private fun SearchResultPreference(result: HomeSearchResult, enabled: Boolean, o
                     style = MiuixTheme.textStyles.body1,
                     color = colors.onSurface.copy(alpha = if (enabled) 1f else .38f),
                 )
-                if (result.description.isNotBlank()) {
-                    Text(
-                        result.description,
+                if (result.description.isNotBlank() || result.showVipBadge) {
+                    Row(
                         modifier = Modifier.padding(top = 4.dp),
-                        style = MiuixTheme.textStyles.body2,
-                        color = colors.onSurfaceVariantSummary.copy(alpha = if (enabled) 1f else .38f),
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        if (result.showVipBadge) {
+                            SongVipBadge(colors.primary.copy(alpha = if (enabled) 1f else .38f))
+                        }
+                        if (result.description.isNotBlank()) {
+                            Text(
+                                result.description,
+                                style = MiuixTheme.textStyles.body2,
+                                color = colors.onSurfaceVariantSummary.copy(alpha = if (enabled) 1f else .38f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
             result.iconRes?.let { resource ->

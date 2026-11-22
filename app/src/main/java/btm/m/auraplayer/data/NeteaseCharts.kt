@@ -32,6 +32,7 @@ data class NeteaseChartSpec(
 data class NeteaseChartItem(
     val spec: NeteaseChartSpec,
     val artwork: String = "",
+    val topSongArtwork: String = "",
     val updateFrequency: String = spec.defaultFrequency,
     val tracks: List<NeteaseChartTrackPreview> = emptyList(),
 ) {
@@ -43,6 +44,7 @@ internal data class NeteaseToplistMeta(
     val id: Long,
     val name: String,
     val artwork: String,
+    val topSongArtwork: String,
     val updateFrequency: String,
     val tracks: List<NeteaseChartTrackPreview>,
 )
@@ -53,12 +55,12 @@ object NeteaseChartCatalog {
         NeteaseChartSpec(3779629L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_new_songs", "新歌榜", "每天更新", 0xFF2FA89A),
         NeteaseChartSpec(3778678L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_hot_songs", "热歌榜", "每天更新", 0xFFE05A47),
         NeteaseChartSpec(2884035L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_original", "原创榜", "每周四更新", 0xFF6A6EE8),
-        NeteaseChartSpec(7785066739L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_vip_hot", "VIP 热歌榜", "每天更新", 0xFFC89B54),
-        NeteaseChartSpec(7785123708L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_vip_new", "VIP 新歌榜", "每天更新", 0xFFB98B48),
-        NeteaseChartSpec(8246775932L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_realtime_heat", "实时热度榜", "实时更新", 0xFFE5694B),
-        NeteaseChartSpec(6723173524L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_viral_hot", "网络热歌榜", "每周五更新", 0xFFD85B88),
-        NeteaseChartSpec(13372522766L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_trend", "潮流风向榜", "每天更新", 0xFF7B61FF),
-        NeteaseChartSpec(18176153161L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_realtime_share", "实时分享榜", "实时更新", 0xFF3A9BD5),
+        NeteaseChartSpec(7785066739L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_vip_hot", "VIP 热歌榜", "每天更新", 0xFFC89B54, styleBadge = "VIP HOT"),
+        NeteaseChartSpec(7785123708L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_vip_new", "VIP 新歌榜", "每天更新", 0xFFB98B48, styleBadge = "VIP NEW"),
+        NeteaseChartSpec(8246775932L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_realtime_heat", "实时热度榜", "实时更新", 0xFFE5694B, styleBadge = "LIVE"),
+        NeteaseChartSpec(6723173524L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_viral_hot", "网络热歌榜", "每周五更新", 0xFFD85B88, styleBadge = "VIRAL"),
+        NeteaseChartSpec(13372522766L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_trend", "潮流风向榜", "每天更新", 0xFF7B61FF, styleBadge = "TREND"),
+        NeteaseChartSpec(18176153161L, NeteaseChartGroup.FEATURED, NeteaseChartSource.PLAYLIST, "chart_realtime_share", "实时分享榜", "实时更新", 0xFF3A9BD5, styleBadge = "SHARE"),
     )
 
     val genreSpecs: List<NeteaseChartSpec> = listOf(
@@ -68,14 +70,14 @@ object NeteaseChartCatalog {
         NeteaseChartSpec(1032L, NeteaseChartGroup.GENRE, NeteaseChartSource.STYLE_TAG, "chart_western_pop", "欧美流行榜", "实时热门", 0xFF4C80D8, styleBadge = "WEST"),
         NeteaseChartSpec(1180L, NeteaseChartGroup.GENRE, NeteaseChartSource.STYLE_TAG, "chart_kpop", "K-Pop 榜", "实时热门", 0xFFC566D6, styleBadge = "K-POP"),
         NeteaseChartSpec(1034L, NeteaseChartGroup.GENRE, NeteaseChartSource.STYLE_TAG, "chart_jpop", "J-Pop 榜", "实时热门", 0xFF3E9DC7, styleBadge = "J-POP"),
-        NeteaseChartSpec(12225155968L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_western_rnb", "欧美 R&B 榜", "每周五更新", 0xFF8C63D6),
-        NeteaseChartSpec(14028249541L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_global_rap", "全球说唱榜", "每周五更新", 0xFFD67C3B),
-        NeteaseChartSpec(71385702L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_acg", "ACG 榜", "每周四更新", 0xFFDF5C9C),
-        NeteaseChartSpec(3001890046L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_vocaloid", "VOCALOID 榜", "每天更新", 0xFF39C5BB),
-        NeteaseChartSpec(5059633707L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_rock", "摇滚榜", "每周五更新", 0xFFD14B4B),
-        NeteaseChartSpec(5059661515L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_folk", "民谣榜", "每周五更新", 0xFF4F9D79),
-        NeteaseChartSpec(71384707L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_classical", "古典榜", "每周四更新", 0xFF8E7B64),
-        NeteaseChartSpec(5059642708L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_guofeng", "国风榜", "每周五更新", 0xFFB85450),
+        NeteaseChartSpec(12225155968L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_western_rnb", "欧美 R&B 榜", "每周五更新", 0xFF8C63D6, styleBadge = "R&B"),
+        NeteaseChartSpec(14028249541L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_global_rap", "全球说唱榜", "每周五更新", 0xFFD67C3B, styleBadge = "RAP"),
+        NeteaseChartSpec(71385702L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_acg", "ACG 榜", "每周四更新", 0xFFDF5C9C, styleBadge = "ACG"),
+        NeteaseChartSpec(3001890046L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_vocaloid", "VOCALOID 榜", "每天更新", 0xFF39C5BB, styleBadge = "VOCALOID"),
+        NeteaseChartSpec(5059633707L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_rock", "摇滚榜", "每周五更新", 0xFFD14B4B, styleBadge = "ROCK"),
+        NeteaseChartSpec(5059661515L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_folk", "民谣榜", "每周五更新", 0xFF4F9D79, styleBadge = "FOLK"),
+        NeteaseChartSpec(71384707L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_classical", "古典榜", "每周四更新", 0xFF8E7B64, styleBadge = "CLASSICAL"),
+        NeteaseChartSpec(5059642708L, NeteaseChartGroup.GENRE, NeteaseChartSource.PLAYLIST, "chart_guofeng", "国风榜", "每周五更新", 0xFFB85450, styleBadge = "GUOFENG"),
     )
 
     val globalSpecs: List<NeteaseChartSpec> = listOf(
@@ -88,13 +90,13 @@ object NeteaseChartCatalog {
     )
 
     val languageSpecs: List<NeteaseChartSpec> = listOf(
-        NeteaseChartSpec(2809513713L, NeteaseChartGroup.LANGUAGE, NeteaseChartSource.PLAYLIST, "chart_western_hot", "欧美热歌榜", "每周四更新", 0xFF4D79C8),
-        NeteaseChartSpec(2809577409L, NeteaseChartGroup.LANGUAGE, NeteaseChartSource.PLAYLIST, "chart_western_new", "欧美新歌榜", "每天更新", 0xFF3D96B8),
-        NeteaseChartSpec(5059644681L, NeteaseChartGroup.LANGUAGE, NeteaseChartSource.PLAYLIST, "chart_japanese", "日语榜", "每周二更新", 0xFFE36B88),
-        NeteaseChartSpec(745956260L, NeteaseChartGroup.LANGUAGE, NeteaseChartSource.PLAYLIST, "chart_korean", "韩语榜", "每周四更新", 0xFF9C6BDE),
-        NeteaseChartSpec(6732051320L, NeteaseChartGroup.LANGUAGE, NeteaseChartSource.PLAYLIST, "chart_russian", "俄语榜", "每周四更新", 0xFF597BB5),
-        NeteaseChartSpec(7095271308L, NeteaseChartGroup.LANGUAGE, NeteaseChartSource.PLAYLIST, "chart_thai", "泰语榜", "每周四更新", 0xFFD98743),
-        NeteaseChartSpec(6732014811L, NeteaseChartGroup.LANGUAGE, NeteaseChartSource.PLAYLIST, "chart_vietnamese", "越南语榜", "每周四更新", 0xFF479B74),
+        NeteaseChartSpec(2809513713L, NeteaseChartGroup.LANGUAGE, NeteaseChartSource.PLAYLIST, "chart_western_hot", "欧美热歌榜", "每周四更新", 0xFF4D79C8, styleBadge = "EN HOT"),
+        NeteaseChartSpec(2809577409L, NeteaseChartGroup.LANGUAGE, NeteaseChartSource.PLAYLIST, "chart_western_new", "欧美新歌榜", "每天更新", 0xFF3D96B8, styleBadge = "EN NEW"),
+        NeteaseChartSpec(5059644681L, NeteaseChartGroup.LANGUAGE, NeteaseChartSource.PLAYLIST, "chart_japanese", "日语榜", "每周二更新", 0xFFE36B88, styleBadge = "JAPANESE"),
+        NeteaseChartSpec(745956260L, NeteaseChartGroup.LANGUAGE, NeteaseChartSource.PLAYLIST, "chart_korean", "韩语榜", "每周四更新", 0xFF9C6BDE, styleBadge = "KOREAN"),
+        NeteaseChartSpec(6732051320L, NeteaseChartGroup.LANGUAGE, NeteaseChartSource.PLAYLIST, "chart_russian", "俄语榜", "每周四更新", 0xFF597BB5, styleBadge = "RUSSIAN"),
+        NeteaseChartSpec(7095271308L, NeteaseChartGroup.LANGUAGE, NeteaseChartSource.PLAYLIST, "chart_thai", "泰语榜", "每周四更新", 0xFFD98743, styleBadge = "THAI"),
+        NeteaseChartSpec(6732014811L, NeteaseChartGroup.LANGUAGE, NeteaseChartSource.PLAYLIST, "chart_vietnamese", "越南语榜", "每周四更新", 0xFF479B74, styleBadge = "VIETNAMESE"),
     )
 
     val specsByGroup: Map<NeteaseChartGroup, List<NeteaseChartSpec>> = linkedMapOf(
@@ -113,6 +115,16 @@ object NeteaseChartCatalog {
     )
 
     val styleSpecs: List<NeteaseChartSpec> = genreSpecs.filter { it.source == NeteaseChartSource.STYLE_TAG }
+
+    /** Playlist charts using the unified Top-1 song cover editorial card style. */
+    val topSongCoverPlaylistSpecs: List<NeteaseChartSpec> =
+        (featuredSpecs.drop(4) + genreSpecs.filter { it.source == NeteaseChartSource.PLAYLIST } + languageSpecs)
+            .distinctBy { it.id }
+
+    fun usesTopSongCoverCard(spec: NeteaseChartSpec): Boolean =
+        spec.group != NeteaseChartGroup.GLOBAL && spec.id !in flagshipIds
+
+    private val flagshipIds: Set<Long> = featuredSpecs.take(4).mapTo(hashSetOf()) { it.id }
 
     fun defaultHomeItems(): List<NeteaseChartItem> = homeSpecs.map { NeteaseChartItem(it) }
 

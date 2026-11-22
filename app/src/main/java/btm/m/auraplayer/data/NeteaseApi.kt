@@ -267,16 +267,21 @@ class NeteaseApi(
                 .ifBlank { item.optString("coverImgUrl") }
                 .ifBlank { item.optString("songCoverImgUrl") }
                 .replaceFirst("http://", "https://")
+            val topSongArtwork = item.optJSONArray("trackRankList")?.optJSONObject(0)
+                ?.optString("coverImgUrl").orEmpty()
+                .ifBlank { item.optString("songCoverImgUrl") }
+                .replaceFirst("http://", "https://")
             val name = item.optString("name").trim()
             val freq = item.optString("updateFrequency").trim()
             val tracks = parseTracks(item)
             val prev = result[id]
             result[id] = if (prev == null) {
-                NeteaseToplistMeta(id, name, artwork, freq, tracks)
+                NeteaseToplistMeta(id, name, artwork, topSongArtwork, freq, tracks)
             } else {
                 prev.copy(
                     name = prev.name.ifBlank { name },
                     artwork = prev.artwork.ifBlank { artwork },
+                    topSongArtwork = prev.topSongArtwork.ifBlank { topSongArtwork },
                     updateFrequency = prev.updateFrequency.ifBlank { freq },
                     tracks = if (prev.tracks.size >= tracks.size) prev.tracks else tracks,
                 )
@@ -881,8 +886,9 @@ class NeteaseApi(
         } }.filter { it.name.isNotBlank() }
         val album = o.optJSONObject("al") ?: o.optJSONObject("album") ?: JSONObject()
         val id = o.getLong("id")
+        val vip = o.optInt("fee", 0) == 1
         Song(id, o.optString("name"), artists.joinToString(" / ") { it.name },
             album.optString("name"), album.optLong("id"), artists.firstOrNull()?.id ?: 0,
-            o.optLong("dt", o.optLong("duration")), "aura://netease/$id", album.optString("picUrl"), cloud = true, artists = artists)
+            o.optLong("dt", o.optLong("duration")), "aura://netease/$id", album.optString("picUrl"), cloud = true, artists = artists, vip = vip)
     }
 }
