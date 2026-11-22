@@ -72,6 +72,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var cloudPlaylistsHasMore by mutableStateOf(false); private set
     var cloudHomeItems by mutableStateOf<List<CloudHomeItem>>(emptyList()); private set
     var cloudDiscoverAlbums by mutableStateOf<List<CloudHomeItem>>(emptyList()); private set
+    var cloudDiscoverAlbumsRefreshing by mutableStateOf(false); private set
     var cloudHomeCharts by mutableStateOf<List<NeteaseChartItem>>(NeteaseChartCatalog.defaultHomeItems()); private set
     var cloudChartsByGroup by mutableStateOf<Map<NeteaseChartGroup, List<NeteaseChartItem>>>(NeteaseChartCatalog.defaultGroupedItems()); private set
     var cloudChartsLoading by mutableStateOf(false); private set
@@ -93,8 +94,16 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private var dailySongsJob: Deferred<List<Song>?>? = null
     private var dailySongsUserId: Long? = null
     private var cloudHomeUserId: Long? = null
+    private var cloudHomeLoadedAtMs: Long = 0L
+    private var cloudRecommendedSinglesCache: List<Song> = emptyList()
+    private var cloudRecommendedSinglesUserId: Long? = null
     private var rankPreviewJob: Job? = null
     private var heartbeatJob: Job? = null
+    private var tasteProfile: NeteaseTasteProfile? = null
+    private var tasteProfileJob: Deferred<NeteaseTasteProfile?>? = null
+    private var tasteProfileKey: Pair<Int, Long>? = null
+    private var tasteProfileStoreRevision: Int = -1
+    private var discoverAlbumsJob: Job? = null
     private var cloudPlaylistOffset = 0
     private var cloudPlaylistRetryReset = false
     private var cloudPlaylistRetryRefresh = false
@@ -110,6 +119,9 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var playbackRequested by mutableStateOf(false); private set
     val playbackPreferences = btm.m.auraplayer.playback.PlaybackPreferences(application)
     var quality by mutableStateOf(playbackPreferences.quality); private set
+    var cellularQuality by mutableStateOf(playbackPreferences.cellularQuality); private set
+    var wifiOnlyMotionCover by mutableStateOf(playbackPreferences.wifiOnlyMotionCover); private set
+    var audioCacheMaxMb by mutableIntStateOf(playbackPreferences.audioCacheMaxMb); private set
     var showTranslation by mutableStateOf(playbackPreferences.translation); private set
     var showPronunciation by mutableStateOf(playbackPreferences.pronunciation); private set
     var lyricTranslationSource by mutableStateOf(playbackPreferences.translationSource); private set
@@ -180,6 +192,8 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var followedArtistStates by mutableStateOf<Map<Long, Boolean>>(emptyMap()); private set
     private val followingArtists = mutableSetOf<Long>()
     var subscribedAlbums by mutableStateOf<List<CatalogAlbum>>(emptyList()); private set
+    var subscribedAlbumStates by mutableStateOf<Map<String, Boolean>>(emptyMap()); private set
+    private val subscribingAlbums = mutableSetOf<String>()
     var subscribedAlbumsLoading by mutableStateOf(false); private set
     var subscribedAlbumsFailed by mutableStateOf(false); private set
     var subscribedAlbumsHasMore by mutableStateOf(false); private set
@@ -391,7 +405,6 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             current = player.currentMediaItem?.let(::songFor)
             current?.takeIf { it.key != lastCurrentKey }?.let { song ->
                 lastCurrentKey = song.key
-                if (song.netease) viewModelScope.launch { resolveSongArtists(song) }
             }
             queue = (0 until player.mediaItemCount).map { songFor(player.getMediaItemAt(it)) }
             queueIndex = player.currentMediaItemIndex
@@ -861,6 +874,22 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         // Replace cloud URIs so ExoPlayer resolves the newly requested level, preserving queue/time.
         val items = (0 until player.mediaItemCount).map { mediaItem(songFor(player.getMediaItemAt(it))) }
         if (items.isNotEmpty()) { player.setMediaItems(items, index.coerceIn(items.indices), pos); player.prepare(); player.playWhenReady = resume }
+    }
+    fun changeCellularQuality(value: btm.m.auraplayer.playback.StreamQuality?) {
+        cellularQuality = value
+        playbackPreferences.cellularQuality = value
+    }
+    fun changeWifiOnlyMotionCover(enabled: Boolean) {
+        wifiOnlyMotionCover = enabled
+        playbackPreferences.wifiOnlyMotionCover = enabled
+    }
+    fun changeAudioCacheMaxMb(mb: Int) {
+        val clamped = mb.coerceIn(512, 8192)
+        audioCacheMaxMb = clamped
+        playbackPreferences.audioCacheMaxMb = clamped
+        viewModelScope.launch(Dispatchers.IO) {
+            btm.m.auraplayer.playback.PlaybackAudioCache.trimToLimit(app, clamped * 1024L * 1024L)
+        }
     }
     fun togglePlayback() { controller?.let { if (it.playWhenReady) it.pause() else it.play() } }
     fun next() { controller?.seekToNextMediaItem() }
@@ -1551,6 +1580,85 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             finally { if (generation == cloudGeneration) subscribedAlbumsLoading = false }
         }
     }
+    fun isAlbumFavorite(collectionKey: String, albumId: Long, isQq: Boolean): Boolean {
+        val rev = app.history.revision
+        subscribedAlbumStates[collectionKey]?.let { return it }
+        if (!isQq && albumId > 0L && subscribedAlbums.any { it.id == albumId }) return true
+        return rev >= 0 && collectionKey in app.history.favoriteAlbums()
+    }
+    suspend fun refreshAlbumFavorite(collectionKey: String, albumId: Long, isQq: Boolean): Boolean? {
+        if (isQq || albumId <= 0L || !cloudEnabled) return null
+        val user = account ?: return null
+        val generation = cloudGeneration
+        return try {
+            val subscribed = app.api.albumSubscribed(albumId)
+            if (generation == cloudGeneration && account?.userId == user.userId) {
+                subscribedAlbumStates = subscribedAlbumStates + (collectionKey to subscribed)
+                app.history.setFavoriteAlbum(collectionKey, subscribed)
+                subscribed
+            } else {
+                null
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
+    fun toggleAlbumFavorite(
+        collection: MusicCollection,
+        albumId: Long,
+        isQq: Boolean,
+        tracks: List<Song> = emptyList(),
+        onResult: (Boolean) -> Unit = {},
+    ) {
+        val key = collection.key
+        val target = !isAlbumFavorite(key, albumId, isQq)
+        if (!isQq && albumId > 0L && account != null && cloudEnabled) {
+            if (!subscribingAlbums.add(key)) return
+            val generation = cloudGeneration
+            val user = account
+            viewModelScope.launch {
+                try {
+                    app.api.subscribeAlbum(albumId, target)
+                    if (generation == cloudGeneration && account?.userId == user?.userId) {
+                        subscribedAlbumStates = subscribedAlbumStates + (key to target)
+                        app.history.setFavoriteAlbum(key, target)
+                        subscribedAlbums = if (target) {
+                            (listOf(CatalogAlbum(albumId, collection.title, collection.artwork, artistId = tracks.firstOrNull()?.artistId ?: 0L, artist = tracks.firstOrNull()?.artist.orEmpty())) + subscribedAlbums).distinctBy { it.id }
+                        } else {
+                            subscribedAlbums.filterNot { it.id == albumId }
+                        }
+                        onResult(true)
+                    } else onResult(false)
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { if (generation == cloudGeneration) cloudFailure(e); onResult(false) }
+                finally { subscribingAlbums.remove(key) }
+            }
+            return
+        }
+        if (isQq && qqAccount != null && cloudEnabled) {
+            val midOrId = key.removePrefix("qqalbum:").takeIf { it.isNotBlank() && it != key }
+                ?: albumId.takeIf { it > 0L }?.toString()
+            if (midOrId != null) {
+                if (!subscribingAlbums.add(key)) return
+                viewModelScope.launch {
+                    try {
+                        app.qq.subscribeAlbum(midOrId, target)
+                        subscribedAlbumStates = subscribedAlbumStates + (key to target)
+                        app.history.setFavoriteAlbum(key, target)
+                        onResult(true)
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { cloudFailure(e); onResult(false) }
+                    finally { subscribingAlbums.remove(key) }
+                }
+                return
+            }
+        }
+        app.history.setFavoriteAlbum(key, target)
+        subscribedAlbumStates = subscribedAlbumStates + (key to target)
+        onResult(true)
+    }
     fun loadMoreArtistAlbums(content: CloudPlaylistContent) {
         if (content.albumsLoading || !content.albumsHasMore) return
         content.albumsLoading = true; content.albumsFailed = false
@@ -1619,7 +1727,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 { it.count != 0 && it.count !in 1..12 },
                 { indexById[it.id] ?: Int.MAX_VALUE },
             )
-        )
+        ).take(12)
         content.albumTracksJob?.cancel()
         val generation = cloudGeneration
         content.albumTracksJob = viewModelScope.launch {
@@ -1691,8 +1799,12 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     private fun resetCloudPaging() {
         likesJob?.cancel(); subscribedAlbumJob?.cancel()
-        cloudHomeJob?.cancel(); cloudChartsJob?.cancel(); cloudHomePlayJob?.cancel(); dailySongsJob?.cancel(); rankPreviewJob?.cancel(); leaveHeartbeat()
+        cloudHomeJob?.cancel(); cloudChartsJob?.cancel(); cloudHomePlayJob?.cancel(); dailySongsJob?.cancel(); rankPreviewJob?.cancel(); tasteProfileJob?.cancel(); discoverAlbumsJob?.cancel(); leaveHeartbeat()
         dailySongsJob = null; dailySongsUserId = null
+        cloudHomeLoadedAtMs = 0L
+        cloudRecommendedSinglesCache = emptyList(); cloudRecommendedSinglesUserId = null
+        tasteProfile = null; tasteProfileJob = null; tasteProfileKey = null; tasteProfileStoreRevision = -1
+        cloudDiscoverAlbumsRefreshing = false
         cloudHomeLoading = false
         cloudChartsLoading = false; cloudChartsFailed = false; cloudChartsHydrated = false
         cloudLikedIds = emptySet(); cloudLikesReady = false; liking.clear()
@@ -1770,36 +1882,149 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun refreshCloudHome() {
+    private suspend fun fetchCloudTasteProfile(forceRefresh: Boolean = false): NeteaseTasteProfile? {
+        val user = account ?: return null
+        if (!cloudEnabled) return null
+        val generation = cloudGeneration
+        val key = generation to user.userId
+        val storeRev = app.neteaseListenStore.revision
+        val staleByRevision = tasteProfileStoreRevision != storeRev
+        val cached = tasteProfile?.takeIf {
+            !forceRefresh && !staleByRevision && tasteProfileKey == key &&
+                System.currentTimeMillis() - it.loadedAtMs < 120_000L
+        }
+        if (cached != null) return cached
+        val inFlight = if (!forceRefresh && !staleByRevision && tasteProfileKey == key) {
+            tasteProfileJob?.takeIf { it.isActive }
+        } else null
+        if (inFlight != null) return inFlight.await()
+        tasteProfileKey = key
+        tasteProfileStoreRevision = storeRev
+        val likedSnapshot = if (cloudLikesReady) cloudLikedIds else null
+        val likedPid = cloudPlaylists.firstOrNull { it.specialType == 5 && it.creatorId == user.userId }?.id
+        val recentSnapshot = if (!forceRefresh && !staleByRevision) cloudRecentSongs.takeIf { it.isNotEmpty() } else null
+        val job = viewModelScope.async {
+            cloudSection {
+                NeteaseHomeRecommendations.loadTasteProfile(
+                    api = app.api,
+                    store = app.neteaseListenStore,
+                    userId = user.userId,
+                    cachedLikedIds = likedSnapshot,
+                    cachedLikedPlaylistId = likedPid,
+                    cachedRecentSongs = recentSnapshot,
+                )
+            }
+        }
+        tasteProfileJob = job
+        val profile = job.await()
+        if (generation == cloudGeneration && account?.userId == user.userId && profile != null) {
+            tasteProfile = profile
+        }
+        return profile
+    }
+
+    suspend fun loadCloudRecommendedSingles(refresh: Boolean, previousKeys: Set<String> = emptySet()): List<Song> {
+        if (!cloudEnabled) return emptyList()
+        val user = account
+        if (!refresh && cloudRecommendedSinglesUserId == user?.userId && cloudRecommendedSinglesCache.isNotEmpty()) {
+            return cloudRecommendedSinglesCache
+        }
+        val profile = if (user != null) fetchCloudTasteProfile(forceRefresh = false) else null
+        return NeteaseHomeRecommendations.loadRecommendedSingles(
+            api = app.api,
+            profile = profile,
+            targetCount = 25,
+            refresh = refresh,
+            previousKeys = previousKeys,
+            fallbackPlaylists = cloudRecommendedPlaylists.filter { it.section == "recommended" },
+            dailySongsProvider = { force -> fetchCloudDailySongs(force) },
+        ).also { loaded ->
+            if (loaded.isNotEmpty()) {
+                cloudRecommendedSinglesUserId = user?.userId
+                cloudRecommendedSinglesCache = loaded
+            }
+        }
+    }
+
+    fun refreshCloudDiscoverAlbums() {
+        if (!cloudEnabled || cloudDiscoverAlbumsRefreshing) return
+        val user = account
+        val generation = cloudGeneration
+        val previousIds = cloudDiscoverAlbums.mapTo(hashSetOf()) { it.id }
+        val homeAlbumItems = cloudHomeItems.filter { it.kind == "album" }
+        cloudDiscoverAlbumsRefreshing = true
+        discoverAlbumsJob?.cancel()
+        discoverAlbumsJob = viewModelScope.launch {
+            try {
+                val profile = if (user != null) fetchCloudTasteProfile(forceRefresh = false) else null
+                val albums = cloudSection {
+                    NeteaseHomeRecommendations.loadDiscoverAlbums(
+                        api = app.api,
+                        profile = profile,
+                        limit = 16,
+                        refresh = true,
+                        previousIds = previousIds,
+                        homeAlbumItems = homeAlbumItems,
+                    )
+                }.orEmpty()
+                ensureActive()
+                if (generation == cloudGeneration && account?.userId == user?.userId && albums.isNotEmpty()) {
+                    cloudDiscoverAlbums = albums
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } finally {
+                if (generation == cloudGeneration && isActive) {
+                    cloudDiscoverAlbumsRefreshing = false
+                }
+            }
+        }
+    }
+
+    fun refreshCloudHome(force: Boolean = false) {
         if (!cloudEnabled) return
         val user = account
         if (cloudHomeLoading && cloudHomeUserId == user?.userId) return
+        if (!force && cloudHomeUserId == user?.userId &&
+            (cloudHomeItems.isNotEmpty() || cloudRecommendedPlaylists.isNotEmpty()) &&
+            System.currentTimeMillis() - cloudHomeLoadedAtMs < 10 * 60 * 1000L
+        ) {
+            return
+        }
         cloudHomeUserId = user?.userId
         cloudHomeLoading = true; cloudHomeFailed = false
         val generation = cloudGeneration
         cloudHomeJob?.cancel()
         cloudHomeJob = viewModelScope.launch {
             try {
+                if (force) withContext(Dispatchers.IO) { app.api.invalidateHomeCaches() }
                 val home = async { cloudSection { app.api.homeItems() } }
                 val recommended = async { cloudSection { app.api.recommendedPlaylists(personalized = user != null) } }
                 val daily = async { if (user != null) fetchCloudDailySongs() else emptyList() }
-                val recent = async { if (user != null) cloudSection { app.api.recentSongs(limit = 50) } else null }
                 val followed = async { if (user != null) cloudSection { app.api.followedArtistAlbums() } else null }
                 val banners = async { cloudSection { app.api.publicBanners() } }
-                val discoverAlbumsDeferred = async { cloudSection { app.api.discoverAlbums(limit = 16) } }
                 val toplistMetaDeferred = async { cloudSection { app.api.toplistMetaMap() } }
+                val tasteProfileDeferred = async { if (user != null) fetchCloudTasteProfile() else null }
                 val homeItems = home.await()
+                val homeAlbumItems = homeItems.orEmpty().filter { it.kind == "album" }
+                val profile = tasteProfileDeferred.await()
+                val discoveredAlbums = cloudSection {
+                    NeteaseHomeRecommendations.loadDiscoverAlbums(
+                        api = app.api,
+                        profile = profile,
+                        limit = 16,
+                        refresh = false,
+                        homeAlbumItems = homeAlbumItems,
+                    )
+                }
                 val recommendations = recommended.await()
                 daily.await()
-                val recentTracks = recent.await()
-                val discoveredAlbums = discoverAlbumsDeferred.await()
+                val recentTracks = profile?.recentSongs
                 val toplistMeta = toplistMetaDeferred.await().orEmpty()
                 ensureActive()
                 if (generation == cloudGeneration && account?.userId == user?.userId) {
                     cloudHomeItems = homeItems.orEmpty()
-                    val combinedAlbums = (discoveredAlbums.orEmpty() + homeItems.orEmpty().filter { it.kind == "album" })
-                        .distinctBy { it.id }
-                    if (combinedAlbums.isNotEmpty()) cloudDiscoverAlbums = combinedAlbums
+                    if (!discoveredAlbums.isNullOrEmpty()) cloudDiscoverAlbums = discoveredAlbums
                     if (toplistMeta.isNotEmpty()) {
                         val existingHome = cloudHomeCharts.associateBy { it.stableKey }
                         val existingAll = cloudChartsByGroup.values.flatten().associateBy { it.stableKey }
@@ -1816,7 +2041,8 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                     cloudPublicBanners = banners.await()
                         .orEmpty()
                     cloudFollowedAlbums = followed.await().orEmpty()
-                    cloudHomeFailed = homeItems == null && recommendations == null && discoveredAlbums == null && toplistMeta.isEmpty()
+                    cloudHomeFailed = homeItems == null && recommendations == null && discoveredAlbums.isNullOrEmpty() && toplistMeta.isEmpty()
+                    if (!cloudHomeFailed) cloudHomeLoadedAtMs = System.currentTimeMillis()
                     val covers = playlists.filter { it.section == "radar" }.take(6).map { radar ->
                         async { radar.id to cloudSection { app.api.playlistSongs(radar.id, limit = 1).items.firstOrNull()?.artwork } }
                     }.awaitAll().toMap()
@@ -1977,7 +2203,12 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             refresh = cloudPlaylistsFailed && cloudPlaylistRetryRefresh)
     }
     fun forgetCloudMetadataCache(categories: Set<CloudCacheCategory>) {
-        if (CloudCacheCategory.METADATA in categories) cloudContents.clear()
+        if (CloudCacheCategory.METADATA in categories) {
+            cloudContents.clear()
+            cloudHomeLoadedAtMs = 0L
+            cloudRecommendedSinglesCache = emptyList()
+            lyricRepository.clear()
+        }
     }
     private fun loadCloudPlaylists(reset: Boolean = false, refresh: Boolean = false) {
         val user = account ?: return

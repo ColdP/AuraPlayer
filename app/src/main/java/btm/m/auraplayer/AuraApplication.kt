@@ -9,6 +9,7 @@ import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import okio.Path.Companion.toOkioPath
 
 class AuraApplication : Application(), SingletonImageLoader.Factory {
@@ -53,7 +54,8 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         accountsState = MultiAccountStateCodec.decode(session.read())
         cookie = accountsState.activeCookie
         endpoint = getSharedPreferences("aura.cloud", MODE_PRIVATE).getString("endpoint", "").orEmpty()
-        api = NeteaseApi({ endpoint }, { cookie }, metadataCache = CloudMetadataCache(cacheDir.resolve("cloud-metadata")))
+        val sharedMetadataCache = CloudMetadataCache(cacheDir.resolve("cloud-metadata"))
+        api = NeteaseApi({ endpoint }, { cookie }, metadataCache = sharedMetadataCache)
         getSharedPreferences("aura.cloud", MODE_PRIVATE).let {
             qqEndpoint = it.getString("qqEndpoint", "").orEmpty(); qqUin = it.getString("qqUin", "").orEmpty()
         }
@@ -67,7 +69,7 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         qqAccountsState.activeAccount?.let { qqUin = it.userId.toString() }
         session.saveQq(MultiAccountStateCodec.encode(qqAccountsState))
         qqPrefs.edit().remove("qqUserId").remove("qqNickname").remove("qqAvatar").apply()
-        qq = QqMusicApi({ qqEndpoint }, { qqUin }, { qqCookie })
+        qq = QqMusicApi({ qqEndpoint }, { qqUin }, { qqCookie }, metadataCache = sharedMetadataCache)
         I18n.initialize(this, settings.value.language)
         cutoutRing = CutoutRingSettings(this)
         cutoutRingController = btm.m.auraplayer.ui.CutoutRingOverlayController(this, cutoutRing)
@@ -85,10 +87,12 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
     }
     override fun newImageLoader(context: Context): ImageLoader = ImageLoader.Builder(context)
         .components {
+            add(CloudImageResizeInterceptor())
+            add(OkHttpNetworkFetcherFactory(callFactory = { CloudHttpClient.media }))
             add(LocalAudioArtworkFetcher.Factory(context))
         }
         .memoryCache { MemoryCache.Builder().maxSizePercent(context, .15).build() }
-        .diskCache { DiskCache.Builder().directory(cacheDir.resolve("artwork").toOkioPath()).maxSizeBytes(128L * 1024 * 1024).build() }
+        .diskCache { DiskCache.Builder().directory(cacheDir.resolve("artwork").toOkioPath()).maxSizeBytes(256L * 1024 * 1024).build() }
         .build()
     private fun persistAccounts(next: MultiAccountState) {
         accountsState = next

@@ -417,7 +417,45 @@ private fun LazyListScope.cloudGeneralItems(model: AuraViewModel) {
         }
     }
     item(key = "cloud_general_cache") {
-        Group(tr("cache", "缓存")) {
+        Group(tr("cache_and_traffic", "流量与缓存")) {
+            val cellularOptions = listOf(
+                btm.m.auraplayer.playback.StreamQuality.STANDARD,
+                btm.m.auraplayer.playback.StreamQuality.HIGHER,
+                btm.m.auraplayer.playback.StreamQuality.HIGH,
+                btm.m.auraplayer.playback.StreamQuality.LOSSLESS,
+                null,
+            )
+            val cellularLabels = listOf(
+                tr("quality_standard", "标准"),
+                tr("quality_higher", "较高"),
+                tr("quality_high", "极高"),
+                tr("quality_lossless", "无损"),
+                tr("cellular_quality_follow", "跟随默认音质"),
+            )
+            GlassDropdownPreference(
+                title = tr("cellular_quality", "移动网络音质"),
+                items = cellularLabels,
+                selectedIndex = cellularOptions.indexOf(model.cellularQuality).coerceAtLeast(0),
+                backdrop = LocalToolbarBackdrop.current,
+            ) { index ->
+                model.changeCellularQuality(cellularOptions[index])
+            }
+            SwitchPreference(
+                title = tr("wifi_only_motion_cover", "仅在 Wi-Fi 下加载动态封面"),
+                summary = tr("wifi_only_motion_cover_summary", "避免使用移动数据时下载大体积动态封面视频"),
+                checked = model.wifiOnlyMotionCover,
+                onCheckedChange = model::changeWifiOnlyMotionCover,
+            )
+            val cacheOptions = btm.m.auraplayer.playback.PlaybackPreferences.AUDIO_CACHE_LIMIT_OPTIONS_MB
+            val cacheLabels = cacheOptions.map { mb -> if (mb >= 1024) "${mb / 1024} GB" else "$mb MB" }
+            GlassDropdownPreference(
+                title = tr("audio_cache_limit", "音频缓存上限"),
+                items = cacheLabels,
+                selectedIndex = cacheOptions.indexOf(model.audioCacheMaxMb).coerceAtLeast(2),
+                backdrop = LocalToolbarBackdrop.current,
+            ) { index ->
+                model.changeAudioCacheMaxMb(cacheOptions[index])
+            }
             CloudCachePreference(model)
         }
     }

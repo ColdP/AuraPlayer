@@ -33,7 +33,7 @@ internal fun migratePlaybackAudioCache(legacy: File, persistent: File): File = w
 
 /** Disk cache for online audio. The cache key is the stable Aura URI and includes quality. */
 object PlaybackAudioCache {
-    private const val MAX_BYTES = 512L * 1024 * 1024
+    private const val DEFAULT_MAX_BYTES = 2048L * 1024 * 1024
     private val holder = AtomicReference<SimpleCache?>(null)
     private val trialKeys = java.util.Collections.synchronizedSet(HashSet<String>())
 
@@ -50,13 +50,54 @@ object PlaybackAudioCache {
     @Synchronized
     fun get(context: Context): SimpleCache {
         holder.get()?.let { return it }
+        val configuredBytes = runCatching {
+            PlaybackPreferences(context.applicationContext).audioCacheMaxMb * 1024L * 1024L
+        }.getOrDefault(DEFAULT_MAX_BYTES)
         val cache = SimpleCache(
             migratePlaybackAudioCache(legacyDirectory(context), persistentDirectory(context)),
-            LeastRecentlyUsedCacheEvictor(MAX_BYTES),
+            LeastRecentlyUsedCacheEvictor(configuredBytes),
             StandaloneDatabaseProvider(context.applicationContext),
         )
         holder.set(cache)
         return cache
+    }
+
+    fun isFullyCached(context: Context, key: String): Boolean {
+        if (key.isBlank() || isTrialKey(key)) return false
+        val cache = get(context)
+        val length = ContentMetadata.getContentLength(cache.getContentMetadata(key))
+        return length > 0L && cache.isCached(key, 0L, length)
+    }
+
+    /** Returns an already-cached NetEase quality at or above [minQuality], preferring [preferred]. */
+    fun findCachedQuality(
+        context: Context,
+        songId: Long,
+        preferred: StreamQuality,
+        minQuality: StreamQuality,
+    ): StreamQuality? {
+        if (songId <= 0L) return null
+        if (isFullyCached(context, key(context, songId, preferred))) return preferred
+        for (candidate in StreamQuality.entries.asReversed()) {
+            if (candidate.ordinal < minQuality.ordinal) break
+            if (candidate == preferred) continue
+            if (isFullyCached(context, key(context, songId, candidate))) return candidate
+        }
+        return null
+    }
+
+    @Synchronized
+    fun trimToLimit(context: Context, maxBytes: Long) {
+        val cache = holder.get() ?: return
+        if (cache.cacheSpace <= maxBytes) return
+        val entries = cache.keys.map { key ->
+            val lastTouch = cache.getCachedSpans(key).maxOfOrNull { it.lastTouchTimestamp } ?: 0L
+            key to lastTouch
+        }.sortedBy { it.second }
+        for ((key, _) in entries) {
+            if (cache.cacheSpace <= maxBytes) break
+            runCatching { cache.removeResource(key) }
+        }
     }
 
     fun key(songId: Long, quality: StreamQuality): String = key(songId, quality.level)

@@ -96,7 +96,7 @@ internal fun CloudHomePage(
     val isBlurBg = styleConfig.backgroundStyle == HomeBackgroundStyle.COLOR_BLUR
     val activeBannerTheme = if (coloredHomeBg) rememberHomeBannerTheme(bannerConfig.imagePath) else null
     var homeRefresh by remember { mutableIntStateOf(0) }
-    LaunchedEffect(user?.userId, homeRefresh) { model.refreshCloudHome() }
+    LaunchedEffect(user?.userId, homeRefresh) { model.refreshCloudHome(force = homeRefresh > 0) }
     val recentSongs = model.cloudRecentSongs
     val playlists = model.cloudRecommendedPlaylists.filter { it.section == "recommended" }
     val feature = model.cloudRecommendedPlaylists.filter { it.section == "daily" || it.section == "feature" }
@@ -104,18 +104,8 @@ internal fun CloudHomePage(
     val albums = model.cloudDiscoverAlbums.ifEmpty { model.cloudHomeItems.filter { it.kind == "album" } }
     val charts = model.cloudHomeCharts
     val singles = key(user?.userId) {
-        rememberCloudSingles { refresh ->
-            val daily = if (user != null) model.fetchCloudDailySongs(refresh) else emptyList()
-            val discovery = daily + if (refresh || daily.size < CloudSingleCount) cloudSection { model.app.api.discoverySongs() }.orEmpty() else emptyList()
-            if (discovery.distinctBy { it.key }.size >= CloudSingleCount) discovery
-            else {
-                val fallback = playlists.ifEmpty { cloudSection { model.app.api.recommendedPlaylists(personalized = user != null) }.orEmpty() }
-                discovery + coroutineScope {
-                    (if (refresh) fallback.shuffled() else fallback).take(2).map { playlist ->
-                        async { cloudSection { model.app.api.playlistSongs(playlist.id, limit = CloudSingleCount).items }.orEmpty() }
-                    }.awaitAll().flatten()
-                }
-            }
+        rememberCloudSingles(shuffleOnRefresh = false) { refresh, previous ->
+            model.loadCloudRecommendedSingles(refresh, previous)
         }
     }
     LaunchedEffect(user?.userId) {
@@ -275,9 +265,21 @@ internal fun CloudHomePage(
                     item("follow") { CloudHomeItemRow(model.cloudFollowedAlbums.take(8), model, contentPadding = rowContentPadding) }
                 }
                 "discover_albums" -> item("discover_albums") {
+                    val refreshTint = activeBannerTheme?.takeIf { it.isCustom }?.accent ?: MiuixTheme.colorScheme.primary
+                    val refreshing = model.cloudDiscoverAlbumsRefreshing
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (showTitle) {
-                            Box(Modifier.padding(horizontal = itemHorizontalPadding)) { CloudHomeHeader(tr("discover_albums", "发现专辑")) }
+                            Row(Modifier.padding(horizontal = itemHorizontalPadding), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.weight(1f)) { CloudHomeHeader(tr("discover_albums", "发现专辑")) }
+                                IconButton(onClick = { if (!refreshing) model.refreshCloudDiscoverAlbums() }, modifier = Modifier.size(44.dp)) {
+                                    Image(
+                                        MiuixIcons.Regular.Refresh,
+                                        tr("refresh", "刷新"),
+                                        Modifier.size(22.dp),
+                                        colorFilter = ColorFilter.tint(refreshTint.copy(alpha = if (refreshing) .45f else 1f)),
+                                    )
+                                }
+                            }
                         }
                         CloudHomeItemRow(albums.take(12), model, contentPadding = rowContentPadding)
                     }
@@ -298,7 +300,10 @@ private class CloudSinglesState {
 }
 
 @Composable
-private fun rememberCloudSingles(load: suspend (Boolean) -> List<Song>): CloudSinglesState {
+private fun rememberCloudSingles(
+    shuffleOnRefresh: Boolean = true,
+    load: suspend (refresh: Boolean, previous: Set<String>) -> List<Song>,
+): CloudSinglesState {
     val state = remember { CloudSinglesState() }
     val currentLoad by rememberUpdatedState(load)
     LaunchedEffect(state.refresh) {
@@ -306,9 +311,13 @@ private fun rememberCloudSingles(load: suspend (Boolean) -> List<Song>): CloudSi
         state.loading = true
         try {
             val previous = state.tracks.mapTo(hashSetOf()) { it.key }
-            val candidates = currentLoad(refresh > 0).distinctBy { it.key }
+            val candidates = currentLoad(refresh > 0, previous).distinctBy { it.key }
             if (candidates.isNotEmpty()) {
-                state.tracks = (if (refresh == 0) candidates else candidates.shuffled().sortedBy { it.key in previous }).take(CloudSingleCount)
+                state.tracks = when {
+                    refresh == 0 -> candidates
+                    shuffleOnRefresh -> candidates.shuffled().sortedBy { it.key in previous }
+                    else -> candidates.sortedBy { it.key in previous }
+                }.take(CloudSingleCount)
                 state.scrollState.requestScrollToItem(0)
             }
         } finally { state.loading = false }
@@ -363,7 +372,7 @@ internal fun QqHomePage(
     val recommended = model.qqRecommended
     LaunchedEffect(model.app.qqEndpoint, user?.userId) { if (recommended.isEmpty()) model.refreshQq() }
     val singles = if (recommended.isNotEmpty()) key(user?.userId, recommended) {
-        rememberCloudSingles { refresh ->
+        rememberCloudSingles { refresh, _ ->
             val playlists = (if (refresh) recommended.shuffled() else recommended).take(3)
             coroutineScope {
                 playlists.map { playlist ->

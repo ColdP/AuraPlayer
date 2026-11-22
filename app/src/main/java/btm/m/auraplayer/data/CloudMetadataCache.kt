@@ -8,21 +8,26 @@ import java.security.MessageDigest
 class CloudMetadataCache(
     private val directory: File,
     private val now: () -> Long = System::currentTimeMillis,
-    private val maxBytes: Long = 16L * 1024 * 1024,
+    private val maxBytes: Long = 32L * 1024 * 1024,
 ) {
     companion object {
         const val FRESH_MS = 15L * 60 * 1000
         private const val RETAIN_MS = 7L * 24 * 60 * 60 * 1000
+        private const val MAX_ENTRIES = 1024
         fun digest(value: String): String = MessageDigest.getInstance("SHA-256")
             .digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
     }
 
     @Synchronized
-    fun read(key: String, stale: Boolean = false): JSONObject? = runCatching {
+    fun read(key: String, stale: Boolean = false): JSONObject? =
+        read(key, FRESH_MS, stale)
+
+    @Synchronized
+    fun read(key: String, freshMs: Long, stale: Boolean = false): JSONObject? = runCatching {
         val file = File(directory, digest(key) + ".json")
         val entry = JSONObject(file.readText())
         val age = now() - entry.getLong("savedAt")
-        if (age < 0 || age > if (stale) RETAIN_MS else FRESH_MS) return null
+        if (age < 0 || age > if (stale) RETAIN_MS else freshMs) return null
         file.setLastModified(now())
         entry.getJSONObject("data")
     }.getOrNull()
@@ -39,7 +44,7 @@ class CloudMetadataCache(
             var bytes = files.sumOf { it.length() }
             var count = files.size
             for (old in files) {
-                if (bytes <= maxBytes && count <= 512) break
+                if (bytes <= maxBytes && count <= MAX_ENTRIES) break
                 val size = old.length()
                 if (old.delete()) { bytes -= size; count-- }
             }

@@ -41,28 +41,64 @@ class LyricsRepository(
     private val cache = object : LinkedHashMap<String, ResolvedLyrics>(24, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ResolvedLyrics>) = size > 24
     }
+    private val diskCacheDir by lazy { context.cacheDir.resolve("cloud-lyrics") }
     private data class Answer(val rank: Int, val lines: List<LyricLine>)
-    fun invalidate(songKey: String) { cache.remove(songKey) }
-    fun clear() { cache.clear() }
+    fun invalidate(songKey: String) {
+        cache.remove(songKey)
+        runCatching { diskCacheFile(songKey).delete() }
+    }
+    fun clear() {
+        cache.clear()
+        runCatching { diskCacheDir.listFiles().orEmpty().filter(File::isFile).forEach { it.delete() } }
+    }
 
     fun lyrics(song: Song): Flow<List<LyricLine>> = resolveLyrics(song).map { it.select(LyricTranslationSource.LLM) }
 
     fun resolveLyrics(song: Song): Flow<ResolvedLyrics> = flow {
         cache[song.key]?.let { emit(it); return@flow }
-        var own = withContext(Dispatchers.IO) { local(song) }
+        var own = withContext(Dispatchers.IO) {
+            if (song.cloud) readDiskLyrics(song.key) else local(song)
+        }
+        val fromCloudDiskCache = song.cloud && own.isNotEmpty()
         var llmVersion: List<LyricLine>? = null
         var networkVersion: List<LyricLine>? = own.takeIf { lines -> lines.any { !it.translation.isNullOrBlank() } }
 
-        suspend fun publish() {
+        suspend fun publish(persistCloud: Boolean = false) {
             val resolved = ResolvedLyrics(
                 primaryLines = own,
                 llmLines = llmVersion,
                 networkLines = networkVersion ?: own.takeIf { lines -> lines.any { !it.translation.isNullOrBlank() } },
             )
-            if (own.isNotEmpty()) cache[song.key] = resolved
+            if (own.isNotEmpty()) {
+                cache[song.key] = resolved
+                if (persistCloud && song.cloud) {
+                    withContext(Dispatchers.IO) { writeDiskLyrics(song.key, own) }
+                }
+            }
             emit(resolved)
         }
         if (own.isNotEmpty()) publish()
+        if (fromCloudDiskCache) {
+            val llmConfig = llmConfigProvider()
+            val llmApiKey = llmApiKeyProvider()
+            if (llmConfig.enabled && !LlmLyricLanguageSupport.isSameLanguage(llmConfig, own)) {
+                val translated = LlmTranslator.translate(
+                    songKey = song.key,
+                    songTitle = song.title,
+                    artist = song.artist,
+                    albumTitle = song.album,
+                    lines = own,
+                    config = llmConfig,
+                    apiKey = llmApiKey,
+                    cacheRoot = context.cacheDir,
+                )
+                if (translated != null) {
+                    llmVersion = translated
+                    publish()
+                }
+            }
+            return@flow
+        }
         // Same race and 400ms database grace as LyricSource.race; rich ID sources do not
         // delay the catalogue fallback. The original five-provider matching stays intact.
         supervisorScope {
@@ -192,7 +228,80 @@ class LyricsRepository(
                 }
             } finally { jobs.forEach { it.cancel() }; answers.close() }
         }
-        publish()
+        publish(persistCloud = own.isNotEmpty())
+    }
+
+    private fun diskCacheFile(songKey: String): File {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(songKey.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        return File(diskCacheDir, "$digest.json")
+    }
+
+    private fun encodeLine(line: LyricLine): org.json.JSONObject = org.json.JSONObject().apply {
+        put("t", line.text)
+        line.translation?.let { put("tr", it) }
+        line.roma?.let { put("r", it) }
+        put("s", line.start)
+        put("e", line.end)
+        if (line.opposite) put("o", true)
+        line.sylStart?.let { arr -> put("ss", org.json.JSONArray().apply { arr.forEach(::put) }) }
+        line.sylEnd?.let { arr -> put("se", org.json.JSONArray().apply { arr.forEach(::put) }) }
+        line.charEnd?.let { arr -> put("ce", org.json.JSONArray().apply { arr.forEach(::put) }) }
+        line.bg?.let { put("bg", encodeLine(it)) }
+    }
+
+    private fun decodeLine(obj: org.json.JSONObject): LyricLine {
+        fun intArray(key: String): IntArray? {
+            val arr = obj.optJSONArray(key) ?: return null
+            return IntArray(arr.length()) { arr.getInt(it) }
+        }
+        return LyricLine(
+            obj.getString("t"),
+            if (obj.has("tr")) obj.optString("tr").takeIf { it.isNotEmpty() } else null,
+            if (obj.has("r")) obj.optString("r").takeIf { it.isNotEmpty() } else null,
+            obj.getInt("s"),
+            obj.getInt("e"),
+            obj.optBoolean("o", false),
+            intArray("ss"),
+            intArray("se"),
+            intArray("ce"),
+        ).apply {
+            obj.optJSONObject("bg")?.let { bg = decodeLine(it) }
+        }
+    }
+
+    private fun readDiskLyrics(songKey: String): List<LyricLine> = runCatching {
+        val file = diskCacheFile(songKey)
+        if (!file.isFile) return@runCatching emptyList()
+        val obj = org.json.JSONObject(file.readText())
+        val age = System.currentTimeMillis() - obj.optLong("savedAt", 0L)
+        if (age < 0L || age > 14L * 24 * 60 * 60 * 1000) {
+            file.delete()
+            return@runCatching emptyList()
+        }
+        val arr = obj.getJSONArray("lines")
+        List(arr.length()) { decodeLine(arr.getJSONObject(it)) }
+    }.getOrDefault(emptyList())
+
+    private fun writeDiskLyrics(songKey: String, lines: List<LyricLine>) {
+        if (lines.isEmpty()) return
+        runCatching {
+            diskCacheDir.mkdirs()
+            val target = diskCacheFile(songKey)
+            val tmp = File(diskCacheDir, "${target.name}.tmp")
+            val arr = org.json.JSONArray().apply { lines.forEach { put(encodeLine(it)) } }
+            tmp.writeText(org.json.JSONObject().put("savedAt", System.currentTimeMillis()).put("lines", arr).toString())
+            java.nio.file.Files.move(tmp.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            val files = diskCacheDir.listFiles { f -> f.extension == "json" }.orEmpty().sortedBy { it.lastModified() }
+            var totalBytes = files.sumOf { it.length() }
+            val maxBytes = 8L * 1024 * 1024
+            for (old in files) {
+                if (totalBytes <= maxBytes) break
+                val len = old.length()
+                if (old.delete()) totalBytes -= len
+            }
+        }
     }
 
     private fun local(song: Song): List<LyricLine> {

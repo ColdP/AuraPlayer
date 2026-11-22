@@ -271,6 +271,12 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
             amMotionFile = cached
             return@LaunchedEffect
         }
+        if (btm.m.auraplayer.playback.PlaybackPreferences(context).wifiOnlyMotionCover &&
+            btm.m.auraplayer.data.NetworkTrafficPolicy.isMetered(context)
+        ) {
+            amMotionFile = null
+            return@LaunchedEffect
+        }
         amMotionFile = null
         kotlinx.coroutines.delay(350L)
         amMotionFile = AppleMusicMotionCoverManager.resolve(

@@ -64,6 +64,12 @@ internal class OfficialNeteaseClient(
                 .put("songId", value("id")).put("playlistId", value("pid")).put("type", "fromPlayOne")
                 .put("startMusicId", value("sid", value("id"))).put("count", value("count", "1").toInt()),
                 authenticated, eapi = true, androidClient = true)
+            "simi/song" -> call("/api/v1/discovery/simiSong", JSONObject()
+                .put("songid", value("id"))
+                .put("limit", value("limit", "20").toIntOrNull() ?: 20)
+                .put("offset", value("offset", "0").toIntOrNull() ?: 0), authenticated)
+            "simi/artist" -> call("/api/discovery/simiArtist", JSONObject()
+                .put("artistid", value("id")), authenticated)
             "personal_fm" -> call("/api/v1/radio/get", JSONObject(), authenticated)
             "personalized/playlist" -> call("/api/personalized/playlist", JSONObject().put("limit", value("limit", "30")).put("offset", value("offset", "0")), authenticated = false)
             "login/status" -> call("/api/w/nuser/account/get", JSONObject(), authenticated)
@@ -75,6 +81,7 @@ internal class OfficialNeteaseClient(
                 .put("limit", value("limit", "50")).put("offset", value("offset", "0")), authenticated)
             "user/record" -> call("/api/v1/play/record", JSONObject().put("uid", value("uid")).put("type", value("type", "0")), authenticated)
             "record/recent/song" -> call("/api/play-record/song/list", JSONObject().put("limit", value("limit", "100").toInt()), authenticated)
+            "record/recent/album" -> call("/api/play-record/album/list", JSONObject().put("limit", value("limit", "50").toIntOrNull() ?: 50), authenticated)
             "scrobble/start" -> {
                 val id = value("id")
                 val sourceId = value("sourceid", id)
@@ -221,6 +228,11 @@ internal class OfficialNeteaseClient(
             "dj/program" -> call("/api/dj/program/byradio", JSONObject().put("radioId", value("rid")).put("limit", value("limit", "50")).put("offset", value("offset", "0")).put("asc", false), authenticated)
             "dj/program/detail" -> call("/api/dj/program/detail", JSONObject().put("id", value("id")), authenticated)
             "album" -> call("/api/v1/album/${value("id")}", JSONObject(), authenticated)
+            "album/detail/dynamic" -> call("/api/album/detail/dynamic", JSONObject().put("id", value("id")), authenticated)
+            "album/sub" -> {
+                val action = if (value("t") == "1") "sub" else "unsub"
+                call("/api/album/$action", JSONObject().put("id", value("id")), authenticated, eapi = true)
+            }
             "artist/detail" -> call("/api/artist/head/info/get", JSONObject().put("id", value("id")), authenticated)
             "artist/detail/dynamic" -> call("/api/artist/detail/dynamic", JSONObject().put("id", value("id")), authenticated)
             "artist/album" -> call("/api/artist/albums/${value("id")}", JSONObject().put("limit", value("limit", "12")).put("offset", value("offset", "0")), authenticated)

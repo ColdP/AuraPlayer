@@ -27,15 +27,53 @@ internal suspend fun <T> cloudSection(fetch: suspend () -> T): T? = try {
 class NeteaseApi(
     private val endpoint: () -> String,
     private val cookie: () -> String,
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS).readTimeout(25, TimeUnit.SECONDS)
-        .followRedirects(false).build(),
+    private val client: OkHttpClient = CloudHttpClient.api,
     private val metadataCache: CloudMetadataCache? = null,
 ) {
     private val official = OfficialNeteaseClient(cookie, client, metadataCache = metadataCache)
     private fun cacheScope() = CloudMetadataCache.digest(endpoint() + "\n" + cookie())
-    fun clearMetadataCache() { metadataCache?.clear() }
+    fun clearMetadataCache() {
+        metadataCache?.clear()
+        synchronized(resolvedUrlCache) { resolvedUrlCache.clear() }
+    }
+
+    private data class CachedStreamUrl(
+        val url: String,
+        val info: btm.m.auraplayer.playback.StreamInfo,
+        val expiresAtMs: Long,
+    )
+
+    private val resolvedUrlCache = object : LinkedHashMap<String, CachedStreamUrl>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedStreamUrl>?) = size > 128
+    }
+
+    fun invalidateHomeCaches() {
+        val scope = cacheScope()
+        listOf(
+            "homepage/block/page", "recommend/resource", "personalized/playlist",
+            "personalized/newsong", "recommend/songs", "banner", "banner/get",
+            "artist/sublist", "record/recent/song", "record/recent/album",
+        ).forEach { path -> metadataCache?.removePrefix("$scope/$path/") }
+    }
+
     companion object {
+        private const val LONG_CACHE_MS = 24L * 60 * 60 * 1000
+        private const val MEDIUM_CACHE_MS = 2L * 60 * 60 * 1000
+        private const val STREAM_URL_CACHE_MS = 8L * 60 * 1000
+
+        private fun cacheTtlMs(path: String): Long? = when (path) {
+            "song/detail", "album", "artist/detail", "lyric/new",
+            "song/music/detail", "dj/program/detail" -> LONG_CACHE_MS
+            "artist/album", "artist/songs", "toplist/detail/v2",
+            "toplist/detail", "style/song", "album/newest", "album/new" -> MEDIUM_CACHE_MS
+            "user/playlist", "playlist/track/all", "homepage/block/page",
+            "recommend/resource", "personalized/playlist", "personalized/newsong",
+            "recommend/songs", "banner", "banner/get", "artist/sublist",
+            "album/sublist", "likelist", "user/record", "record/recent/song",
+            "record/recent/album", "dj/program" -> CloudMetadataCache.FRESH_MS
+            else -> null
+        }
+
         fun normalizeEndpoint(value: String): String {
             val url = value.trim().trimEnd('/').toHttpUrl()
             val octets = url.host.split('.').mapNotNull(String::toIntOrNull)
@@ -48,19 +86,26 @@ class NeteaseApi(
     }
 
     fun requestBlocking(path: String, values: Map<String, String> = emptyMap(), authenticated: Boolean = true): JSONObject {
-        val cacheable = path in setOf(
-            "user/playlist", "playlist/track/all", "song/detail", "lyric/new", "album",
-            "artist/songs", "artist/detail", "artist/album",
-            "album/newest", "album/new", "toplist/detail/v2", "toplist/detail", "style/song",
-        )
+        val ttlMs = cacheTtlMs(path)
+        val bypassRead = path == "recommend/songs" && values["afresh"] == "true"
+        val cacheable = ttlMs != null
         val key = cacheScope() + "/" + path + "/" + (values["uid"] ?: values["id"]).orEmpty() + "/" +
             values.toSortedMap().entries.joinToString("&") { "${it.key}=${it.value}" }
-        if (cacheable) metadataCache?.read(key)?.let { return it }
+        if (ttlMs != null && !bypassRead) metadataCache?.read(key, ttlMs)?.let { return it }
         return try {
-            requestNetwork(path, values, authenticated).also { if (cacheable) metadataCache?.write(key, it) }
+            requestNetwork(path, values, authenticated).also {
+                if (cacheable) {
+                    val writeKey = if (bypassRead) {
+                        val normalizedValues = values.toMutableMap().apply { remove("afresh") }
+                        cacheScope() + "/" + path + "/" + (normalizedValues["uid"] ?: normalizedValues["id"]).orEmpty() + "/" +
+                            normalizedValues.toSortedMap().entries.joinToString("&") { "${it.key}=${it.value}" }
+                    } else key
+                    metadataCache?.write(writeKey, it)
+                }
+            }
         } catch (e: IOException) {
             // HTTP/authentication failures must stay visible; only a transport outage uses stale data.
-            if (cacheable && e !is CloudApiException) metadataCache?.read(key, stale = true)?.let { return it }
+            if (ttlMs != null && e !is CloudApiException) metadataCache?.read(key, ttlMs, stale = true)?.let { return it }
             throw e
         }
     }
@@ -190,7 +235,7 @@ class NeteaseApi(
     suspend fun followedArtistAlbums(): List<CloudHomeItem> = withContext(Dispatchers.IO) {
         val artists = requestBlocking("artist/sublist", mapOf("limit" to "100", "offset" to "0"))
             .optJSONArray("data") ?: JSONArray()
-        val artistsToLoad = (0 until minOf(artists.length(), 20)).mapNotNull { artists.optJSONObject(it)?.optLong("id")?.takeIf { id -> id > 0 } }
+        val artistsToLoad = (0 until minOf(artists.length(), 10)).mapNotNull { artists.optJSONObject(it)?.optLong("id")?.takeIf { id -> id > 0 } }
         kotlinx.coroutines.coroutineScope {
             artistsToLoad.map { artistId -> async(Dispatchers.IO) {
                 try { artistAlbums(artistId, 0).items.take(3) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: IOException) { emptyList() }
@@ -464,6 +509,42 @@ class NeteaseApi(
         val songs = parseSongs(details.optJSONArray("songs") ?: JSONArray()).associateBy { it.id }
         return ids.mapNotNull(songs::get)
     }
+    suspend fun similarSongs(songId: Long, limit: Int = 20, offset: Int = 0): List<Song> {
+        if (songId <= 0L) return emptyList()
+        val response = request(
+            "simi/song",
+            mapOf(
+                "id" to "$songId",
+                "limit" to "${limit.coerceIn(1, 50)}",
+                "offset" to "${offset.coerceAtLeast(0)}",
+            ),
+        )
+        return parseSongs(response.optJSONArray("songs") ?: JSONArray())
+            .map { song ->
+                val httpsArt = song.artwork.replaceFirst("http://", "https://")
+                if (httpsArt == song.artwork) song else song.copy(artwork = httpsArt)
+            }
+            .distinctBy { it.id }
+    }
+    suspend fun similarArtists(artistId: Long): List<SongArtist> {
+        if (artistId <= 0L) return emptyList()
+        val response = request("simi/artist", mapOf("id" to "$artistId"))
+        val rows = response.optJSONArray("artists") ?: JSONArray()
+        return buildList {
+            for (index in 0 until rows.length()) {
+                val row = rows.optJSONObject(index) ?: continue
+                val id = row.optLong("id", 0L)
+                val name = row.optString("name").trim()
+                if (id <= 0L || name.isBlank()) continue
+                val pic = row.optString("picUrl")
+                    .ifBlank { row.optString("img1v1Url") }
+                    .takeUnless { it == "null" }
+                    .orEmpty()
+                    .replaceFirst("http://", "https://")
+                add(SongArtist(id, name, pic))
+            }
+        }.distinctBy { it.id }
+    }
     suspend fun follows(uid: Long, offset: Int = 0, limit: Int = 30): CloudPage<CloudFollow> {
         val response = request("user/follows", mapOf("uid" to "$uid", "offset" to "$offset", "limit" to "$limit"))
         val rows = response.optJSONArray("follow") ?: JSONArray()
@@ -483,7 +564,10 @@ class NeteaseApi(
         val ids = request("likelist", mapOf("uid" to "$uid")).optJSONArray("ids") ?: JSONArray()
         return (0 until ids.length()).map { ids.getLong(it) }.toSet()
     }
-    suspend fun likeSong(id: Long, liked: Boolean) { request("like", mapOf("id" to "$id", "like" to "$liked")) }
+    suspend fun likeSong(id: Long, liked: Boolean) {
+        request("like", mapOf("id" to "$id", "like" to "$liked"))
+        metadataCache?.removePrefix(cacheScope() + "/likelist/")
+    }
     suspend fun addSongToPlaylist(playlistId: Long, songId: Long) {
         request("playlist/tracks", mapOf("op" to "add", "pid" to "$playlistId", "tracks" to "$songId"))
         invalidatePlaylist(playlistId)
@@ -522,6 +606,43 @@ class NeteaseApi(
     }
 
     suspend fun recentSongs(limit: Int = 50): List<Song> = recentPlayEntries(limit).map { it.song }
+
+    data class RecentAlbumEntry(val album: CatalogAlbum, val playCount: Int, val playTimeMs: Long)
+
+    suspend fun recentAlbumEntries(limit: Int = 50): List<RecentAlbumEntry> {
+        val response = request("record/recent/album", mapOf("limit" to "${limit.coerceIn(1, 100)}"))
+        val rows = response.optJSONObject("data")?.optJSONArray("list")
+            ?: response.optJSONArray("list")
+            ?: JSONArray()
+        val albumsJson = JSONArray()
+        val stats = mutableListOf<Pair<Int, Long>>()
+        for (index in 0 until rows.length()) {
+            val row = rows.optJSONObject(index) ?: continue
+            val resourceType = row.optString("resourceType")
+            if (resourceType.isNotBlank() && !resourceType.equals("ALBUM", ignoreCase = true)) continue
+            val albumJson = row.optJSONObject("data")
+                ?: row.optJSONObject("album")
+                ?: row.takeIf { it.has("id") && it.has("name") }
+                ?: continue
+            if (albumJson.optLong("id", 0L) <= 0L) continue
+            albumsJson.put(albumJson)
+            stats += row.optInt("playCount", 0) to row.optLong("playTime", 0L)
+        }
+        val parsed = parseAlbums(albumsJson)
+        val seen = HashSet<Long>()
+        return buildList {
+            for (index in parsed.indices) {
+                val album = parsed[index].let {
+                    val httpsArt = it.artwork.replaceFirst("http://", "https://")
+                    if (httpsArt == it.artwork) it else it.copy(artwork = httpsArt)
+                }
+                if (seen.add(album.id)) {
+                    val (count, time) = stats.getOrElse(index) { 0 to 0L }
+                    add(RecentAlbumEntry(album, count, time))
+                }
+            }
+        }
+    }
 
     suspend fun scrobble(
         songId: Long,
@@ -625,6 +746,14 @@ class NeteaseApi(
         val response = request("album/sublist", mapOf("offset" to "$offset", "limit" to "25"))
         val albums = parseAlbums(response.optJSONArray("data") ?: JSONArray())
         return CloudPage(albums, offset + albums.size, albums.isNotEmpty() && response.optBoolean("hasMore", albums.size == 25))
+    }
+    suspend fun subscribeAlbum(id: Long, subscribe: Boolean) {
+        request("album/sub", mapOf("id" to "$id", "t" to if (subscribe) "1" else "0"))
+        metadataCache?.removePrefix(cacheScope() + "/album/sublist/")
+    }
+    suspend fun albumSubscribed(id: Long): Boolean {
+        val response = request("album/detail/dynamic", mapOf("id" to "$id"))
+        return response.optBoolean("isSub", false)
     }
     suspend fun artistAlbums(id: Long, offset: Int = 0): CloudPage<CatalogAlbum> {
         val response = request("artist/album", mapOf("id" to "$id", "offset" to "$offset", "limit" to "30"))
@@ -784,6 +913,7 @@ class NeteaseApi(
     }
     suspend fun followArtist(id: Long, follow: Boolean) {
         request("artist/sub", mapOf("id" to "$id", "t" to if (follow) "1" else "0"))
+        metadataCache?.removePrefix(cacheScope() + "/artist/sublist/")
     }
     suspend fun songArtists(id: Long): List<SongArtist> =
         parseSongs(request("song/detail", mapOf("ids" to "$id")).optJSONArray("songs") ?: JSONArray()).firstOrNull()?.artists.orEmpty()
@@ -884,6 +1014,14 @@ class NeteaseApi(
         song?.optString("url")?.takeIf { it.isNotBlank() && it != "null" }
 
     fun resolveBlocking(id: Long, level: String = "standard"): String {
+        val urlKey = "${cacheScope()}:$id:$level"
+        val now = System.currentTimeMillis()
+        synchronized(resolvedUrlCache) {
+            resolvedUrlCache[urlKey]?.takeIf { it.expiresAtMs > now }?.let { cached ->
+                btm.m.auraplayer.playback.PlaybackStreams.records[id] = cached.info
+                return cached.url
+            }
+        }
         val response = requestBlocking("song/url/v1", mapOf("id" to "$id", "level" to level, "unblock" to "false"))
         val primarySong = response.optJSONArray("data")?.optJSONObject(0) ?: throw IOException("UNAVAILABLE_SONG")
         var selectedSong = primarySong
@@ -916,7 +1054,7 @@ class NeteaseApi(
         }
 
         val isTrial = isTrialSong(selectedSong)
-        btm.m.auraplayer.playback.PlaybackStreams.records[id] = btm.m.auraplayer.playback.StreamInfo(
+        val streamInfo = btm.m.auraplayer.playback.StreamInfo(
             selectedSong.optString("level", selectedLevel),
             selectedSong.optString("type"),
             selectedSong.optInt("br"),
@@ -924,10 +1062,15 @@ class NeteaseApi(
             selectedSong.optInt("bitDepth", selectedSong.optInt("bits")),
             isTrial = isTrial,
         )
+        btm.m.auraplayer.playback.PlaybackStreams.records[id] = streamInfo
         val url = usableSongUrl(selectedSong) ?: throw IOException("UNAVAILABLE_SONG")
         val parsed = url.toHttpUrl()
         // NetEase occasionally returns HTTP CDN URLs. HTTPS is supported by its CDN.
-        return parsed.newBuilder().scheme("https").build().toString()
+        val resolved = parsed.newBuilder().scheme("https").build().toString()
+        synchronized(resolvedUrlCache) {
+            resolvedUrlCache[urlKey] = CachedStreamUrl(resolved, streamInfo, now + STREAM_URL_CACHE_MS)
+        }
+        return resolved
     }
     private fun parseAccount(profile: JSONObject) = CloudAccount(profile.getLong("userId"), profile.optString("nickname"), profile.optString("avatarUrl"))
     internal fun parseSongs(array: JSONArray): List<Song> = List(array.length()) { i ->

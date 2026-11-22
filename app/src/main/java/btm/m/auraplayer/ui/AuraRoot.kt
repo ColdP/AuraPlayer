@@ -473,9 +473,6 @@ private fun AuraShell(model: AuraViewModel, onEnterOobe: () -> Unit = {}) {
                                     actions = {
                                         if (tab == 0) GlassToolbarIconButton(MiuixIcons.Regular.Settings, tr("settings", "设置")) { open("settings") }
                                         else if (tab == 2) SongsToolbarMenu(model)
-                                        else GlassToolbarIconButton(MiuixIcons.Regular.Refresh, tr("refresh", "刷新")) {
-                                            model.refreshLibrary(); if (tab == 1) model.refreshCloud()
-                                        }
                                     },
                                 ) { padding, _ ->
                                     val chromeSpace = if (model.current != null) 184 else 112

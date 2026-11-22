@@ -12,7 +12,11 @@ import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.data.SearchCategory
 import btm.m.auraplayer.data.CloudFollow
 import btm.m.auraplayer.data.cloudSection
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import top.yukonga.miuix.kmp.basic.PullToRefresh
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.rememberPullToRefreshState
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -22,9 +26,42 @@ internal fun CloudHubPage(model: AuraViewModel, padding: PaddingValues, login: (
     val source = model.settings.value.cloudSource
     val showNetease = source != "qq"
     val showQq = source != "netease"
+    val pullToRefreshState = rememberPullToRefreshState()
+    var isRefreshing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isRefreshing) {
+        if (!isRefreshing) return@LaunchedEffect
+        val start = System.currentTimeMillis()
+        try {
+            model.refreshLibrary()
+            model.refreshCloud()
+            if (showNetease) model.refreshListeningRankPreview()
+            snapshotFlow { model.cloudPlaylistsLoading || model.subscribedAlbumsLoading || model.qqLoading }.first { !it }
+            val elapsed = System.currentTimeMillis() - start
+            if (elapsed < 350L) delay(350L - elapsed)
+        } finally {
+            isRefreshing = false
+        }
+    }
+
     LaunchedEffect(showQq, model.app.qqEndpoint) { if (showQq && model.qqPlaylists.isEmpty() && model.qqRecommended.isEmpty()) model.refreshQq() }
     LaunchedEffect(showNetease, user?.userId) { if (showNetease) model.refreshListeningRankPreview() }
-    LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    PullToRefresh(
+        isRefreshing = isRefreshing,
+        onRefresh = { isRefreshing = true },
+        modifier = Modifier.fillMaxSize(),
+        pullToRefreshState = pullToRefreshState,
+        contentPadding = padding,
+        topAppBarScrollBehavior = LocalPageScroll.current,
+        color = MiuixTheme.colorScheme.primary,
+        refreshTexts = listOf(
+            tr("pull_to_refresh", "下拉刷新"),
+            tr("release_to_refresh", "松开刷新"),
+            tr("refreshing", "正在刷新…"),
+            tr("refresh_completed", "刷新完成"),
+        ),
+    ) {
+        LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (showNetease) {
             item("account") {
                 SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
@@ -72,6 +109,7 @@ internal fun CloudHubPage(model: AuraViewModel, padding: PaddingValues, login: (
             }
         }
         if (showQq) qqSection(model, loginQq)
+        }
     }
 }
 

@@ -25,12 +25,41 @@ class QqMusicApi(
     private val endpoint: () -> String,
     private val uin: () -> String,
     private val cookie: () -> String,
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS).readTimeout(25, TimeUnit.SECONDS).followRedirects(false).build(),
+    private val client: OkHttpClient = CloudHttpClient.api,
+    private val metadataCache: CloudMetadataCache? = null,
 ) {
     private val official = OfficialQqClient(cookie, uin, client)
     val usingCustomEndpoint: Boolean get() = endpoint().isNotBlank()
     val configured: Boolean get() = true
+
+    private data class CachedQqUrl(val url: String, val expiresAtMs: Long)
+
+    private val resolvedUrlCache = object : LinkedHashMap<String, CachedQqUrl>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedQqUrl>?) = size > 128
+    }
+
+    private fun cacheScope(): String =
+        "qq/" + CloudMetadataCache.digest(endpoint() + "\n" + uin() + "\n" + cookie())
+
+    private inline fun cachedJson(
+        subKey: String,
+        ttlMs: Long,
+        refresh: Boolean = false,
+        fetch: () -> JSONObject,
+    ): JSONObject {
+        val fullKey = "${cacheScope()}/$subKey"
+        if (!refresh) {
+            metadataCache?.read(fullKey, ttlMs)?.let { return it }
+        }
+        return try {
+            fetch().also { metadataCache?.write(fullKey, it) }
+        } catch (e: IOException) {
+            if (e !is CloudApiException) {
+                metadataCache?.read(fullKey, ttlMs, stale = true)?.let { return it }
+            }
+            throw e
+        }
+    }
 
     fun requestBlocking(path: String, values: Map<String, String> = emptyMap()): JSONObject {
         val base = endpoint().takeIf { it.isNotBlank() } ?: throw CloudApiException(0, "QQ_ENDPOINT_MISSING")
@@ -83,11 +112,37 @@ class QqMusicApi(
         CloudPage(songs, page, songs.isNotEmpty() && (total == 0 || page * pageSize < total), total.takeIf { it > 0 })
     }
 
-    suspend fun playlists(): CloudPage<CloudPlaylist> = withContext(Dispatchers.IO) {
-        if (!usingCustomEndpoint) return@withContext official.playlists()
+    suspend fun playlists(refresh: Boolean = false): CloudPage<CloudPlaylist> = withContext(Dispatchers.IO) {
+        if (!usingCustomEndpoint) {
+            val id = userUin()
+            if (id.isBlank() || id == "0") return@withContext CloudPage(emptyList(), 0, false, 0)
+            val cacheKey = "${cacheScope()}/official-playlists/$id"
+            if (!refresh) {
+                metadataCache?.read(cacheKey, CloudMetadataCache.FRESH_MS)?.let { cached ->
+                    val arr = cached.optJSONArray("items") ?: JSONArray()
+                    val items = List(arr.length()) { i ->
+                        val o = arr.getJSONObject(i)
+                        CloudPlaylist(o.getLong("id"), o.optString("name"), o.optInt("count"), o.optString("artwork"), o.optInt("specialType"), provider = PROVIDER_QQ)
+                    }
+                    return@withContext CloudPage(items, items.size, false, items.size)
+                }
+            }
+            return@withContext official.playlists().also { page ->
+                if (page.items.isNotEmpty()) {
+                    val arr = JSONArray().apply {
+                        page.items.forEach { p ->
+                            put(JSONObject().put("id", p.id).put("name", p.name).put("count", p.count).put("artwork", p.artwork).put("specialType", p.specialType))
+                        }
+                    }
+                    metadataCache?.write(cacheKey, JSONObject().put("items", arr))
+                }
+            }
+        }
         val id = userUin()
         if (id.isBlank()) return@withContext CloudPage(emptyList(), 0, false, 0)
-        val list = request("user/songlist", mapOf("id" to id)).optJSONObject("data")?.optJSONArray("list") ?: JSONArray()
+        val list = cachedJson("user/songlist/$id", CloudMetadataCache.FRESH_MS, refresh) {
+            requestBlocking("user/songlist", mapOf("id" to id))
+        }.optJSONObject("data")?.optJSONArray("list") ?: JSONArray()
         val items = List(list.length()) { i ->
             val o = list.getJSONObject(i)
             CloudPlaylist(o.optLong("tid", o.optLong("dissid")), o.optString("diss_name", o.optString("dissname")),
@@ -97,9 +152,32 @@ class QqMusicApi(
         CloudPage(items, items.size, false, items.size)
     }
 
-    suspend fun recommendedPlaylists(): List<CloudPlaylist> = withContext(Dispatchers.IO) {
-        if (!usingCustomEndpoint) return@withContext official.recommendedPlaylists()
-        val list = request("recommend/playlist", mapOf("id" to "3317", "pageSize" to "30", "pageNo" to "1")).optJSONObject("data")?.optJSONArray("list") ?: JSONArray()
+    suspend fun recommendedPlaylists(refresh: Boolean = false): List<CloudPlaylist> = withContext(Dispatchers.IO) {
+        if (!usingCustomEndpoint) {
+            val cacheKey = "${cacheScope()}/official-recommended"
+            if (!refresh) {
+                metadataCache?.read(cacheKey, CloudMetadataCache.FRESH_MS)?.let { cached ->
+                    val arr = cached.optJSONArray("items") ?: JSONArray()
+                    return@withContext List(arr.length()) { i ->
+                        val o = arr.getJSONObject(i)
+                        CloudPlaylist(o.getLong("id"), o.optString("name"), o.optInt("count"), o.optString("artwork"), provider = PROVIDER_QQ)
+                    }
+                }
+            }
+            return@withContext official.recommendedPlaylists().also { items ->
+                if (items.isNotEmpty()) {
+                    val arr = JSONArray().apply {
+                        items.forEach { p ->
+                            put(JSONObject().put("id", p.id).put("name", p.name).put("count", p.count).put("artwork", p.artwork))
+                        }
+                    }
+                    metadataCache?.write(cacheKey, JSONObject().put("items", arr))
+                }
+            }
+        }
+        val list = cachedJson("recommend/playlist", CloudMetadataCache.FRESH_MS, refresh) {
+            requestBlocking("recommend/playlist", mapOf("id" to "3317", "pageSize" to "30", "pageNo" to "1"))
+        }.optJSONObject("data")?.optJSONArray("list") ?: JSONArray()
         List(list.length()) { i ->
             val o = list.getJSONObject(i)
             CloudPlaylist(o.optLong("dissid", o.optLong("tid")), o.optString("dissname", o.optString("diss_name")), o.optInt("song_count", o.optInt("songnum")),
@@ -107,17 +185,28 @@ class QqMusicApi(
         }.filter { it.id > 0 }
     }
 
-    suspend fun playlistSongs(id: Long): CloudPage<Song> = withContext(Dispatchers.IO) {
+    suspend fun playlistSongs(id: Long, refresh: Boolean = false): CloudPage<Song> = withContext(Dispatchers.IO) {
         if (!usingCustomEndpoint) return@withContext official.playlistSongs(id, ::parseSongs)
-        val data = request("songlist", mapOf("id" to "$id")).optJSONObject("data")
+        val data = cachedJson("songlist/$id", CloudMetadataCache.FRESH_MS, refresh) {
+            requestBlocking("songlist", mapOf("id" to "$id"))
+        }.optJSONObject("data")
         val songs = parseSongs(data?.optJSONArray("songlist") ?: JSONArray())
         CloudPage(songs, songs.size, false, songs.size)
     }
 
     suspend fun albumTracks(albumMidOrId: String): List<Song> = withContext(Dispatchers.IO) {
         if (!usingCustomEndpoint) return@withContext official.albumTracks(albumMidOrId, ::parseSongs)
-        val json = request("album/songs", mapOf("albummid" to albumMidOrId))
+        val json = cachedJson("album/songs/$albumMidOrId", 24L * 60 * 60 * 1000) {
+            requestBlocking("album/songs", mapOf("albummid" to albumMidOrId))
+        }
         parseAlbumTracks(json)
+    }
+    suspend fun subscribeAlbum(albumMidOrId: String, subscribe: Boolean) = withContext(Dispatchers.IO) {
+        if (!usingCustomEndpoint) {
+            official.subscribeAlbum(albumMidOrId, subscribe)
+        } else {
+            request("album/sub", mapOf("albummid" to albumMidOrId, "t" to if (subscribe) "1" else "0"))
+        }
     }
 
     suspend fun artistAlbums(singerMidOrId: String, offset: Int = 0, pageSize: Int = 30): CloudPage<CatalogAlbum> = withContext(Dispatchers.IO) {
@@ -132,10 +221,22 @@ class QqMusicApi(
     }
 
     fun resolveBlocking(songmid: String): String {
-        if (!usingCustomEndpoint) return official.resolveBlocking(songmid)
-        val response = requestBlocking("song/url", mapOf("id" to songmid, "type" to "128"))
-        val url = response.optString("data").takeIf { it.isNotBlank() && it != "null" } ?: throw IOException("UNAVAILABLE_SONG")
-        return url.toHttpUrl().newBuilder().scheme("https").build().toString()
+        val urlKey = "${cacheScope()}:$songmid"
+        val now = System.currentTimeMillis()
+        synchronized(resolvedUrlCache) {
+            resolvedUrlCache[urlKey]?.takeIf { it.expiresAtMs > now }?.let { return it.url }
+        }
+        val resolved = if (!usingCustomEndpoint) {
+            official.resolveBlocking(songmid)
+        } else {
+            val response = requestBlocking("song/url", mapOf("id" to songmid, "type" to "128"))
+            val url = response.optString("data").takeIf { it.isNotBlank() && it != "null" } ?: throw IOException("UNAVAILABLE_SONG")
+            url.toHttpUrl().newBuilder().scheme("https").build().toString()
+        }
+        synchronized(resolvedUrlCache) {
+            resolvedUrlCache[urlKey] = CachedQqUrl(resolved, now + 8L * 60 * 1000)
+        }
+        return resolved
     }
 
     internal fun parseAlbumTracks(json: JSONObject): List<Song> {

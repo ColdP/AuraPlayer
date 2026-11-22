@@ -296,6 +296,18 @@ internal class OfficialQqClient(
         val hasMore = albums.isNotEmpty() && (if (total > 0) offset + albums.size < total else albums.size >= pageSize)
         return CloudPage(albums, offset + albums.size, hasMore, total.takeIf { it > 0 })
     }
+    fun subscribeAlbum(albumMidOrId: String, subscribe: Boolean) {
+        val method = if (subscribe) "AddFavAlbum" else "DelFavAlbum"
+        val param = JSONObject().apply {
+            albumMidOrId.toLongOrNull()?.let { put("v_albumId", JSONArray().put(it)) }
+                ?: put("v_albumMid", JSONArray().put(albumMidOrId))
+        }
+        musicu(mapOf("fav" to JSONObject().apply {
+            put("module", "music.musicasset.AlbumFavWriteServer")
+            put("method", method)
+            put("param", param)
+        }))
+    }
 
     private fun String.https() = if (startsWith("http://")) "https://" + removePrefix("http://") else this
 }

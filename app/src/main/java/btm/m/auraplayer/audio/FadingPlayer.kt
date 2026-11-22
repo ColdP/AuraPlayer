@@ -34,6 +34,9 @@ class FadingPlayer(private val delegate: Player, private val store: EffectsStore
     override fun setVolume(volume: Float) { userVolume = volume.coerceIn(0f, 1f); if (ramp?.isActive != true) delegate.volume = userVolume }
     override fun getVolume(): Float = userVolume
     override fun setPlayWhenReady(playWhenReady: Boolean) {
+        if (playWhenReady && delegate.playbackState == Player.STATE_IDLE && delegate.mediaItemCount > 0) {
+            delegate.prepare()
+        }
         if (requested == playWhenReady && (delegate.playWhenReady == playWhenReady || ramp?.isActive == true)) return
         requested = playWhenReady
         ramp?.cancel(); fadingOut = false

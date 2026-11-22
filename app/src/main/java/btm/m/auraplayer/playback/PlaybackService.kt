@@ -76,7 +76,8 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
         activeInstance = this
         val app = application as AuraApplication
-        val http = OkHttpDataSource.Factory(OkHttpClient()).setDefaultRequestProperties(mapOf("Referer" to "https://music.163.com/"))
+        val http = OkHttpDataSource.Factory(btm.m.auraplayer.data.CloudHttpClient.media)
+            .setDefaultRequestProperties(mapOf("Referer" to "https://music.163.com/"))
         val audioCache = PlaybackAudioCache.get(this)
         val resolving = ResolvingDataSource.Factory(http) { spec ->
             if (spec.uri.scheme == "aura" && spec.uri.host == "netease") {
@@ -103,25 +104,62 @@ class PlaybackService : MediaSessionService() {
             .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         val cloudSource = ResolvingDataSource.Factory(cacheSource) { spec ->
             val uri = spec.uri
-            val key = if (uri.scheme == "aura") uri.lastPathSegment?.let { trackId ->
-                val level = uri.getQueryParameter("quality") ?: PlaybackPreferences(this).quality.level
-                val scope = if (uri.host == "netease") app.neteaseAudioCacheScope() else ""
-                playbackAudioCacheKey(uri.host.orEmpty(), trackId, level, scope)
-            } else null
-            if (key != null && PlaybackAudioCache.isTrialKey(key)) {
-                runCatching { audioCache.removeResource(key) }
+            if (uri.scheme == "aura") {
+                val trackId = uri.lastPathSegment
+                if (trackId != null) {
+                    val prefs = PlaybackPreferences(this)
+                    val requestedLevel = uri.getQueryParameter("quality") ?: prefs.quality.level
+                    val effectiveLevel = if (uri.host == "netease") {
+                        val songId = trackId.toLongOrNull() ?: 0L
+                        val requestedQuality = StreamQuality.entries.firstOrNull { it.level == requestedLevel } ?: StreamQuality.STANDARD
+                        val metered = btm.m.auraplayer.data.NetworkTrafficPolicy.isMetered(this)
+                        val targetQuality = prefs.effectiveQuality(requestedQuality, metered)
+                        if (metered && targetQuality != requestedQuality && songId > 0L) {
+                            (PlaybackAudioCache.findCachedQuality(this, songId, requestedQuality, targetQuality) ?: targetQuality).level
+                        } else {
+                            targetQuality.level
+                        }
+                    } else {
+                        requestedLevel
+                    }
+                    val scope = if (uri.host == "netease") app.neteaseAudioCacheScope() else ""
+                    val key = playbackAudioCacheKey(uri.host.orEmpty(), trackId, effectiveLevel, scope)
+                    if (key != null && PlaybackAudioCache.isTrialKey(key)) {
+                        runCatching { audioCache.removeResource(key) }
+                    }
+                    val effectiveUri = if (uri.host == "netease" && effectiveLevel != uri.getQueryParameter("quality")) {
+                        uri.buildUpon().clearQuery().appendQueryParameter("quality", effectiveLevel).build()
+                    } else {
+                        uri
+                    }
+                    if (key != null) {
+                        spec.buildUpon().setUri(effectiveUri).setKey(key).setFlags(playbackAudioCacheFlags(spec.flags)).build()
+                    } else {
+                        spec.withUri(effectiveUri)
+                    }
+                } else {
+                    spec
+                }
+            } else {
+                spec
             }
-            if (key == null) spec else spec.buildUpon().setKey(key).setFlags(playbackAudioCacheFlags(spec.flags)).build()
         }
         val source = DefaultDataSource.Factory(this, cloudSource)
         val mediaSourceFactory = DefaultMediaSourceFactory(source)
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(15_000, 30_000, 1_500, 3_000)
+            .setBackBuffer(0, false)
+            .build()
         val renderersFactory = btm.m.auraplayer.audio.EffectsRenderersFactory(
             context = this,
             store = app.effects,
             auraSing = app.auraSing,
             onUsbSinkCreated = { usbAudioSink = it },
         )
-        val player = ExoPlayer.Builder(this, renderersFactory).setMediaSourceFactory(mediaSourceFactory).build().apply {
+        val player = ExoPlayer.Builder(this, renderersFactory)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .setLoadControl(loadControl)
+            .build().apply {
             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), !app.effects.state.value.alwaysPlay)
             setHandleAudioBecomingNoisy(true)
             repeatMode = androidx.media3.common.Player.REPEAT_MODE_ALL
@@ -483,7 +521,11 @@ class PlaybackService : MediaSessionService() {
         val index = state.getInt("index", 0).coerceIn(items.indices)
         val position = state.getLong("position", 0L).coerceAtLeast(0L)
         player.setMediaItems(items, index, position)
-        player.prepare()
+        // Avoid eagerly buffering cloud streams on cold start until the user explicitly resumes playback.
+        val restoredScheme = items[index].localConfiguration?.uri?.scheme
+        if (!restoredScheme.equals("aura", ignoreCase = true)) {
+            player.prepare()
+        }
         // Never resume auto-play on cold relaunch after exiting while playing; keep restored track and progress.
         player.playWhenReady = false
     }
@@ -525,14 +567,16 @@ class PlaybackService : MediaSessionService() {
             fallback.decodeBitmap(data)
 
         override fun loadBitmap(uri: Uri): ListenableFuture<android.graphics.Bitmap> {
-            if (uri.scheme == LocalAudioArtwork.SCHEME) {
+            val scheme = uri.scheme?.lowercase()
+            if (scheme == LocalAudioArtwork.SCHEME || scheme == "http" || scheme == "https") {
                 val future = SettableFuture.create<android.graphics.Bitmap>()
                 serviceScope.launch(Dispatchers.IO) {
+                    val targetSize = if (scheme == LocalAudioArtwork.SCHEME) 1024 else 640
                     val bitmap = runCatching {
                         val result = SingletonImageLoader.get(context).execute(
                             ImageRequest.Builder(context)
                                 .data(uri.toString())
-                                .size(1024)
+                                .size(targetSize)
                                 .allowHardware(false)
                                 .build(),
                         ) as? SuccessResult
@@ -541,11 +585,15 @@ class PlaybackService : MediaSessionService() {
                     if (bitmap != null) {
                         future.set(bitmap)
                     } else {
-                        val parsedAlbumArt = LocalAudioArtwork.parse(uri.toString())?.albumArtUri
-                            ?.takeIf { it.isNotBlank() }
-                            ?.let(Uri::parse)
-                        if (parsedAlbumArt != null) {
-                            runCatching { fallback.loadBitmap(parsedAlbumArt).get() }
+                        val fallbackUri = if (scheme == LocalAudioArtwork.SCHEME) {
+                            LocalAudioArtwork.parse(uri.toString())?.albumArtUri
+                                ?.takeIf { it.isNotBlank() }
+                                ?.let(Uri::parse)
+                        } else {
+                            uri
+                        }
+                        if (fallbackUri != null) {
+                            runCatching { fallback.loadBitmap(fallbackUri).get() }
                                 .onSuccess(future::set)
                                 .onFailure(future::setException)
                         } else {

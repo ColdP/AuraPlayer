@@ -563,6 +563,13 @@ class LibraryHistory(context: Context) {
         prefs.edit().putStringSet("favorites", if (song.key in old) old - song.key else old + song.key).apply()
         revision++
     }
+    fun favoriteAlbums(): Set<String> = prefs.getStringSet("favorite_albums", emptySet())!!.toSet()
+    fun setFavoriteAlbum(key: String, favorite: Boolean) {
+        val old = favoriteAlbums()
+        val updated = if (favorite) old + key else old - key
+        prefs.edit().putStringSet("favorite_albums", updated).apply()
+        revision++
+    }
     fun record(song: Song) {
         prefs.edit().putLong("recent.${song.key}", System.currentTimeMillis())
             .putInt("count.${song.key}", count(song) + 1).apply()

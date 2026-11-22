@@ -13,8 +13,10 @@ class CloudCacheStore(private val context: Context, private val api: NeteaseApi)
     suspend fun sizes(): Map<CloudCacheCategory, Long> = withContext(Dispatchers.IO) {
         mapOf(
             CloudCacheCategory.ARTWORK to (SingletonImageLoader.get(context).diskCache?.size ?: 0L),
-            CloudCacheCategory.METADATA to context.cacheDir.resolve("cloud-metadata")
-                .listFiles().orEmpty().filter { it.isFile }.sumOf { it.length() },
+            CloudCacheCategory.METADATA to (
+                context.cacheDir.resolve("cloud-metadata").listFiles().orEmpty().filter { it.isFile }.sumOf { it.length() } +
+                    context.cacheDir.resolve("cloud-lyrics").listFiles().orEmpty().filter { it.isFile }.sumOf { it.length() }
+                ),
             CloudCacheCategory.PLAYBACK_AUDIO to PlaybackAudioCache.size(context),
         )
     }
@@ -25,7 +27,10 @@ class CloudCacheStore(private val context: Context, private val api: NeteaseApi)
             loader.diskCache?.clear()
             loader.memoryCache?.clear()
         }
-        if (CloudCacheCategory.METADATA in categories) api.clearMetadataCache()
+        if (CloudCacheCategory.METADATA in categories) {
+            api.clearMetadataCache()
+            context.cacheDir.resolve("cloud-lyrics").listFiles().orEmpty().filter { it.isFile }.forEach { it.delete() }
+        }
         if (CloudCacheCategory.PLAYBACK_AUDIO in categories) PlaybackAudioCache.clear(context)
     }
 }

@@ -279,6 +279,12 @@ internal fun rememberCatalogMotionCoverPath(
             motionFile = cached
             return@LaunchedEffect
         }
+        if (btm.m.auraplayer.playback.PlaybackPreferences(context).wifiOnlyMotionCover &&
+            btm.m.auraplayer.data.NetworkTrafficPolicy.isMetered(context)
+        ) {
+            motionFile = null
+            return@LaunchedEffect
+        }
         motionFile = null
         motionFile = AppleMusicMotionCoverManager.resolve(
             context = context,
@@ -318,13 +324,20 @@ internal fun rememberCatalogArtistMedia(
             media = ResolvedArtistMedia()
             return@LaunchedEffect
         }
+        val wifiOnlyBlocked = btm.m.auraplayer.playback.PlaybackPreferences(context).wifiOnlyMotionCover &&
+            btm.m.auraplayer.data.NetworkTrafficPolicy.isMetered(context)
+        val effectiveNeedMotion = needMotionVideo && (!wifiOnlyBlocked || initialMotion != null)
+        if (wifiOnlyBlocked && !needLogo && !needArtwork && initialMotion == null) {
+            media = ResolvedArtistMedia()
+            return@LaunchedEffect
+        }
         val activePath = media.motionVideoPath ?: initialMotion
         media = AppleMusicArtistLogoManager.resolveArtistMedia(
             context = context,
             artistName = artistName,
             needLogo = needLogo,
             needArtwork = needArtwork,
-            needMotionVideo = needMotionVideo,
+            needMotionVideo = effectiveNeedMotion,
             activePlayingVideoPath = activePath,
         )
     }
@@ -444,67 +457,103 @@ internal fun AlbumInfoBackground(collection: MusicCollection, modifier: Modifier
 private fun AlbumHeroActions(
     tracks: List<Song>,
     destinationId: Long,
+    isFavorite: Boolean,
     iconButtonFill: Color,
     foreground: Color,
     accent: Color,
     onAccent: Color,
     onInfo: () -> Unit,
+    onFavorite: () -> Unit,
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
 ) {
     val enabled = tracks.isNotEmpty()
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box(
-            Modifier
-                .size(42.dp)
-                .clip(CircleShape)
-                .clickable(enabled = destinationId > 0, onClick = onInfo)
-                .background(iconButtonFill),
-            contentAlignment = Alignment.Center,
+    val buttonSize = 37.dp
+    Column(
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalAlignment = Alignment.End,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            Image(
-                painterResource(R.drawable.ic_album_info),
-                tr("album_details", "专辑详情"),
-                Modifier.size(26.dp),
-                colorFilter = ColorFilter.tint(foreground),
-            )
-        }
-        Box(
-            Modifier
-                .height(42.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .alpha(if (enabled) 1f else 0.45f)
-                .clickable(enabled = enabled, onClick = onPlay)
-                .background(accent)
-                .padding(horizontal = 16.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .height(buttonSize)
+                    .clip(RoundedCornerShape(999.dp))
+                    .alpha(if (enabled) 1f else 0.45f)
+                    .clickable(enabled = enabled, onClick = onPlay)
+                    .background(accent)
+                    .padding(horizontal = 15.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Image(
+                        painterResource(R.drawable.ic_player_play),
+                        tr("play", "播放"),
+                        Modifier.size(16.dp),
+                        colorFilter = ColorFilter.tint(onAccent),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(tr("play", "播放"), color = onAccent)
+                }
+            }
+            Box(
+                Modifier
+                    .size(buttonSize)
+                    .clip(CircleShape)
+                    .clickable(enabled = destinationId > 0, onClick = onInfo)
+                    .background(iconButtonFill),
+                contentAlignment = Alignment.Center,
+            ) {
                 Image(
-                    painterResource(R.drawable.ic_player_play),
-                    tr("play", "播放"),
-                    Modifier.size(18.dp),
-                    colorFilter = ColorFilter.tint(onAccent),
+                    painterResource(R.drawable.ic_album_info),
+                    tr("album_details", "专辑详情"),
+                    Modifier.size(22.dp),
+                    colorFilter = ColorFilter.tint(foreground),
                 )
-                Spacer(Modifier.width(5.dp))
-                Text(tr("play", "播放"), color = onAccent)
             }
         }
-        Box(
-            Modifier
-                .size(42.dp)
-                .clip(CircleShape)
-                .alpha(if (enabled) 1f else 0.45f)
-                .clickable(enabled = enabled, onClick = onShuffle)
-                .background(iconButtonFill),
-            contentAlignment = Alignment.Center,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            Image(
-                painterResource(R.drawable.ic_player_shuffle),
-                tr("shuffle", "随机播放"),
-                Modifier.size(20.dp),
-                colorFilter = ColorFilter.tint(foreground),
-            )
+            Box(
+                Modifier
+                    .size(buttonSize)
+                    .clip(CircleShape)
+                    .clickable(onClick = onFavorite)
+                    .background(iconButtonFill),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painterResource(if (isFavorite) R.drawable.ic_player_favorite_on else R.drawable.ic_player_favorite),
+                    tr("favorite_album", "收藏专辑"),
+                    Modifier.size(18.dp),
+                    colorFilter = ColorFilter.tint(if (isFavorite) accent else foreground),
+                )
+            }
+            Box(
+                Modifier
+                    .height(buttonSize)
+                    .clip(RoundedCornerShape(999.dp))
+                    .alpha(if (enabled) 1f else 0.45f)
+                    .clickable(enabled = enabled, onClick = onShuffle)
+                    .background(accent)
+                    .padding(horizontal = 15.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Image(
+                        painterResource(R.drawable.ic_player_shuffle),
+                        tr("shuffle", "随机播放"),
+                        Modifier.size(16.dp),
+                        colorFilter = ColorFilter.tint(onAccent),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(tr("shuffle", "随机播放"), color = onAccent)
+                }
+            }
         }
     }
 }
@@ -554,8 +603,21 @@ internal fun CatalogDetailPage(
     val context = LocalContext.current
     val favoritePrefs = remember { context.getSharedPreferences("aura.catalog.favorites", android.content.Context.MODE_PRIVATE) }
     val artistId = remember(collection.key) { collection.key.substringAfterLast(':').toLongOrNull() ?: 0L }
+    val albumId = remember(collection.key, cloud?.playlist?.id) {
+        cloud?.playlist?.id?.takeIf { it > 0L } ?: collection.key.substringAfterLast(':').toLongOrNull() ?: 0L
+    }
+    val isQqAlbum = remember(collection.key, cloud?.playlist?.provider, tracks) {
+        cloud?.playlist?.provider == "qq" || collection.key.startsWith("qqalbum:") || tracks.any { it.isQq }
+    }
     val isCloudArtist = remember(collection.key) { collection.key.startsWith("cloud:artist:") }
     val canSyncArtistFollow = artist && isCloudArtist && artistId > 0L && model.cloudEnabled && model.account != null
+    val canSyncAlbumFavorite = !artist && !isQqAlbum && (cloud != null || collection.key.startsWith("cloud:album:")) &&
+        albumId > 0L && model.cloudEnabled && model.account != null
+    LaunchedEffect(canSyncAlbumFavorite, collection.key, albumId, model.account?.userId) {
+        if (canSyncAlbumFavorite) {
+            model.refreshAlbumFavorite(collection.key, albumId, isQqAlbum)
+        }
+    }
     val remoteFollowed = if (canSyncArtistFollow) model.isArtistFollowed(artistId) else null
     var artistFavorite by remember(collection.key) {
         mutableStateOf(remoteFollowed ?: favoritePrefs.getBoolean(collection.key, false))
@@ -784,11 +846,13 @@ internal fun CatalogDetailPage(
                     AlbumHeroActions(
                         tracks = tracks,
                         destinationId = destinationId,
+                        isFavorite = model.isAlbumFavorite(collection.key, albumId, isQqAlbum),
                         iconButtonFill = heroCardFill,
                         foreground = foreground,
                         accent = accent,
                         onAccent = onAccent,
                         onInfo = { open("albumInfo:$destinationId") },
+                        onFavorite = { model.toggleAlbumFavorite(collection, albumId, isQqAlbum, tracks) },
                         onPlay = { model.playCollection(tracks, content = cloud) },
                         onShuffle = { model.playCollection(tracks, content = cloud, shuffle = true) },
                     )
@@ -812,11 +876,13 @@ internal fun CatalogDetailPage(
                     AlbumHeroActions(
                         tracks = tracks,
                         destinationId = destinationId,
+                        isFavorite = model.isAlbumFavorite(collection.key, albumId, isQqAlbum),
                         iconButtonFill = foreground.copy(alpha = .12f),
                         foreground = foreground,
                         accent = accent,
                         onAccent = onAccent,
                         onInfo = { open("albumInfo:$destinationId") },
+                        onFavorite = { model.toggleAlbumFavorite(collection, albumId, isQqAlbum, tracks) },
                         onPlay = { model.playCollection(tracks, content = cloud) },
                         onShuffle = { model.playCollection(tracks, content = cloud, shuffle = true) },
                     )
