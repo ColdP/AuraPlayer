@@ -32,15 +32,16 @@ Aura Player (`btm.m.auraplayer`) is an Android music player for Android 13 (API 
 
 The source version is defined by `versionName` in [app/build.gradle.kts](app/build.gradle.kts); the README does not duplicate the version string. See [Releases](https://github.com/ColdP/AuraPlayer/releases) for downloads and release notes.
 
-See the [1.0.0 release notes](RELEASE_NOTES_1.0.0.md) for this stable release (in Simplified Chinese).
+See the [1.0.1 release notes](RELEASE_NOTES_1.0.1.md) for this stable release (in Simplified Chinese).
 
 ## Features
 
 ### Local Library and Home
 
 - MediaStore local music scanning and permission handling with Songs, Local Playlists, Albums, Artists, Favorites, and Playback History.
-- Retro Music-inspired home layout: greeting header, quick shortcuts, recently added, cover collage suggestions, and top/recent artists and albums.
-- Folder blacklist/whitelist, minimum-duration filter, manual audio file import via Android SAF (up to 20 files at once), full or folder-scoped scanning, persistent sorting, pull-to-refresh, and categorized search.
+- Retro Music-inspired home layout: greeting header, quick shortcuts, recently added, cover collage suggestions, and top/recent artists and albums, with customizable home section ordering and irregular cover aspect-ratio adaptation.
+- Customizable Home banner supporting image, video, and Motion Photo playback and export, with banner theme color extraction and overview overlay.
+- Folder blacklist/whitelist, filename block rules & blocked songs management, minimum-duration filter, manual audio file import via Android SAF (up to 20 files at once), full or folder-scoped scanning, persistent sorting, pull-to-refresh, and categorized search.
 - Adaptive responsive layout: compact track rows with `44dp` covers, freeform/multi-window and landscape split-pane Now Playing scaling, multi-column grids on large screens, and preserved system font scaling.
 
 ### Cloud Music (NetEase / QQ Music) and Downloads
@@ -49,13 +50,14 @@ See the [1.0.0 release notes](RELEASE_NOTES_1.0.0.md) for this stable release (i
 - **Optional Custom APIs**: Advanced connection settings support connecting to a self-hosted [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) server (including SMS verification login, with ready-to-run Node.js and Docker Compose files in `server/`) or [jsososo/QQMusicApi](https://github.com/jsososo/QQMusicApi).
 - **Cloud Home and Heartbeat**: Choose Local, NetEase, or QQ Music for Home. Both cloud home pages offer refreshable song recommendations. NetEase also offers a Following page and a Heartbeat repeat mode that restores the previous queue and position when turned off. The Heartbeat option can be disabled in NetEase settings.
 - **Cloud Source Filter and Pure Local Mode**: Under Settings → Features, **Cloud content display** selects `NetEase Cloud Music / QQ Music / Show All`, while the independent **Cloud search content** dropdown selects `NetEase Cloud Music / QQ Music`. QQ Music's personal playlists appear above recommendations. **Disable all cloud features** hides cloud UI entries, cancels cloud jobs, and strips cloud tracks from the queue to turn Aura Player into a pure local player.
-- **Cloud Browsing and Details**: Cloud recommendations, paginated playlists and tracks, categorized search, album and artist detail pages, and audio quality selection (with extended features subject to NetEase API support).
+- **Cloud Browsing and Details**: Cloud recommendations, NetEase Listen Report (horizontal period swipe & pull-to-refresh), NetEase discover albums & categorized charts (unified chart cards & VIP song badge switch), paginated playlists and tracks, categorized search, album and artist detail pages, and audio quality selection (with extended features subject to NetEase API support).
 - **Downloads and Tagging**: Downloads selected qualities via the Android system downloader; WorkManager decodes NCM containers in the background and writes FLAC/MP3 tags and artwork to `Music/Aura Player` (subject to NetEase account and regional rights).
-- **Cache Management**: Artwork cache up to `128 MiB`, metadata cache up to `16 MiB`, and cloud playback audio cache up to `512 MiB`. View and clear each category under Settings → NetEase Music → Cache.
+- **Cache and Data-Saver Management**: Artwork cache up to `128 MiB`, metadata cache up to `16 MiB`, and cloud playback audio cache up to `512 MiB`, with cloud network policy and preload optimizations to reduce mobile data usage. View and clear each category under Settings → NetEase Music → Cache.
 
 ### Now Playing, Lyrics, and Lyric Sharing
 
-- **Media3 Playback and Gestures**: Background playback with media notifications, 0.5–3x playback speed, sleep timer, volume controls, drag-to-reorder queue, horizontal swipe track switching, mini-player to full-screen continuous morphing, swipe-down collapse, and predictive back.
+- **Media3 Playback and Gestures**: Background playback with media notifications, 0.5–3x playback speed, sleep timer, volume controls, blurred drag-to-reorder queue, horizontal swipe track switching, mini-player to full-screen continuous morphing, swipe-down collapse, and predictive back.
+- **Desktop Widgets & Cutout Ring Indicator**: `2x2`, `4x1`, `4x2`, `4x3`, `4x4` player widgets and `4x4` cover widget with theme color extraction and MIUI widget updates; camera Cutout Ring Indicator displaying song progress, volume, audio level, or sleep timer with optional outside-app overlay and landscape auto-hide.
 - **Player Appearance and Cover Themes**: Aurora, Blurred Aurora, Blur, Solid Color, Full-Screen, Material, and One themes; snow and rain effects; glow progress bars (`Hyper` / `One`); **Square / 3D Coverflow / Tiled cover wall** themes (landscape auto-Coverflow option, adjustable center-hold duration in Tiled mode, and model-free gyroscope 3D tilt parallax with sensitivity sliders); Immersive Cover (bottom feather mask and screen-corner collapse morphing); **Apple Music animated artwork & artist visuals** (motion covers on Now Playing/albums/artists, high-res artist portraits, and artist wordmark logos); 8 cover transitions; keep-screen-on in lyrics mode; and auto-hiding immersive controls.
 - **12 Stylized Lyric Themes & 3D Tokyo Cityscape**: Reworked AGSL shader backgrounds plus a Cel-Shaded **3D Tokyo** theme with seamless **City Walk** auto-transitions across Shibuya Crossing, Tokyo Tower, Shinjuku Neon Street, Asakusa Nakamise, and Odaiba Rainbow Bay with 6 time-of-day presets or system-time sync.
 - **Experimental Features**:
@@ -68,14 +70,14 @@ See the [1.0.0 release notes](RELEASE_NOTES_1.0.0.md) for this stable release (i
 
 ### Audio Effects, Tag Editor, and Updates
 
-- **Built-In DSP Engine**: 15 built-in presets (Reference, Warmth, Clarity, Deep Bass, etc.) plus real-time custom tuning (multi-band EQ, preamp, automatic gain protection, stereo width, low-frequency crossfeed, harmonic coloration, and dynamics compressor), alongside fade-in/out, Always Play, Android native Previous Track behavior (rewind past 3s), and **USB Exclusive Output** (bypasses the system mixer and resampler to stream PCM directly to external UAC 1.0 / UAC 2.0 USB DACs via native `usbdevfs` isochronous transfers).
+- **Built-In DSP Engine**: 15 built-in presets (Reference, Warmth, Clarity, Deep Bass, etc.), per-band EQ presets, and real-time custom tuning (multi-band EQ, preamp, automatic gain protection, stereo width, low-frequency crossfeed, harmonic coloration, and dynamics compressor) with custom effect visualizers, alongside fade-in/out, Always Play, Android native Previous Track behavior (rewind past 3s), and **USB Exclusive Output** (bypasses the system mixer and resampler to stream PCM directly to external UAC 1.0 / UAC 2.0 USB DACs via native `usbdevfs` isochronous transfers).
 - **Preset Sharing**: Import, export, and share audio presets via Aura JSON files, JSON text, or ZXing QR codes.
 - **Local Tag Editor & Audio Info**: Powered by `jaudiotagger` to inspect audio codec, format, sample rate, bit depth, and bitrate, and edit title, artist, album, album artist, release date, year, track number, composer, lyricist, comment, and embedded artwork with system write confirmation.
 - **In-App Update Checker**: Check GitHub Releases and release notes directly from Settings.
 
 ### Visual Customization and Localization
 
-- Three interface styles (**Hyper**, **Material**, and **One**) built across MIUIX 0.9.4, Material 3 Expressive, and OneUI_Kit; light, dark, and system themes, Monet color generation (Classic 2021 / Expressive 2025 specs, One UI CIELAB semantic tones, multiple palettes, and custom colors), and a global **Disable advanced materials** solid-color fallback switch.
+- Three interface styles (**Hyper**, **Material**, and **One**) built across MIUIX 0.9.4, Material 3 Expressive, and OneUI_Kit; light, dark, and system themes, Monet color generation (Classic 2021 / Expressive 2025 specs, Monet curve theming, app-wide Oklab color mode, per-theme player color themes, One UI CIELAB semantic tones, multiple palettes, and custom colors), animated OOBE onboarding cards, and a global **Disable advanced materials** solid-color fallback switch.
 - Floating HyperOS, floating HarmonyOS, Liquid Glass, Material, and One UI bottom navigation styles, with customizable blur, opacity, refraction, highlight, and dispersion parameters for glass styles.
 - Built-in Simplified Chinese, English, and Japanese interfaces and localized legal documents (User Agreement, Disclaimer, Privacy Policy), extensible via [languages/example.json](languages/example.json).
 
@@ -136,6 +138,7 @@ Aura-Player/
 |-- README.md                Primary Chinese README
 |-- README_en.md             English README
 |-- README_ja.md             Japanese README
+|-- RELEASE_NOTES_1.0.1.md   1.0.1 stable release notes
 |-- RELEASE_NOTES_1.0.0.md   1.0.0 stable release notes
 |-- CONTRIBUTING_zh.md       Chinese contributing guide
 |-- CONTRIBUTING.md          English contributing guide
