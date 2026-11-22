@@ -48,7 +48,11 @@ class NeteaseApi(
     }
 
     fun requestBlocking(path: String, values: Map<String, String> = emptyMap(), authenticated: Boolean = true): JSONObject {
-        val cacheable = path in setOf("user/playlist", "playlist/track/all", "song/detail", "lyric/new", "album", "artist/songs", "artist/detail", "artist/album")
+        val cacheable = path in setOf(
+            "user/playlist", "playlist/track/all", "song/detail", "lyric/new", "album",
+            "artist/songs", "artist/detail", "artist/album",
+            "album/newest", "album/new", "toplist/detail/v2", "toplist/detail", "style/song",
+        )
         val key = cacheScope() + "/" + path + "/" + (values["uid"] ?: values["id"]).orEmpty() + "/" +
             values.toSortedMap().entries.joinToString("&") { "${it.key}=${it.value}" }
         if (cacheable) metadataCache?.read(key)?.let { return it }
@@ -186,6 +190,151 @@ class NeteaseApi(
                 CloudHomeItem(album.id, album.title, album.artist, album.artwork.replaceFirst("http://", "https://"), "album", album.id, "followed", "album", album.id)
             }.distinctBy { it.id }.sortedByDescending { it.id }.take(8)
         }
+    }
+
+    /** Curated new/discover albums for the NetEase home page. */
+    suspend fun discoverAlbums(limit: Int = 16): List<CloudHomeItem> = withContext(Dispatchers.IO) {
+        fun parseAlbumHomeItems(response: JSONObject?): List<CloudHomeItem> {
+            val rows = response?.optJSONArray("albums")
+                ?: response?.optJSONArray("monthData")
+                ?: response?.optJSONArray("weekData")
+                ?: JSONArray()
+            return parseAlbums(rows).mapNotNull { album ->
+                val artwork = album.artwork.replaceFirst("http://", "https://")
+                if (album.id <= 0L || album.title.isBlank() || artwork.isBlank()) return@mapNotNull null
+                CloudHomeItem(
+                    id = album.id,
+                    title = album.title,
+                    subtitle = album.artist,
+                    artwork = artwork,
+                    kind = "album",
+                    sourceId = album.id,
+                    section = "discover_album",
+                    actionType = "album",
+                    actionId = album.id,
+                )
+            }
+        }
+        val newest = parseAlbumHomeItems(cloudSection { requestBlocking("album/newest", authenticated = false) })
+        val fresh = if (newest.size < limit) {
+            parseAlbumHomeItems(
+                cloudSection {
+                    requestBlocking(
+                        "album/new",
+                        mapOf("area" to "ALL", "limit" to "$limit", "offset" to "0"),
+                        authenticated = false,
+                    )
+                },
+            )
+        } else {
+            emptyList()
+        }
+        (newest + fresh).distinctBy { it.id }.take(limit)
+    }
+
+    /** Official NetEase chart metadata keyed by playlist ID (merges v2 and v1 detail payloads). */
+    internal suspend fun toplistMetaMap(refresh: Boolean = false): Map<Long, NeteaseToplistMeta> = withContext(Dispatchers.IO) {
+        if (refresh) {
+            metadataCache?.removePrefix(cacheScope() + "/toplist/detail/v2/")
+            metadataCache?.removePrefix(cacheScope() + "/toplist/detail/")
+        }
+        val result = linkedMapOf<Long, NeteaseToplistMeta>()
+        fun parseTracks(item: JSONObject): List<NeteaseChartTrackPreview> {
+            val fromTracks = item.optJSONArray("tracks")
+            if (fromTracks != null && fromTracks.length() > 0) {
+                val parsed = (0 until fromTracks.length()).mapNotNull { idx ->
+                    val row = fromTracks.optJSONObject(idx) ?: return@mapNotNull null
+                    val title = row.optString("first").ifBlank { row.optString("songName") }.trim()
+                    val artist = row.optString("second").ifBlank { row.optString("artistName") }.trim()
+                    if (title.isBlank()) null else NeteaseChartTrackPreview(title, artist)
+                }
+                if (parsed.isNotEmpty()) return parsed.take(3)
+            }
+            val rankList = item.optJSONArray("trackRankList") ?: return emptyList()
+            return (0 until rankList.length()).mapNotNull { idx ->
+                val row = rankList.optJSONObject(idx) ?: return@mapNotNull null
+                val title = row.optString("songName").ifBlank { row.optString("first") }.trim()
+                val artist = row.optString("artistName").ifBlank { row.optString("second") }.trim()
+                if (title.isBlank()) null else NeteaseChartTrackPreview(title, artist)
+            }.take(3)
+        }
+        fun mergeEntry(item: JSONObject) {
+            val targetType = item.optString("targetType")
+            if (targetType.isNotBlank() && !targetType.equals("PLAYLIST", ignoreCase = true)) return
+            val id = item.optLong("id", 0L)
+            if (id <= 0L) return
+            val artwork = item.optString("coverUrl")
+                .ifBlank { item.optString("coverImgUrl") }
+                .ifBlank { item.optString("songCoverImgUrl") }
+                .replaceFirst("http://", "https://")
+            val name = item.optString("name").trim()
+            val freq = item.optString("updateFrequency").trim()
+            val tracks = parseTracks(item)
+            val prev = result[id]
+            result[id] = if (prev == null) {
+                NeteaseToplistMeta(id, name, artwork, freq, tracks)
+            } else {
+                prev.copy(
+                    name = prev.name.ifBlank { name },
+                    artwork = prev.artwork.ifBlank { artwork },
+                    updateFrequency = prev.updateFrequency.ifBlank { freq },
+                    tracks = if (prev.tracks.size >= tracks.size) prev.tracks else tracks,
+                )
+            }
+        }
+        val (v2, v1) = kotlinx.coroutines.coroutineScope {
+            val v2Deferred = async { cloudSection { requestBlocking("toplist/detail/v2", authenticated = false) } }
+            val v1Deferred = async { cloudSection { requestBlocking("toplist/detail", authenticated = false) } }
+            v2Deferred.await() to v1Deferred.await()
+        }
+        val categories = v2?.optJSONArray("data")
+        if (categories != null) {
+            for (i in 0 until categories.length()) {
+                val list = categories.optJSONObject(i)?.optJSONArray("list") ?: continue
+                for (j in 0 until list.length()) {
+                    list.optJSONObject(j)?.let(::mergeEntry)
+                }
+            }
+        }
+        val list = v1?.optJSONArray("list")
+        if (list != null) {
+            for (i in 0 until list.length()) {
+                list.optJSONObject(i)?.let(::mergeEntry)
+            }
+        }
+        result
+    }
+
+    /** Songs for a NetEase style/genre chart tag (e.g. Pop, C-Pop, Cantopop, K-Pop, J-Pop). */
+    suspend fun styleChartSongs(
+        tagId: Long,
+        cursor: Int = 0,
+        size: Int = 50,
+        sort: Int = 0,
+        refresh: Boolean = false,
+    ): CloudPage<Song> = withContext(Dispatchers.IO) {
+        val safeCursor = cursor.coerceAtLeast(0)
+        val safeSize = size.coerceIn(1, 100)
+        if (refresh) {
+            metadataCache?.removePrefix(cacheScope() + "/style/song/")
+        }
+        val response = requestBlocking(
+            "style/song",
+            mapOf(
+                "tagId" to "$tagId",
+                "cursor" to "$safeCursor",
+                "size" to "$safeSize",
+                "sort" to "$sort",
+            ),
+            authenticated = false,
+        )
+        val data = response.optJSONObject("data") ?: JSONObject()
+        val songs = parseSongs(data.optJSONArray("songs") ?: JSONArray()).distinctBy { it.id }
+        val page = data.optJSONObject("page")
+        val nextOffset = safeCursor + songs.size
+        val more = songs.isNotEmpty() && (page?.optBoolean("more", songs.size == safeSize) ?: (songs.size == safeSize))
+        val total = page?.optInt("total")?.takeIf { it > 0 }
+        CloudPage(songs, nextOffset, more, total)
     }
 
     /** Public discovery banners shown on the NetEase home carousel. */

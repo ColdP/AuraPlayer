@@ -79,6 +79,7 @@ internal fun CloudHomePage(
     padding: PaddingValues,
     login: () -> Unit,
     onRecommended: () -> Unit,
+    onCharts: () -> Unit = {},
     immersiveTopPadding: Dp = 0.dp,
     onReport: () -> Unit = {},
 ) {
@@ -100,7 +101,8 @@ internal fun CloudHomePage(
     val playlists = model.cloudRecommendedPlaylists.filter { it.section == "recommended" }
     val feature = model.cloudRecommendedPlaylists.filter { it.section == "daily" || it.section == "feature" }
     val radar = model.cloudRecommendedPlaylists.filter { it.section == "radar" }
-    val albums = model.cloudHomeItems.filter { it.kind == "album" }
+    val albums = model.cloudDiscoverAlbums.ifEmpty { model.cloudHomeItems.filter { it.kind == "album" } }
+    val charts = model.cloudHomeCharts
     val singles = key(user?.userId) {
         rememberCloudSingles { refresh ->
             val daily = if (user != null) model.fetchCloudDailySongs(refresh) else emptyList()
@@ -134,6 +136,7 @@ internal fun CloudHomePage(
             "singles" -> true
             "recent" -> recentDisplaySongs.isNotEmpty()
             "recommend" -> playlists.isNotEmpty()
+            "charts" -> charts.isNotEmpty()
             "banners" -> model.cloudPublicBanners.isNotEmpty()
             "follow" -> model.cloudFollowedAlbums.isNotEmpty()
             "discover_albums" -> albums.isNotEmpty()
@@ -232,6 +235,25 @@ internal fun CloudHomePage(
                     }
                     item("recommend") { CloudHomeItemRow(playlists.take(6), model, contentPadding = rowContentPadding) }
                 }
+                "charts" -> item("charts") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.padding(horizontal = itemHorizontalPadding)) {
+                            CloudHomeHeader(
+                                title = tr("charts", "排行榜"),
+                                arrow = true,
+                                accentOverride = activeBannerTheme?.takeIf { it.isCustom }?.accent,
+                                onClick = onCharts,
+                            )
+                        }
+                        CloudHomeChartsRow(
+                            charts = charts,
+                            model = model,
+                            contentPadding = rowContentPadding,
+                            bannerTheme = activeBannerTheme,
+                            isBlurBg = isBlurBg,
+                        )
+                    }
+                }
                 "banners" -> item("banners") {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (showTitle) {
@@ -257,7 +279,7 @@ internal fun CloudHomePage(
                         if (showTitle) {
                             Box(Modifier.padding(horizontal = itemHorizontalPadding)) { CloudHomeHeader(tr("discover_albums", "发现专辑")) }
                         }
-                        CloudHomeItemRow(albums.take(8), model, contentPadding = rowContentPadding)
+                        CloudHomeItemRow(albums.take(12), model, contentPadding = rowContentPadding)
                     }
                 }
             }

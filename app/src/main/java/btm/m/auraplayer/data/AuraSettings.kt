@@ -72,6 +72,7 @@ internal val NETEASE_HOME_SECTION_IDS = listOf(
     "singles",
     "recent",
     "recommend",
+    "charts",
     "banners",
     "follow",
     "discover_albums",

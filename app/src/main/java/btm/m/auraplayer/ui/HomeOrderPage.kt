@@ -548,6 +548,7 @@ private fun homeSectionTitle(target: HomeSectionTarget, sectionId: String): Stri
         "singles" -> tr("recommended_singles", "为你推荐的单曲")
         "recent" -> tr("recently_listened", "最近常听")
         "recommend" -> tr("recommended_playlists", "推荐歌单")
+        "charts" -> tr("charts", "排行榜")
         "banners" -> tr("netease_banners", "网易云音乐推荐")
         "follow" -> tr("followed_artist_updates", "你关注的艺人的新动向")
         "discover_albums" -> tr("discover_albums", "发现专辑")

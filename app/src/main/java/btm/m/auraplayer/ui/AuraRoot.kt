@@ -487,7 +487,15 @@ private fun AuraShell(model: AuraViewModel, onEnterOobe: () -> Unit = {}) {
                                     val immersiveTop = if (immersiveHomeBanner) padding.calculateTopPadding() else 0.dp
                                     when (tab) {
                                         0 -> when (if (settings.cloudDisabled) "local" else settings.homeContent) {
-                                            "netease" -> CloudHomePage(model, homeContentPadding, { open("login") }, { open("cloud_recommended") }, immersiveTop, { open("cloud_report") })
+                                            "netease" -> CloudHomePage(
+                                                model = model,
+                                                padding = homeContentPadding,
+                                                login = { open("login") },
+                                                onRecommended = { open("cloud_recommended") },
+                                                onCharts = { open("cloud_charts") },
+                                                immersiveTopPadding = immersiveTop,
+                                                onReport = { open("cloud_report") },
+                                            )
                                             "qq" -> QqHomePage(model, homeContentPadding, { open("qq_login") }, immersiveTop)
                                             else -> HomePage(
                                                 model = model,
@@ -639,6 +647,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
     var cloudTab by rememberSaveable { mutableIntStateOf(0) }
     var reportTab by rememberSaveable { mutableIntStateOf(0) }
     var reportRefreshNonce by rememberSaveable { mutableIntStateOf(0) }
+    var chartsTab by rememberSaveable { mutableIntStateOf(0) }
     val tagEditorExitGuard = LocalTagEditorExitGuard.current
     val destination = route.takeIf { it.startsWith("collection:") }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)
     val albumInfoDestination = route.takeIf { it.substringBefore(':') in setOf("albumInfo", "artistInfo", "artistSongs", "artistAlbums", "artistSingles") }?.substringAfter(':')?.toLongOrNull()?.let(model::collectionDestination)
@@ -708,6 +717,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "home_order" -> tr("home_section_order", "首页排序")
         "switch_user", "qq_switch_user" -> tr("switch_user", "切换账号")
         "cloud_recommended" -> tr("recommended_playlists", "推荐歌单")
+        "cloud_charts" -> tr("charts", "排行榜")
         "cloud_follows" -> tr("my_follows", "我的关注")
         "cloud_report" -> tr("listening_report", "听歌报告")
         "downloads" -> tr("downloaded_music", "已下载的音乐")
@@ -813,6 +823,8 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         actions = {
             if (page == "cloud_report") {
                 GlassToolbarIconButton(MiuixIcons.Regular.Refresh, tr("refresh", "刷新")) { reportRefreshNonce++ }
+            } else if (page == "cloud_charts") {
+                GlassToolbarIconButton(MiuixIcons.Regular.Refresh, tr("refresh", "刷新")) { model.refreshCloudCharts(force = true) }
             } else if (playlistPage && effectiveCollection != null) {
                 val cloud = destination?.cloud
                 if (effectiveCollection.key.startsWith("playlist:")) {
@@ -836,6 +848,18 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
                     listOf(tr("report_day", "日"), tr("report_week", "周"), tr("report_month", "月"), tr("report_year", "年")),
                     reportTab,
                 ) { reportTab = it }
+                "cloud_charts" -> SoftGlassHeaderTabs(
+                    tabs = listOf(
+                        tr("charts_tab_all", "全部"),
+                        tr("charts_group_featured", "精选榜"),
+                        tr("charts_group_genre", "曲风榜"),
+                        tr("charts_group_global", "全球榜"),
+                        tr("charts_group_language", "语种榜"),
+                    ),
+                    selected = chartsTab,
+                    widthScale = 1f,
+                    scrollable = true,
+                ) { chartsTab = it }
                 "collection" -> if (playlistSearchSupported) {
                     Column(Modifier.fillMaxWidth()) {
                         if (destination?.cloud?.source == "rank") {
@@ -897,6 +921,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             "switch_user" -> SwitchUserPage(model, contentPadding)
             "qq_switch_user" -> SwitchUserPage(model, contentPadding, isQq = true)
             "cloud_recommended" -> CloudRecommendedPage(model, contentPadding)
+            "cloud_charts" -> CloudChartsPage(model, contentPadding, chartsTab)
             "cloud_follows" -> CloudFollowsPage(model, contentPadding)
             "cloud_report" -> NeteaseListenReportPage(model, contentPadding, reportTab, reportRefreshNonce) { open("login") }
             "downloads" -> DownloadedMusicPage(model, contentPadding)

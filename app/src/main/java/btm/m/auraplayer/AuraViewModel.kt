@@ -71,6 +71,11 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var cloudPlaylistsFailed by mutableStateOf(false); private set
     var cloudPlaylistsHasMore by mutableStateOf(false); private set
     var cloudHomeItems by mutableStateOf<List<CloudHomeItem>>(emptyList()); private set
+    var cloudDiscoverAlbums by mutableStateOf<List<CloudHomeItem>>(emptyList()); private set
+    var cloudHomeCharts by mutableStateOf<List<NeteaseChartItem>>(NeteaseChartCatalog.defaultHomeItems()); private set
+    var cloudChartsByGroup by mutableStateOf<Map<NeteaseChartGroup, List<NeteaseChartItem>>>(NeteaseChartCatalog.defaultGroupedItems()); private set
+    var cloudChartsLoading by mutableStateOf(false); private set
+    var cloudChartsFailed by mutableStateOf(false); private set
     var cloudRecommendedPlaylists by mutableStateOf<List<CloudHomeItem>>(emptyList()); private set
     var cloudFollowedAlbums by mutableStateOf<List<CloudHomeItem>>(emptyList()); private set
     var cloudHomeLoading by mutableStateOf(false); private set
@@ -82,6 +87,8 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var heartbeatLoading by mutableStateOf(false); private set
     var listeningRankWeek by mutableStateOf(false); private set
     private var cloudHomeJob: Job? = null
+    private var cloudChartsJob: Job? = null
+    private var cloudChartsHydrated = false
     private var cloudHomePlayJob: Job? = null
     private var dailySongsJob: Deferred<List<Song>?>? = null
     private var dailySongsUserId: Long? = null
@@ -1068,6 +1075,85 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+    fun openCloudChart(chart: NeteaseChartItem, title: String) {
+        if (!cloudEnabled) return
+        val resolvedTitle = title.ifBlank { chart.spec.defaultTitle }
+        when (chart.spec.source) {
+            NeteaseChartSource.PLAYLIST -> {
+                openCloudPlaylist(CloudPlaylist(chart.spec.id, resolvedTitle, 0, chart.artwork))
+            }
+            NeteaseChartSource.STYLE_TAG -> {
+                val playlist = CloudPlaylist(chart.spec.id, resolvedTitle, 0, chart.artwork)
+                val cacheKey = -(1_000_000_000_000L + chart.spec.id)
+                cloudContents[cacheKey]?.let { old ->
+                    if (!old.loading && old.loadedAt > 0 && System.currentTimeMillis() - old.loadedAt > CloudMetadataCache.FRESH_MS) {
+                        cloudContents.remove(cacheKey)
+                    }
+                }
+                val content = cloudContents.getOrPut(cacheKey) { CloudPlaylistContent(playlist, source = "style_chart") }
+                while (cloudContents.size > 8) {
+                    val old = cloudContents.entries.firstOrNull { it.value !== content && it.value !== cloudQueue } ?: break
+                    old.value.job?.cancel(); cloudContents.remove(old.key)
+                }
+                pushCollection(
+                    MusicCollection("cloud:style:${chart.spec.id}", resolvedTitle, "", content.songs, chart.artwork),
+                    content,
+                )
+                if (content.songs.isEmpty() && !content.failed) loadCloudSongs(content)
+            }
+        }
+    }
+
+    fun playCloudChart(chart: NeteaseChartItem, title: String) {
+        if (!cloudEnabled) return
+        val resolvedTitle = title.ifBlank { chart.spec.defaultTitle }
+        when (chart.spec.source) {
+            NeteaseChartSource.PLAYLIST -> {
+                playCloudHomeItem(
+                    CloudHomeItem(
+                        id = chart.spec.id,
+                        title = resolvedTitle,
+                        artwork = chart.artwork,
+                        kind = "playlist",
+                        actionType = "playlist",
+                        actionId = chart.spec.id,
+                    ),
+                )
+            }
+            NeteaseChartSource.STYLE_TAG -> {
+                val playlist = CloudPlaylist(chart.spec.id, resolvedTitle, 0, chart.artwork)
+                val cacheKey = -(1_000_000_000_000L + chart.spec.id)
+                val cached = cloudContents[cacheKey]?.takeIf {
+                    it.songs.isNotEmpty() && !(it.loadedAt > 0 && System.currentTimeMillis() - it.loadedAt > CloudMetadataCache.FRESH_MS)
+                }
+                if (cached != null) {
+                    playCollection(cached.songs, 0, cached)
+                    return
+                }
+                val content = CloudPlaylistContent(playlist, source = "style_chart")
+                cloudContents[cacheKey] = content
+                val generation = cloudGeneration
+                cloudHomePlayJob?.cancel()
+                cloudHomePlayJob = viewModelScope.launch {
+                    try {
+                        val page = app.api.styleChartSongs(chart.spec.id)
+                        ensureActive()
+                        if (generation != cloudGeneration) return@launch
+                        content.songs = page.items
+                        content.offset = page.nextOffset
+                        content.loadedAt = System.currentTimeMillis()
+                        content.hasMore = page.hasMore
+                        page.total?.let { content.total = it }
+                        if (page.total == null) content.total = maxOf(content.total, content.songs.size)
+                        knownSongs.putAll(page.items.associateBy { it.key })
+                        if (page.items.isNotEmpty()) playCollection(page.items, 0, content)
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { if (generation == cloudGeneration) cloudFailure(e) }
+                }
+            }
+        }
+    }
+
     fun loadMoreCloudSongs() { cloudCollection?.let { loadCloudSongs(it) } }
     fun loadMoreCloudSongsFor(content: CloudPlaylistContent) { loadCloudSongs(content) }
     fun refreshCloudSongs() {
@@ -1075,6 +1161,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         if (old.loading) return
         val content = CloudPlaylistContent(old.playlist, old.source)
         if (old.source == "playlist") cloudContents[contentKey(old.playlist)] = content
+        else if (old.source == "style_chart") cloudContents[-(1_000_000_000_000L + old.playlist.id)] = content
         cloudCollection = content
         collectionDestinations[activeCollectionId]?.cloud = content
         loadCloudSongs(content, refresh = true)
@@ -1094,6 +1181,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 val page = catalog?.page ?: when (content.source) {
                     "rank" -> app.api.listeningRank(content.playlist.id, rankType).let { CloudPage(it, it.size, false, it.size) }
                     "radio" -> app.api.radioPrograms(content.playlist.id, content.offset)
+                    "style_chart" -> app.api.styleChartSongs(content.playlist.id, content.offset, refresh = refresh)
                     else -> if (content.playlist.provider == PROVIDER_QQ) app.qq.playlistSongs(content.playlist.id)
                         else app.api.playlistSongs(content.playlist.id, content.offset, refresh = refresh)
                 }
@@ -1603,12 +1691,13 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
     private fun resetCloudPaging() {
         likesJob?.cancel(); subscribedAlbumJob?.cancel()
-        cloudHomeJob?.cancel(); cloudHomePlayJob?.cancel(); dailySongsJob?.cancel(); rankPreviewJob?.cancel(); leaveHeartbeat()
+        cloudHomeJob?.cancel(); cloudChartsJob?.cancel(); cloudHomePlayJob?.cancel(); dailySongsJob?.cancel(); rankPreviewJob?.cancel(); leaveHeartbeat()
         dailySongsJob = null; dailySongsUserId = null
         cloudHomeLoading = false
+        cloudChartsLoading = false; cloudChartsFailed = false; cloudChartsHydrated = false
         cloudLikedIds = emptySet(); cloudLikesReady = false; liking.clear()
         followedArtistStates = emptyMap(); followingArtists.clear()
-        cloudHomeItems = emptyList(); cloudRecommendedPlaylists = emptyList(); cloudFollowedAlbums = emptyList(); cloudRecentSongs = emptyList(); cloudRankPreviewSongs = emptyList(); cloudDailySongs = emptyList(); cloudPublicBanners = emptyList(); cloudHomeFailed = false
+        cloudHomeItems = emptyList(); cloudDiscoverAlbums = emptyList(); cloudHomeCharts = NeteaseChartCatalog.defaultHomeItems(); cloudChartsByGroup = NeteaseChartCatalog.defaultGroupedItems(); cloudRecommendedPlaylists = emptyList(); cloudFollowedAlbums = emptyList(); cloudRecentSongs = emptyList(); cloudRankPreviewSongs = emptyList(); cloudDailySongs = emptyList(); cloudPublicBanners = emptyList(); cloudHomeFailed = false
         roamingPreviewSong = null; roamingBatch = emptyList(); roamingRefreshJob?.cancel(); roamingLoadMoreJob?.cancel()
         subscribedAlbums = emptyList(); subscribedAlbumOffset = 0; subscribedAlbumsLoading = false
         subscribedAlbumsHasMore = false; subscribedAlbumsFailed = false
@@ -1658,6 +1747,28 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         if (!cloudEnabled) return
         loadCloudPlaylists(reset = true, refresh = true); refreshQq()
     }
+    private fun applyToplistMeta(
+        specs: List<NeteaseChartSpec>,
+        metaMap: Map<Long, NeteaseToplistMeta>,
+        existing: Map<String, NeteaseChartItem> = emptyMap(),
+    ): List<NeteaseChartItem> = specs.map { spec ->
+        val key = "${spec.group.name}:${spec.source.name}:${spec.id}"
+        val prev = existing[key]
+        if (spec.source == NeteaseChartSource.PLAYLIST) {
+            val meta = metaMap[spec.id]
+            NeteaseChartItem(
+                spec = spec,
+                artwork = meta?.artwork?.takeIf { it.isNotBlank() } ?: prev?.artwork.orEmpty(),
+                updateFrequency = meta?.updateFrequency?.takeIf { it.isNotBlank() }
+                    ?: prev?.updateFrequency?.takeIf { it.isNotBlank() }
+                    ?: spec.defaultFrequency,
+                tracks = meta?.tracks?.takeIf { it.isNotEmpty() } ?: prev?.tracks.orEmpty(),
+            )
+        } else {
+            prev ?: NeteaseChartItem(spec)
+        }
+    }
+
     fun refreshCloudHome() {
         if (!cloudEnabled) return
         val user = account
@@ -1674,13 +1785,28 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 val recent = async { if (user != null) cloudSection { app.api.recentSongs(limit = 50) } else null }
                 val followed = async { if (user != null) cloudSection { app.api.followedArtistAlbums() } else null }
                 val banners = async { cloudSection { app.api.publicBanners() } }
+                val discoverAlbumsDeferred = async { cloudSection { app.api.discoverAlbums(limit = 16) } }
+                val toplistMetaDeferred = async { cloudSection { app.api.toplistMetaMap() } }
                 val homeItems = home.await()
                 val recommendations = recommended.await()
                 daily.await()
                 val recentTracks = recent.await()
+                val discoveredAlbums = discoverAlbumsDeferred.await()
+                val toplistMeta = toplistMetaDeferred.await().orEmpty()
                 ensureActive()
                 if (generation == cloudGeneration && account?.userId == user?.userId) {
                     cloudHomeItems = homeItems.orEmpty()
+                    val combinedAlbums = (discoveredAlbums.orEmpty() + homeItems.orEmpty().filter { it.kind == "album" })
+                        .distinctBy { it.id }
+                    if (combinedAlbums.isNotEmpty()) cloudDiscoverAlbums = combinedAlbums
+                    if (toplistMeta.isNotEmpty()) {
+                        val existingHome = cloudHomeCharts.associateBy { it.stableKey }
+                        val existingAll = cloudChartsByGroup.values.flatten().associateBy { it.stableKey }
+                        cloudHomeCharts = applyToplistMeta(NeteaseChartCatalog.homeSpecs, toplistMeta, existingHome)
+                        cloudChartsByGroup = NeteaseChartCatalog.specsByGroup.mapValues { (_, specs) ->
+                            applyToplistMeta(specs, toplistMeta, existingAll)
+                        }
+                    }
                     val playlists = (recommendations.orEmpty() + homeItems.orEmpty().filter { it.kind == "playlist" })
                         .sortedBy { it.section == "recommended" }.distinctBy { it.id }
                     cloudRecommendedPlaylists = playlists
@@ -1689,18 +1815,90 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                     cloudPublicBanners = banners.await()
                         .orEmpty()
                     cloudFollowedAlbums = followed.await().orEmpty()
-                    cloudHomeFailed = homeItems == null && recommendations == null
+                    cloudHomeFailed = homeItems == null && recommendations == null && discoveredAlbums == null && toplistMeta.isEmpty()
                     val covers = playlists.filter { it.section == "radar" }.take(6).map { radar ->
                         async { radar.id to cloudSection { app.api.playlistSongs(radar.id, limit = 1).items.firstOrNull()?.artwork } }
+                    }.awaitAll().toMap()
+                    val homeChartPreviews = cloudHomeCharts.filter { it.tracks.isEmpty() }.map { chart ->
+                        async {
+                            chart.spec.id to cloudSection {
+                                app.api.playlistSongs(chart.spec.id, limit = 3).items
+                            }
+                        }
                     }.awaitAll().toMap()
                     ensureActive()
                     cloudRecommendedPlaylists = playlists.map { item ->
                         covers[item.id]?.takeIf(String::isNotBlank)?.let { item.copy(artwork = it) } ?: item
                     }
+                    if (homeChartPreviews.isNotEmpty()) {
+                        cloudHomeCharts = cloudHomeCharts.map { chart ->
+                            val previewSongs = homeChartPreviews[chart.spec.id].orEmpty()
+                            if (previewSongs.isEmpty()) chart
+                            else chart.copy(
+                                artwork = chart.artwork.ifBlank { previewSongs.firstOrNull()?.artwork.orEmpty() },
+                                tracks = previewSongs.take(3).map { NeteaseChartTrackPreview(it.title, it.artist) },
+                            )
+                        }
+                    }
                 }
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { if (generation == cloudGeneration) cloudHomeFailed = true }
             finally { if (generation == cloudGeneration && isActive) cloudHomeLoading = false }
+        }
+    }
+
+    fun refreshCloudCharts(force: Boolean = false) {
+        if (!cloudEnabled) return
+        if (cloudChartsLoading && !force) return
+        if (!force && cloudChartsHydrated && cloudChartsByGroup.values.flatten().any { it.artwork.isNotBlank() }) return
+        val generation = cloudGeneration
+        cloudChartsLoading = true
+        cloudChartsFailed = false
+        cloudChartsJob?.cancel()
+        cloudChartsJob = viewModelScope.launch {
+            try {
+                val meta = cloudSection { app.api.toplistMetaMap(refresh = force) }.orEmpty()
+                ensureActive()
+                if (generation != cloudGeneration) return@launch
+                if (meta.isNotEmpty()) {
+                    val existingAll = cloudChartsByGroup.values.flatten().associateBy { it.stableKey }
+                    val existingHome = cloudHomeCharts.associateBy { it.stableKey }
+                    cloudChartsByGroup = NeteaseChartCatalog.specsByGroup.mapValues { (_, specs) ->
+                        applyToplistMeta(specs, meta, existingAll)
+                    }
+                    cloudHomeCharts = applyToplistMeta(NeteaseChartCatalog.homeSpecs, meta, existingHome)
+                }
+                val styleHydration = NeteaseChartCatalog.styleSpecs.map { spec ->
+                    async {
+                        spec.id to cloudSection { app.api.styleChartSongs(spec.id, cursor = 0, size = 3, refresh = force).items }
+                    }
+                }.awaitAll().toMap()
+                ensureActive()
+                if (generation != cloudGeneration) return@launch
+                val updatedGenre = cloudChartsByGroup[NeteaseChartGroup.GENRE].orEmpty().map { item ->
+                    if (item.spec.source != NeteaseChartSource.STYLE_TAG) item
+                    else {
+                        val songs = styleHydration[item.spec.id].orEmpty()
+                        if (songs.isEmpty()) item
+                        else item.copy(
+                            artwork = songs.firstOrNull { it.artwork.isNotBlank() }?.artwork
+                                ?.replaceFirst("http://", "https://")
+                                ?: item.artwork,
+                            tracks = songs.take(3).map { NeteaseChartTrackPreview(it.title, it.artist) },
+                        )
+                    }
+                }
+                cloudChartsByGroup = cloudChartsByGroup + (NeteaseChartGroup.GENRE to updatedGenre)
+                val anyHydrated = meta.isNotEmpty() || styleHydration.values.any { !it.isNullOrEmpty() }
+                cloudChartsHydrated = anyHydrated
+                cloudChartsFailed = !anyHydrated
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                if (generation == cloudGeneration) cloudChartsFailed = true
+            } finally {
+                if (generation == cloudGeneration && isActive) cloudChartsLoading = false
+            }
         }
     }
     suspend fun fetchCloudDailySongs(refresh: Boolean = false): List<Song> {

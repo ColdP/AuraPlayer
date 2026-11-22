@@ -181,6 +181,29 @@ internal class OfficialNeteaseClient(
                 }
             }
             "album/sublist" -> call("/api/album/sublist", JSONObject().put("limit", value("limit", "25")).put("offset", value("offset", "0")).put("total", true), authenticated)
+            "album/newest" -> call("/api/discovery/newAlbum", JSONObject(), authenticated = false, eapi = true)
+            "album/new" -> call(
+                "/api/album/new",
+                JSONObject()
+                    .put("area", value("area", "ALL"))
+                    .put("limit", value("limit", "20").toIntOrNull() ?: 20)
+                    .put("offset", value("offset", "0").toIntOrNull() ?: 0)
+                    .put("total", true),
+                authenticated = false,
+                eapi = true,
+            )
+            "toplist/detail/v2" -> call("/api/toplist/detail/v2", JSONObject(), authenticated = false, eapi = true)
+            "toplist/detail" -> call("/api/toplist/detail", JSONObject(), authenticated = false, eapi = true)
+            "style/song" -> call(
+                "/api/style-tag/home/song",
+                JSONObject()
+                    .put("tagId", value("tagId").toLongOrNull() ?: 0L)
+                    .put("size", value("size", "50").toIntOrNull() ?: 50)
+                    .put("cursor", value("cursor", "0").toIntOrNull() ?: 0)
+                    .put("sort", value("sort", "0").toIntOrNull() ?: 0),
+                authenticated = false,
+                eapi = true,
+            )
             "dj/program" -> call("/api/dj/program/byradio", JSONObject().put("radioId", value("rid")).put("limit", value("limit", "50")).put("offset", value("offset", "0")).put("asc", false), authenticated)
             "dj/program/detail" -> call("/api/dj/program/detail", JSONObject().put("id", value("id")), authenticated)
             "album" -> call("/api/v1/album/${value("id")}", JSONObject(), authenticated)
