@@ -20,6 +20,8 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
     lateinit var auraSing: btm.m.auraplayer.sing.AuraSingEngine; private set
     lateinit var auraMix: btm.m.auraplayer.auramix.AuraMixSettings; private set
     lateinit var settings: AuraSettings; private set
+    lateinit var cutoutRing: CutoutRingSettings; private set
+    lateinit var cutoutRingController: btm.m.auraplayer.ui.CutoutRingOverlayController; private set
     internal lateinit var navigationMaterial: btm.m.auraplayer.ui.navigation.NavigationMaterialStore; private set
     lateinit var history: LibraryHistory; private set
     lateinit var neteaseListenStore: NeteaseListenStore; private set
@@ -67,6 +69,8 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         qqPrefs.edit().remove("qqUserId").remove("qqNickname").remove("qqAvatar").apply()
         qq = QqMusicApi({ qqEndpoint }, { qqUin }, { qqCookie })
         I18n.initialize(this, settings.value.language)
+        cutoutRing = CutoutRingSettings(this)
+        cutoutRingController = btm.m.auraplayer.ui.CutoutRingOverlayController(this, cutoutRing)
         btm.m.auraplayer.download.MusicDownloads.resume(this)
         if (btm.m.auraplayer.widget.WidgetUpdateCoordinator.hasActiveWidgets(this)) {
             btm.m.auraplayer.widget.WidgetUpdateCoordinator.requestUpdate(this)
@@ -74,6 +78,7 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
     }
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        cutoutRingController.onConfigurationChanged()
         if (btm.m.auraplayer.widget.WidgetUpdateCoordinator.hasActiveWidgets(this)) {
             btm.m.auraplayer.widget.WidgetUpdateCoordinator.requestUpdate(this)
         }

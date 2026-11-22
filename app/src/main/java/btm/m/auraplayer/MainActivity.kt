@@ -3,6 +3,7 @@ package btm.m.auraplayer
 import android.os.Bundle
 import android.content.Intent
 import android.view.KeyEvent
+import android.view.WindowManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
@@ -19,6 +20,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        window.attributes = window.attributes.apply {
+            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        }
         mediaPlayerRequest = savedInstanceState?.getInt("mediaPlayerRequest", 0) ?: 0
         if (savedInstanceState == null) acceptMediaIntent(intent)
         setContent { AuraRoot(model) }

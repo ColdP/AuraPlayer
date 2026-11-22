@@ -23,6 +23,8 @@ class OutputWaveform {
 
     @Volatile var enabled = false
     @Volatile var spectrumEnabled = false
+    @Volatile var levelEnabled = false
+    @Volatile var level: Float = 0f; private set
     @Volatile var snapshot: Snapshot? = null; private set
 
     private val ring = FloatArray(256)
@@ -37,11 +39,14 @@ class OutputWaveform {
     private val lpStates = FloatArray(SPECTRUM_BANDS - 1)
     private val bandEnergySq = DoubleArray(SPECTRUM_BANDS)
     private var spectrumFrames = 0
+    private var levelEnergySq = 0.0
+    private var levelFrames = 0
 
     fun reset() {
         ring.fill(0f); position = 0; frames = 0; publishFrames = 0
-        low = 0f; high = 0f; lastRate = 0; snapshot = null
+        low = 0f; high = 0f; lastRate = 0; snapshot = null; level = 0f
         lpStates.fill(0f); bandEnergySq.fill(0.0); spectrumFrames = 0
+        levelEnergySq = 0.0; levelFrames = 0
     }
 
     private fun configureSampleRate(sampleRate: Int) {
@@ -53,7 +58,7 @@ class OutputWaveform {
     }
 
     fun offer(pcm: ByteBuffer, encoding: Int, channels: Int, sampleRate: Int) {
-        if (!enabled && !spectrumEnabled) { if (lastRate != 0) reset(); return }
+        if (!enabled && !spectrumEnabled && !levelEnabled) { if (lastRate != 0) reset(); return }
         if (lastRate != sampleRate) {
             reset()
             lastRate = sampleRate
@@ -70,6 +75,7 @@ class OutputWaveform {
         val publishInterval = (sampleRate / 30).coerceAtLeast(1)
         val channelCount = channels.coerceAtLeast(1)
         val analyzeSpectrum = spectrumEnabled
+        val analyzeLevel = levelEnabled
         var offset = pcm.position()
         while (offset + bytes * channelCount <= pcm.limit()) {
             var monoSum = 0f
@@ -88,8 +94,13 @@ class OutputWaveform {
                 low = min(low, sample); high = max(high, sample)
                 monoSum += sample
             }
+            val mono = monoSum / channelCount
+            if (analyzeLevel) {
+                levelEnergySq += (mono * mono).toDouble()
+                levelFrames++
+            }
             if (analyzeSpectrum) {
-                var residual = monoSum / channelCount
+                var residual = mono
                 for (stage in BAND_CUTOFFS_HZ.indices) {
                     val lp = lpStates[stage] + lpAlphas[stage] * (residual - lpStates[stage])
                     lpStates[stage] = lp
@@ -108,20 +119,28 @@ class OutputWaveform {
                 frames = 0; low = 0f; high = 0f
             }
             if (++publishFrames >= publishInterval) {
-                val ordered = FloatArray(ring.size) { ring[(position + it) % ring.size] }
-                val spectrum = FloatArray(SPECTRUM_BANDS)
-                if (analyzeSpectrum && spectrumFrames > 0) {
-                    val frameCount = spectrumFrames.toDouble()
-                    val logNorm = ln(19f)
-                    for (b in 0 until SPECTRUM_BANDS) {
-                        val rms = sqrt(bandEnergySq[b] / frameCount).toFloat()
-                        val tilt = 1f + b * 0.12f
-                        spectrum[b] = (ln(1f + rms * tilt * 18f) / logNorm).coerceIn(0f, 1f)
-                    }
-                    bandEnergySq.fill(0.0)
-                    spectrumFrames = 0
+                if (analyzeLevel && levelFrames > 0) {
+                    val rms = sqrt(levelEnergySq / levelFrames.toDouble()).toFloat()
+                    level = (ln(1f + rms * 16f) / ln(17f)).coerceIn(0f, 1f)
+                    levelEnergySq = 0.0
+                    levelFrames = 0
                 }
-                snapshot = Snapshot(ordered, System.nanoTime(), spectrum)
+                if (enabled || analyzeSpectrum) {
+                    val ordered = FloatArray(ring.size) { ring[(position + it) % ring.size] }
+                    val spectrum = FloatArray(SPECTRUM_BANDS)
+                    if (analyzeSpectrum && spectrumFrames > 0) {
+                        val frameCount = spectrumFrames.toDouble()
+                        val logNorm = ln(19f)
+                        for (b in 0 until SPECTRUM_BANDS) {
+                            val rms = sqrt(bandEnergySq[b] / frameCount).toFloat()
+                            val tilt = 1f + b * 0.12f
+                            spectrum[b] = (ln(1f + rms * tilt * 18f) / logNorm).coerceIn(0f, 1f)
+                        }
+                        bandEnergySq.fill(0.0)
+                        spectrumFrames = 0
+                    }
+                    snapshot = Snapshot(ordered, System.nanoTime(), spectrum)
+                }
                 publishFrames = 0
             }
         }

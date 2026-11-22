@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
@@ -630,6 +631,23 @@ private fun AuraShell(model: AuraViewModel, onEnterOobe: () -> Unit = {}) {
                     navigationStylePreference = settings.navigation,
                     onMountedChange = { usbHudMounted = it },
                 )
+                val activeThemePrimaryArgb = MiuixTheme.colorScheme.primary.toArgb()
+                LaunchedEffect(activeThemePrimaryArgb) {
+                    model.app.cutoutRingController.updateThemePrimaryColor(activeThemePrimaryArgb)
+                }
+                LaunchedEffect(model.current?.key, model.current?.artwork, model.playing, model.position, model.duration, model.playbackSpeed) {
+                    val song = model.current
+                    model.app.cutoutRingController.updateUiPlaybackFallback(
+                        if (song == null) null else CutoutRingPlaybackSnapshot(
+                            positionMs = model.position,
+                            durationMs = model.duration,
+                            isPlaying = model.playing,
+                            playbackSpeed = model.playbackSpeed,
+                            artworkUri = song.artwork,
+                        ),
+                    )
+                }
+                InAppCutoutRingOverlay()
             }
         }
     }
@@ -741,6 +759,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         "aura_sing_cache" -> tr("aura_sing_cache_title", "伴奏与人声分离缓存")
         "spatial_cover_downloads" -> tr("spatial_model_downloads", "模型下载")
         "spatial_cover_cache" -> tr("spatial_cover_cache_title", "空间封面数据缓存")
+        "cutout_ring" -> tr("cutout_ring", "挖孔光环")
         "rear_screen" -> tr("rear_screen", "背屏")
         "about" -> tr("about", "关于")
         "software_update" -> tr("software_update", "软件更新")
@@ -944,6 +963,7 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             "now_playing_settings" -> NowPlayingSettingsPage(contentPadding, open)
             "spatial_cover_downloads" -> SpatialCoverDownloadsPage(contentPadding)
             "spatial_cover_cache" -> SpatialCoverCachePage(contentPadding, open)
+            "cutout_ring" -> CutoutRingSettingsPage(contentPadding)
             "rear_screen" -> RearScreenSettingsPage(contentPadding)
             "about" -> AboutPage(model, contentPadding, open, onEnterOobe)
             "software_update" -> SoftwareUpdatePage(contentPadding, open)

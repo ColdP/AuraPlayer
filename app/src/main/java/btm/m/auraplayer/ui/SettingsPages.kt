@@ -103,6 +103,18 @@ fun SettingsPage(model: AuraViewModel, padding: PaddingValues, open: (String) ->
                 Preference(tr("audio_effects", "音效")) { open("audio_effects") }
                 Preference(tr("now_playing_page", "正在播放界面")) { open("now_playing_settings") }
                 Preference(tr("audio_settings", "音频")) { open("audio_settings") }
+                val cutoutRingState by model.app.cutoutRing.state.collectAsState()
+                Preference(
+                    title = tr("cutout_ring", "挖孔光环"),
+                    summary = if (cutoutRingState.enabled) {
+                        when (cutoutRingState.content) {
+                            btm.m.auraplayer.data.CutoutRingContent.SONG_PROGRESS -> tr("cutout_ring_content_progress", "歌曲进度")
+                            btm.m.auraplayer.data.CutoutRingContent.VOLUME -> tr("cutout_ring_content_volume", "媒体音量")
+                            btm.m.auraplayer.data.CutoutRingContent.AUDIO_LEVEL -> tr("cutout_ring_content_audio_level", "音频律动")
+                            btm.m.auraplayer.data.CutoutRingContent.SLEEP_TIMER -> tr("cutout_ring_content_sleep_timer", "睡眠定时")
+                        }
+                    } else null,
+                ) { open("cutout_ring") }
                 if (btm.m.auraplayer.rear.RearScreenDevice.isSupported()) {
                     Preference(tr("rear_screen", "背屏")) { open("rear_screen") }
                 }

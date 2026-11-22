@@ -181,6 +181,7 @@ class PlaybackService : MediaSessionService() {
                     )) {
                     saveState(player)
                     WidgetUpdateCoordinator.requestUpdate(this@PlaybackService)
+                    app.cutoutRingController.notifyPlaybackChanged()
                 }
             }
         })
@@ -329,6 +330,19 @@ class PlaybackService : MediaSessionService() {
         return WidgetPlaybackState.fromLivePlayer(player, playRequested)
     }
 
+    internal fun currentCutoutRingPlayback(): btm.m.auraplayer.ui.CutoutRingPlaybackSnapshot? {
+        val player = playerInstance ?: return null
+        val item = player.currentMediaItem ?: return null
+        val playRequested = transportInstance?.isPlayRequested ?: player.playWhenReady
+        return btm.m.auraplayer.ui.CutoutRingPlaybackSnapshot(
+            positionMs = player.currentPosition.coerceAtLeast(0L),
+            durationMs = player.duration.takeIf { it > 0L } ?: 0L,
+            isPlaying = player.isPlaying || (playRequested && player.playbackState == androidx.media3.common.Player.STATE_BUFFERING),
+            playbackSpeed = player.playbackParameters.speed,
+            artworkUri = item.mediaMetadata.artworkUri?.toString(),
+        )
+    }
+
     internal fun handleWidgetAction(intent: Intent?, forcePlayOnColdStart: Boolean = false) {
         val player = playerInstance ?: return
         val transport = transportInstance ?: return
@@ -415,6 +429,7 @@ class PlaybackService : MediaSessionService() {
         transportInstance = null
         session?.run { saveState(player); player.release(); release() }
         session = null
+        (application as AuraApplication).cutoutRingController.notifyPlaybackChanged()
         WidgetUpdateCoordinator.requestUpdate(this)
         super.onDestroy()
     }
