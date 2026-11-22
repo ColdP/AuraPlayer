@@ -92,6 +92,7 @@ fun Artwork(
     circular: Boolean = false,
     cornerRadius: Dp = 16.dp,
     adaptIrregular: Boolean = !circular,
+    shape: Shape? = null,
 ) {
     val context = LocalContext.current
     val adapt = adaptIrregular && !circular && LocalAdaptIrregularCovers.current && uri.isNotBlank()
@@ -108,9 +109,9 @@ fun Artwork(
                 .build()
         }
     }
-    val shape = if (circular) CircleShape else RoundedCornerShape(cornerRadius)
+    val effectiveShape = shape ?: if (circular) CircleShape else RoundedCornerShape(cornerRadius)
     val cardModifier = (if (adapt) Modifier.fitCoverAspectRatio(aspectRatio) else Modifier.fillMaxSize())
-        .clip(shape)
+        .clip(effectiveShape)
         .background(Brush.linearGradient(listOf(MiuixTheme.colorScheme.primaryContainer, MiuixTheme.colorScheme.surfaceContainer)))
     Box(modifier, contentAlignment = Alignment.Center) {
         Box(cardModifier, contentAlignment = Alignment.Center) {

@@ -32,17 +32,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.sqrt
+import kotlin.math.tan
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.R
 import btm.m.auraplayer.data.NeteaseChartCatalog
@@ -474,7 +487,7 @@ private fun CloudChartFeaturedCard(
                         showEditorialOverlay = false,
                     )
                 }
-                val playShape = RoundedCornerShape(10.dp)
+                val playShape = SmoothRoundedCornerShape(10.dp)
                 val playBg = if (LocalAdvancedMaterialEnabled.current) {
                     Modifier.drawPlainBackdrop(
                         backdrop = thumbBackdrop,
@@ -647,7 +660,7 @@ private fun CloudChartGridCard(
         showIndication = true,
         onClick = { model.openCloudChart(chart, title) },
     ) {
-        val coverShape = RoundedCornerShape(14.dp)
+        val coverShape = SmoothRoundedCornerShape(14.dp)
         val tagBackdrop = rememberLayerBackdrop {
             drawRect(cardColor)
             drawContent()
@@ -700,7 +713,7 @@ private fun CloudChartGridCard(
                     )
                 }
             }
-            val playShape = RoundedCornerShape(12.dp)
+            val playShape = SmoothRoundedCornerShape(12.dp)
             val playBg = if (LocalAdvancedMaterialEnabled.current) {
                 Modifier.drawPlainBackdrop(
                     backdrop = tagBackdrop,
@@ -770,7 +783,7 @@ private fun CloudChartArtwork(
     val accent = Color(chart.spec.accentHex)
     val deep = lerp(accent, Color(0xFF0E1118), 0.52f)
     val bright = lerp(accent, Color.White, 0.16f)
-    val shape = RoundedCornerShape(cornerRadius)
+    val shape = SmoothRoundedCornerShape(cornerRadius)
     Box(
         modifier = modifier
             .clip(shape)
@@ -782,6 +795,7 @@ private fun CloudChartArtwork(
                 modifier = Modifier.fillMaxSize(),
                 cornerRadius = cornerRadius,
                 adaptIrregular = false,
+                shape = shape,
             )
             if (showEditorialOverlay) {
                 Box(
@@ -850,5 +864,83 @@ private fun CloudChartArtwork(
                 )
             }
         }
+    }
+}
+
+/**
+ * Continuous iOS-style squircle rectangle using Figma's 60% corner smoothing geometry.
+ */
+private data class SmoothRoundedCornerShape(
+    val cornerRadius: Dp,
+    val smoothing: Float = 0.6f,
+) : Shape {
+    override fun createOutline(
+        size: Size,
+        layoutDirection: LayoutDirection,
+        density: Density,
+    ): Outline {
+        val w = size.width
+        val h = size.height
+        if (w <= 0f || h <= 0f) return Outline.Rectangle(Rect.Zero)
+
+        val maxEdge = min(w, h) * 0.5f
+        val r = with(density) { cornerRadius.toPx() }.coerceIn(0f, maxEdge)
+        if (r <= 0f) return Outline.Rectangle(Rect(0f, 0f, w, h))
+
+        val s = smoothing.coerceIn(0f, 1f)
+        val p = min((1f + s) * r, maxEdge)
+        val ratio = if (r > maxEdge * 0.5f) {
+            val pct = (r - maxEdge * 0.5f) / (maxEdge * 0.5f)
+            1f - s * (1f - pct)
+        } else {
+            1f - s
+        }
+        val betaDeg = 90f * ratio
+        val alphaDeg = (90f - betaDeg) * 0.5f
+        val alphaRad = alphaDeg.toDouble() * PI / 180.0
+        val betaRad = betaDeg.toDouble() * PI / 180.0
+
+        val p3ToP4 = r.toDouble() * tan(alphaRad * 0.5)
+        val arcProj = sin(betaRad * 0.5) * r.toDouble() * sqrt(2.0)
+        val c = (p3ToP4 * cos(alphaRad)).toFloat()
+        val d = (p3ToP4 * sin(alphaRad)).toFloat()
+        val b = ((p.toDouble() - arcProj - c - d) / 3.0).coerceAtLeast(0.0).toFloat()
+        val a = 2f * b
+        val bezierSpan = p - a - b - c
+        val diam = 2f * r
+
+        val path = Path().apply {
+            moveTo(p, 0f)
+            lineTo(w - p, 0f)
+
+            // Top-right corner
+            cubicTo(w - (p - a), 0f, w - (p - a - b), 0f, w - bezierSpan, d)
+            arcTo(Rect(w - diam, 0f, w, diam), 270f + alphaDeg, betaDeg, forceMoveTo = false)
+            cubicTo(w, p - a - b, w, p - a, w, p)
+
+            lineTo(w, h - p)
+
+            // Bottom-right corner
+            cubicTo(w, h - (p - a), w, h - (p - a - b), w - d, h - bezierSpan)
+            arcTo(Rect(w - diam, h - diam, w, h), alphaDeg, betaDeg, forceMoveTo = false)
+            cubicTo(w - (p - a - b), h, w - (p - a), h, w - p, h)
+
+            lineTo(p, h)
+
+            // Bottom-left corner
+            cubicTo(p - a, h, p - a - b, h, bezierSpan, h - d)
+            arcTo(Rect(0f, h - diam, diam, h), 90f + alphaDeg, betaDeg, forceMoveTo = false)
+            cubicTo(0f, h - (p - a - b), 0f, h - (p - a), 0f, h - p)
+
+            lineTo(0f, p)
+
+            // Top-left corner
+            cubicTo(0f, p - a, 0f, p - a - b, d, bezierSpan)
+            arcTo(Rect(0f, 0f, diam, diam), 180f + alphaDeg, betaDeg, forceMoveTo = false)
+            cubicTo(p - a - b, 0f, p - a, 0f, p, 0f)
+
+            close()
+        }
+        return Outline.Generic(path)
     }
 }
