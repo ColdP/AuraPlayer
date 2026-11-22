@@ -341,12 +341,14 @@ class OfficialLoginActivity : ComponentActivity() {
             }
             return
         }
-        val cookie = CookieManager.getInstance().getCookie("https://music.163.com").orEmpty()
+        val rawCookies = CookieManager.getInstance().getCookie("https://music.163.com").orEmpty()
             .split(';')
             .map { it.trim() }
             .filter { it.substringBefore('=') in SESSION_COOKIE_KEYS && it.substringAfter('=', "").isNotBlank() }
+        val hasMusicU = rawCookies.any { it.substringBefore('=') == "MUSIC_U" }
+        val cookie = (if (hasMusicU) rawCookies.filterNot { it.substringBefore('=') == "MUSIC_A" } else rawCookies)
             .joinToString("; ")
-        if (cookie.split(';').any { it.trim().startsWith("MUSIC_U=") }) {
+        if (hasMusicU) {
             submitted = true
             setResult(RESULT_OK, Intent().putExtra(EXTRA_COOKIE, cookie))
             finish()

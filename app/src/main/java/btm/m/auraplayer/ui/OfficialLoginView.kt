@@ -55,11 +55,13 @@ internal fun OfficialLoginView(padding: PaddingValues, busy: Boolean, onSession:
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
                 if (!currentBusy) {
-                    val cookie = CookieManager.getInstance().getCookie("https://music.163.com").orEmpty()
+                    val rawCookies = CookieManager.getInstance().getCookie("https://music.163.com").orEmpty()
                         .split(';').map { it.trim() }
                         .filter { it.substringBefore('=') in setOf("MUSIC_U", "__csrf", "MUSIC_A", "NMTID") && it.substringAfter('=', "").isNotBlank() }
+                    val hasMusicU = rawCookies.any { it.substringBefore('=') == "MUSIC_U" }
+                    val cookie = (if (hasMusicU) rawCookies.filterNot { it.substringBefore('=') == "MUSIC_A" } else rawCookies)
                         .joinToString("; ")
-                    if (cookie.split(';').any { it.trim().startsWith("MUSIC_U=") } && submitted != cookie) {
+                    if (hasMusicU && submitted != cookie) {
                         submitted = cookie
                         currentSession(cookie)
                     }

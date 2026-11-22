@@ -93,6 +93,11 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
     }
     fun savedAccounts(): List<StoredCloudAccount> = accountsState.accounts
     fun activeStoredAccount(): StoredCloudAccount? = accountsState.activeAccount
+    fun neteaseAudioCacheScope(): String {
+        activeStoredAccount()?.userId?.takeIf { it > 0L }?.let { return "u$it" }
+        val activeCookie = cookie.trim()
+        return if (activeCookie.isNotEmpty()) "c${CloudMetadataCache.digest(activeCookie).take(12)}" else "guest"
+    }
     fun saveAccountSession(user: CloudAccount, cookieValue: String) =
         persistAccounts(MultiAccountStateCodec.upsertAndActivate(accountsState, user, cookieValue))
     fun switchAccount(userId: Long): StoredCloudAccount? {

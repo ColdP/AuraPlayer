@@ -3,6 +3,9 @@
 package btm.m.auraplayer.ui.player
 
 import android.graphics.Bitmap
+import android.graphics.Paint
+import android.graphics.RuntimeShader
+import android.os.Build
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -11,7 +14,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import btm.m.auraplayer.data.LocalAudioArtwork
 import coil3.Image
@@ -314,6 +319,88 @@ internal fun rememberPlayerExpressiveColors(
     )
 }
 
+private const val AMBIENT_AURORA_AGSL = """
+uniform float2 uResolution;
+uniform float4 uBase;
+uniform float4 uOrb0;
+uniform float4 uOrb1;
+uniform float4 uOrb2;
+uniform float uPhase;
+
+float ign(float2 fc) {
+    return fract(52.9829189 * fract(dot(fc, float2(0.06711056, 0.00583715))));
+}
+
+float3 srgbToLinear(float3 c) {
+    float3 lo = c / 12.92;
+    float3 hi = pow(max((c + 0.055) / 1.055, float3(1e-5)), float3(2.4));
+    return mix(lo, hi, step(float3(0.04045), c));
+}
+
+float3 linearToSrgb(float3 c) {
+    float3 lo = c * 12.92;
+    float3 hi = 1.055 * pow(max(c, float3(1e-5)), float3(1.0 / 2.4)) - 0.055;
+    return mix(lo, hi, step(float3(0.0031308), c));
+}
+
+float orbFalloff(float2 fragCoord, float2 center, float radius) {
+    float d = clamp(length(fragCoord - center) / max(radius, 1.0), 0.0, 1.0);
+    // Quintic C2 falloff avoids center/edge Mach bands across large gradients.
+    float t = 1.0 - d;
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+
+half4 main(float2 fragCoord) {
+    float2 res = max(uResolution, float2(1.0));
+    float radius = max(res.x * 0.85, res.y * 0.55);
+
+    float2 c0 = float2(res.x * (0.22 + 0.25 * sin(uPhase)), res.y * (0.25 + 0.18 * cos(uPhase)));
+    float2 c1 = float2(res.x * (0.78 + 0.20 * cos(uPhase)), res.y * (0.50 + 0.30 * sin(uPhase)));
+    float2 c2 = float2(res.x * (0.38 + 0.28 * cos(uPhase)), res.y * (0.85 + 0.18 * sin(uPhase)));
+
+    float3 col = srgbToLinear(uBase.rgb);
+    col = mix(col, srgbToLinear(uOrb0.rgb), orbFalloff(fragCoord, c0, radius) * 0.72);
+    col = mix(col, srgbToLinear(uOrb1.rgb), orbFalloff(fragCoord, c1, radius) * 0.72);
+    col = mix(col, srgbToLinear(uOrb2.rgb), orbFalloff(fragCoord, c2, radius) * 0.72);
+
+    float3 srgb = linearToSrgb(col);
+    float dither = (ign(fragCoord) + ign(fragCoord + float2(7.0, 13.0)) - 1.0) * (1.25 / 255.0);
+    srgb = clamp(srgb + float3(dither), float3(0.0), float3(1.0));
+    return half4(half3(srgb), 1.0);
+}
+"""
+
+private class AmbientAuroraShaderRenderer {
+    private val shader = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        runCatching { RuntimeShader(AMBIENT_AURORA_AGSL) }.getOrNull()
+    } else {
+        null
+    }
+    private val paint = shader?.let { Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG).apply { shader = it } }
+
+    fun draw(
+        scope: androidx.compose.ui.graphics.drawscope.DrawScope,
+        base: Color,
+        orb0: Color,
+        orb1: Color,
+        orb2: Color,
+        phase: Float,
+    ): Boolean {
+        val activeShader = shader ?: return false
+        val activePaint = paint ?: return false
+        activeShader.setFloatUniform("uResolution", scope.size.width.coerceAtLeast(1f), scope.size.height.coerceAtLeast(1f))
+        activeShader.setFloatUniform("uBase", base.red, base.green, base.blue, base.alpha)
+        activeShader.setFloatUniform("uOrb0", orb0.red, orb0.green, orb0.blue, orb0.alpha)
+        activeShader.setFloatUniform("uOrb1", orb1.red, orb1.green, orb1.blue, orb1.alpha)
+        activeShader.setFloatUniform("uOrb2", orb2.red, orb2.green, orb2.blue, orb2.alpha)
+        activeShader.setFloatUniform("uPhase", phase)
+        scope.drawIntoCanvas { canvas ->
+            canvas.nativeCanvas.drawRect(0f, 0f, scope.size.width, scope.size.height, activePaint)
+        }
+        return true
+    }
+}
+
 @Composable
 internal fun PlayerAmbientBackground(
     palette: CorePalette,
@@ -333,6 +420,7 @@ internal fun PlayerAmbientBackground(
     val tertiary by animateColorAsState(targetTertiary, colorSpec, label = "ambientMonetTertiary")
     val base by animateColorAsState(targetBase, colorSpec, label = "ambientMonetBase")
     var phase by remember { mutableFloatStateOf(0f) }
+    val shaderRenderer = remember { AmbientAuroraShaderRenderer() }
     LaunchedEffect(animate, visible) {
         if (!visible) {
             phase = 0f
@@ -347,7 +435,11 @@ internal fun PlayerAmbientBackground(
         }
     }
     Canvas(modifier) {
+        if (shaderRenderer.draw(this, base, primary, secondary, tertiary, phase)) {
+            return@Canvas
+        }
         drawRect(base)
+        val radius = max(size.width * .85f, size.height * .55f)
         val centers = listOf(
             Offset(size.width * (.22f + .25f * sin(phase)), size.height * (.25f + .18f * cos(phase))),
             Offset(size.width * (.78f + .20f * cos(phase)), size.height * (.5f + .30f * sin(phase))),
@@ -355,8 +447,19 @@ internal fun PlayerAmbientBackground(
         )
         val orbs = listOf(primary, secondary, tertiary)
         centers.forEachIndexed { index, center ->
-            drawCircle(Brush.radialGradient(listOf(orbs[index].copy(alpha = .72f), Color.Transparent),
-                center = center, radius = size.width * .85f), radius = size.width * .85f, center = center)
+            val orb = orbs[index]
+            drawCircle(
+                Brush.radialGradient(
+                    0f to orb.copy(alpha = .72f),
+                    0.35f to orb.copy(alpha = .50f),
+                    0.70f to orb.copy(alpha = .16f),
+                    1f to Color.Transparent,
+                    center = center,
+                    radius = radius,
+                ),
+                radius = radius,
+                center = center,
+            )
         }
     }
 }

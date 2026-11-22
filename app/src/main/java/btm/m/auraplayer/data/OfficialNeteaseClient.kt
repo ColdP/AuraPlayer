@@ -20,10 +20,24 @@ internal class OfficialNeteaseClient(
     private val client: OkHttpClient,
     private val webOrigin: String = "https://music.163.com",
     private val streamOrigin: String = "https://interface.music.163.com",
+    private val eapiOrigin: String = "https://interfacepc.music.163.com",
     private val clientlogOrigin: String = "https://clientlog.music.163.com",
     private val clientlog3Origin: String = "https://clientlog3.music.163.com",
     private val metadataCache: CloudMetadataCache? = null,
 ) {
+    private val deviceId: String = java.util.UUID.randomUUID().toString().replace("-", "").uppercase()
+
+    private fun parseSessionCookies(authenticated: Boolean): Map<String, String> {
+        if (!authenticated) return emptyMap()
+        val raw = cookie().split(';')
+            .map { it.trim() }
+            .filter { '=' in it }
+            .associate { it.substringBefore('=').trim() to it.substringAfter('=').trim() }
+            .filterValues { it.isNotBlank() }
+        // Never send anonymous MUSIC_A alongside an authenticated MUSIC_U session.
+        return if (!raw["MUSIC_U"].isNullOrBlank()) raw.filterKeys { it != "MUSIC_A" } else raw
+    }
+
     private fun playlistKey(id: String) = "official/" + CloudMetadataCache.digest(webOrigin + "\n" + cookie()) + "/playlist/$id"
     fun invalidatePlaylist(id: Long) { metadataCache?.removePrefix(playlistKey(id.toString())) }
     fun request(path: String, values: Map<String, String>, authenticated: Boolean): JSONObject {
@@ -251,8 +265,7 @@ internal class OfficialNeteaseClient(
             "lyric/new" -> call("/api/song/lyric/v1", JSONObject().put("id", value("id"))
                 .put("cp", false).put("lv", 0).put("kv", 0).put("tv", 0).put("rv", 0)
                 .put("yv", 0).put("ytv", 0).put("yrv", 0), authenticated, eapi = true)
-            "song/url/v1" -> call("/api/song/enhance/player/url/v1", JSONObject().put("ids", "[${value("id")}]")
-                .put("level", value("level", "standard")).put("encodeType", if (value("level") == "vivid") "mp3" else "flac").apply { if (value("level") == "sky") put("immerseType", "c51") }, authenticated, eapi = true, androidClient = value("level") == "vivid")
+            "song/url/v1" -> resolveSongUrlV1(value("id"), value("level", "standard"), authenticated)
             "captcha/sent" -> call("/api/sms/captcha/sent", JSONObject().put("cellphone", value("phone"))
                 .put("ctcode", value("ctcode", "86")).put("secrete", "music_middleuser_pclogin"), false)
             "login/cellphone" -> call("/api/w/login/cellphone", JSONObject().put("type", "1").put("https", "true")
@@ -261,6 +274,81 @@ internal class OfficialNeteaseClient(
             "logout" -> call("/api/logout", JSONObject(), authenticated)
             else -> throw IOException("UNSUPPORTED_OFFICIAL_ROUTE")
         }
+    }
+
+    private fun isFullPlayableUrlResponse(response: JSONObject?): Boolean {
+        val item = response?.optJSONArray("data")?.optJSONObject(0) ?: return false
+        val url = item.optString("url")
+        if (url.isBlank() || url == "null") return false
+        val trial = item.opt("freeTrialInfo")
+        return trial == null || trial == JSONObject.NULL || trial.toString() == "null"
+    }
+
+    private fun songUrlV1Payload(id: String, level: String): JSONObject = JSONObject()
+        .put("ids", "[$id]")
+        .put("level", level)
+        .put("encodeType", if (level == "vivid") "mp3" else "flac")
+        .apply { if (level == "sky") put("immerseType", "c51") }
+
+    private fun resolveSongUrlV1(id: String, level: String, authenticated: Boolean): JSONObject {
+        val isVivid = level == "vivid"
+        val primary = call(
+            "/api/song/enhance/player/url/v1",
+            songUrlV1Payload(id, level),
+            authenticated,
+            eapi = true,
+            androidClient = isVivid,
+        )
+        if (isFullPlayableUrlResponse(primary)) return primary
+        val cookies = parseSessionCookies(authenticated)
+        if (!authenticated || cookies["MUSIC_U"].isNullOrBlank()) return primary
+
+        // Retry with WEAPI and alternate client profiles when an authenticated VIP session receives a trial clip.
+        val weapiCandidate = runCatching {
+            call(
+                "/api/song/enhance/player/url/v1",
+                songUrlV1Payload(id, level),
+                authenticated = true,
+                eapi = false,
+            )
+        }.getOrNull()
+        if (isFullPlayableUrlResponse(weapiCandidate)) return weapiCandidate!!
+
+        val altEapiCandidate = runCatching {
+            call(
+                "/api/song/enhance/player/url/v1",
+                songUrlV1Payload(id, level),
+                authenticated = true,
+                eapi = true,
+                androidClient = !isVivid,
+                originOverride = streamOrigin,
+            )
+        }.getOrNull()
+        if (isFullPlayableUrlResponse(altEapiCandidate)) return altEapiCandidate!!
+
+        if (level in setOf("standard", "higher", "exhigh", "lossless")) {
+            val br = when (level) {
+                "standard" -> 128000
+                "higher" -> 192000
+                "exhigh" -> 320000
+                else -> 999000
+            }
+            val legacyCandidate = runCatching {
+                call(
+                    "/api/song/enhance/player/url",
+                    JSONObject().put("ids", "[$id]").put("br", br),
+                    authenticated = true,
+                    eapi = false,
+                )
+            }.getOrNull()
+            if (isFullPlayableUrlResponse(legacyCandidate)) return legacyCandidate!!
+        }
+
+        return listOfNotNull(weapiCandidate, altEapiCandidate)
+            .firstOrNull { resp ->
+                val url = resp.optJSONArray("data")?.optJSONObject(0)?.optString("url").orEmpty()
+                url.isNotBlank() && url != "null"
+            } ?: primary
     }
 
     private fun call(
@@ -272,9 +360,7 @@ internal class OfficialNeteaseClient(
         osxClient: Boolean = false,
         originOverride: String? = null,
     ): JSONObject {
-        val session = if (authenticated) cookie() else ""
-        val cookies = session.split(';').map { it.trim() }.filter { '=' in it }
-            .associate { it.substringBefore('=') to it.substringAfter('=') }
+        val cookies = parseSessionCookies(authenticated)
         val csrf = cookies["__csrf"].orEmpty()
         val clientOs = when {
             osxClient -> "osx"
@@ -284,32 +370,48 @@ internal class OfficialNeteaseClient(
         val clientAppVer = when {
             osxClient -> "3.1.10.5100"
             androidClient -> "9.5.61"
-            else -> "3.0.18"
+            else -> "3.1.17.204416"
         }
+        val clientOsVer = when {
+            osxClient -> "15.5"
+            androidClient -> "14"
+            else -> "Microsoft-Windows-10-Professional-build-19045-64bit"
+        }
+        val clientChannel = if (androidClient) "xiaomi" else "netease"
         data.put("csrf_token", csrf).put("e_r", false)
         val body = if (eapi) {
+            val reqCounter = java.util.concurrent.ThreadLocalRandom.current().nextInt(1000, 9999)
             data.put("header", JSONObject()
+                .put("osver", clientOsVer)
+                .put("deviceId", deviceId)
                 .put("os", clientOs)
                 .put("appver", clientAppVer)
+                .put("versioncode", "140")
+                .put("buildver", (System.currentTimeMillis() / 1000L).toString())
+                .put("resolution", "1920x1080")
                 .put("__csrf", csrf)
+                .put("channel", clientChannel)
+                .put("requestId", "${System.currentTimeMillis()}_$reqCounter")
                 .apply {
-                    if (osxClient) {
-                        put("osver", "15.5")
-                        put("channel", "netease")
-                    }
                     cookies["MUSIC_U"]?.let { put("MUSIC_U", it) }
+                    cookies["NMTID"]?.let { put("NMTID", it) }
                 })
             NeteaseCrypto.eapi(path, data.toString())
         } else NeteaseCrypto.weapi(data.toString())
-        val origin = originOverride ?: if (eapi) streamOrigin else webOrigin
-        val userAgent = if (osxClient) {
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        } else {
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36"
+        val origin = originOverride ?: if (eapi) (if (androidClient || osxClient) streamOrigin else eapiOrigin) else webOrigin
+        val userAgent = when {
+            osxClient -> "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            androidClient -> "NeteaseMusic/9.5.61.260802021928(9005061);Dalvik/2.1.0 (Linux; U; Android 12; HBN-AL00 Build/cd737a2.0)"
+            eapi -> "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/3.1.29.205117"
+            else -> "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36"
         }
         val cookieMap = cookies.toMutableMap().apply {
+            put("__remember_me", "true")
             put("os", clientOs)
             put("appver", clientAppVer)
+            put("osver", clientOsVer)
+            put("channel", clientChannel)
+            put("deviceId", deviceId)
         }
         val request = Request.Builder().url(origin + path.replaceFirst("/api/", if (eapi) "/eapi/" else "/weapi/"))
             .header("Referer", "https://music.163.com/")

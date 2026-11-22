@@ -77,25 +77,40 @@ class PlaybackService : MediaSessionService() {
         activeInstance = this
         val app = application as AuraApplication
         val http = OkHttpDataSource.Factory(OkHttpClient()).setDefaultRequestProperties(mapOf("Referer" to "https://music.163.com/"))
+        val audioCache = PlaybackAudioCache.get(this)
         val resolving = ResolvingDataSource.Factory(http) { spec ->
             if (spec.uri.scheme == "aura" && spec.uri.host == "netease") {
                 val id = spec.uri.lastPathSegment?.toLongOrNull() ?: throw java.io.IOException("INVALID_SONG")
-                spec.withUri(Uri.parse(app.api.resolveBlocking(id, spec.uri.getQueryParameter("quality") ?: PlaybackPreferences(this).quality.level)))
+                val level = spec.uri.getQueryParameter("quality") ?: PlaybackPreferences(this).quality.level
+                val resolvedUrl = app.api.resolveBlocking(id, level)
+                val cacheKey = playbackAudioCacheKey("netease", "$id", level, app.neteaseAudioCacheScope())
+                if (cacheKey != null) {
+                    if (PlaybackStreams.records[id]?.isTrial == true) {
+                        PlaybackAudioCache.markTrialKey(cacheKey)
+                    } else {
+                        PlaybackAudioCache.clearTrialKey(cacheKey)
+                    }
+                }
+                spec.withUri(Uri.parse(resolvedUrl))
             } else if (spec.uri.scheme == "aura" && spec.uri.host == "qqmusic") {
                 val mid = spec.uri.lastPathSegment ?: throw java.io.IOException("INVALID_SONG")
                 spec.withUri(Uri.parse(app.qq.resolveBlocking(mid)))
             } else spec
         }
         val cacheSource = androidx.media3.datasource.cache.CacheDataSource.Factory()
-            .setCache(PlaybackAudioCache.get(this))
+            .setCache(audioCache)
             .setUpstreamDataSourceFactory(resolving)
             .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         val cloudSource = ResolvingDataSource.Factory(cacheSource) { spec ->
             val uri = spec.uri
             val key = if (uri.scheme == "aura") uri.lastPathSegment?.let { trackId ->
-                playbackAudioCacheKey(uri.host.orEmpty(), trackId,
-                    uri.getQueryParameter("quality") ?: PlaybackPreferences(this).quality.level)
+                val level = uri.getQueryParameter("quality") ?: PlaybackPreferences(this).quality.level
+                val scope = if (uri.host == "netease") app.neteaseAudioCacheScope() else ""
+                playbackAudioCacheKey(uri.host.orEmpty(), trackId, level, scope)
             } else null
+            if (key != null && PlaybackAudioCache.isTrialKey(key)) {
+                runCatching { audioCache.removeResource(key) }
+            }
             if (key == null) spec else spec.buildUpon().setKey(key).setFlags(playbackAudioCacheFlags(spec.flags)).build()
         }
         val source = DefaultDataSource.Factory(this, cloudSource)

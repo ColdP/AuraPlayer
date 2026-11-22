@@ -64,6 +64,14 @@ class NeteaseApi(
             throw e
         }
     }
+    private fun sanitizedCookie(): String {
+        val raw = cookie().trim()
+        if (raw.isBlank()) return ""
+        val parts = raw.split(';').map { it.trim() }.filter { '=' in it }
+        val hasMusicU = parts.any { it.substringBefore('=').trim() == "MUSIC_U" && it.substringAfter('=').isNotBlank() }
+        return if (hasMusicU) parts.filterNot { it.substringBefore('=').trim() == "MUSIC_A" }.joinToString("; ") else raw
+    }
+
     private fun requestNetwork(path: String, values: Map<String, String>, authenticated: Boolean): JSONObject {
         val base = endpoint().takeIf { it.isNotBlank() }
             ?: return official.request(path, values, authenticated)
@@ -71,7 +79,7 @@ class NeteaseApi(
         val body = FormBody.Builder().apply {
             add("timestamp", System.currentTimeMillis().toString())
             values.forEach { (key, value) -> add(key, value) }
-            if (authenticated) cookie().takeIf(String::isNotBlank)?.let { add("cookie", it) }
+            if (authenticated) sanitizedCookie().takeIf(String::isNotBlank)?.let { add("cookie", it) }
         }.build()
         val request = Request.Builder().url(url).post(body).header("Accept", "application/json").build()
         client.newCall(request).execute().use { response ->
@@ -867,12 +875,56 @@ class NeteaseApi(
         require(actual == quality.level) { "DOWNLOAD_QUALITY_UNAVAILABLE" }
         return btm.m.auraplayer.playback.DownloadSource(parsed.newBuilder().scheme("https").build().toString(), data.optString("type"), quality)
     }
+    private fun isTrialSong(song: JSONObject?): Boolean {
+        val trial = song?.opt("freeTrialInfo") ?: return false
+        return trial != JSONObject.NULL && trial.toString().isNotBlank() && trial.toString() != "null"
+    }
+
+    private fun usableSongUrl(song: JSONObject?): String? =
+        song?.optString("url")?.takeIf { it.isNotBlank() && it != "null" }
+
     fun resolveBlocking(id: Long, level: String = "standard"): String {
         val response = requestBlocking("song/url/v1", mapOf("id" to "$id", "level" to level, "unblock" to "false"))
-        val song = response.optJSONArray("data")?.optJSONObject(0) ?: throw IOException("UNAVAILABLE_SONG")
+        val primarySong = response.optJSONArray("data")?.optJSONObject(0) ?: throw IOException("UNAVAILABLE_SONG")
+        var selectedSong = primarySong
+        var selectedLevel = level
+
+        // If an authenticated VIP session receives a 30s preview or blank URL at a higher tier
+        // (for example SVIP-only levels), step down to standard/lossless tiers before giving up.
+        if ((isTrialSong(selectedSong) || usableSongUrl(selectedSong) == null) && sanitizedCookie().isNotBlank()) {
+            val fallbacks = when (level) {
+                "jymaster", "vivid", "dolby", "sky", "jyeffect", "hires" -> listOf("lossless", "exhigh", "standard")
+                "lossless" -> listOf("exhigh", "standard")
+                "exhigh", "higher" -> listOf("standard")
+                else -> emptyList()
+            }
+            for (fallbackLevel in fallbacks) {
+                val candidate = runCatching {
+                    requestBlocking("song/url/v1", mapOf("id" to "$id", "level" to fallbackLevel, "unblock" to "false"))
+                        .optJSONArray("data")?.optJSONObject(0)
+                }.getOrNull() ?: continue
+                if (usableSongUrl(candidate) != null && !isTrialSong(candidate)) {
+                    selectedSong = candidate
+                    selectedLevel = fallbackLevel
+                    break
+                }
+                if (usableSongUrl(selectedSong) == null && usableSongUrl(candidate) != null) {
+                    selectedSong = candidate
+                    selectedLevel = fallbackLevel
+                }
+            }
+        }
+
+        val isTrial = isTrialSong(selectedSong)
         btm.m.auraplayer.playback.PlaybackStreams.records[id] = btm.m.auraplayer.playback.StreamInfo(
-            song.optString("level", level), song.optString("type"), song.optInt("br"), song.optInt("sr"), song.optInt("bitDepth", song.optInt("bits")))
-        val url = song.optString("url").takeIf { it.isNotBlank() && it != "null" } ?: throw IOException("UNAVAILABLE_SONG")
+            selectedSong.optString("level", selectedLevel),
+            selectedSong.optString("type"),
+            selectedSong.optInt("br"),
+            selectedSong.optInt("sr"),
+            selectedSong.optInt("bitDepth", selectedSong.optInt("bits")),
+            isTrial = isTrial,
+        )
+        val url = usableSongUrl(selectedSong) ?: throw IOException("UNAVAILABLE_SONG")
         val parsed = url.toHttpUrl()
         // NetEase occasionally returns HTTP CDN URLs. HTTPS is supported by its CDN.
         return parsed.newBuilder().scheme("https").build().toString()

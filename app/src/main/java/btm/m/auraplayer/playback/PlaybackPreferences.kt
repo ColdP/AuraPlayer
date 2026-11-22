@@ -34,7 +34,7 @@ class PlaybackPreferences(context: Context) {
 }
 
 
-data class StreamInfo(val level: String, val codec: String, val bitrate: Int, val sampleRate: Int, val bits: Int = 0)
+data class StreamInfo(val level: String, val codec: String, val bitrate: Int, val sampleRate: Int, val bits: Int = 0, val isTrial: Boolean = false)
 data class CloudQuality(val quality: StreamQuality, val audio: AudioDetails)
 data class DownloadSource(val url: String, val codec: String, val quality: StreamQuality)
 object PlaybackStreams {

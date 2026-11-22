@@ -1,5 +1,8 @@
 package btm.m.auraplayer.ui.player
 
+import android.graphics.RenderEffect as AndroidRenderEffect
+import android.graphics.RuntimeShader
+import android.os.Build
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -16,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -39,6 +43,41 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlin.math.*
 import kotlin.random.Random
+
+private const val BACKDROP_DITHER_AGSL = """
+uniform shader content;
+
+float ign(float2 fc) {
+    return fract(52.9829189 * fract(dot(fc, float2(0.06711056, 0.00583715))));
+}
+
+half4 main(float2 fragCoord) {
+    half4 c = content.eval(fragCoord);
+    float d = (ign(fragCoord) + ign(fragCoord + float2(7.0, 13.0)) - 1.0) * (1.25 / 255.0);
+    return half4(clamp(c.rgb + half3(d) * c.a, half3(0.0), half3(c.a)), c.a);
+}
+"""
+
+private fun rememberBackdropDitherRenderEffect(): androidx.compose.ui.graphics.RenderEffect? =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        runCatching {
+            AndroidRenderEffect.createRuntimeShaderEffect(RuntimeShader(BACKDROP_DITHER_AGSL), "content")
+                .asComposeRenderEffect()
+        }.getOrNull()
+    } else {
+        null
+    }
+
+private fun flowingCoverScale(width: Float, height: Float, maxTxFraction: Float, maxTyFraction: Float, maxRotationDeg: Float): Float {
+    val w = width.coerceAtLeast(1f)
+    val h = height.coerceAtLeast(1f)
+    val rad = (maxRotationDeg * (PI / 180.0)).toFloat()
+    val cosA = cos(rad)
+    val sinA = sin(rad)
+    val reqX = (1f + 2f * maxTxFraction) * cosA + (h / w) * (1f + 2f * maxTyFraction) * sinA
+    val reqY = (1f + 2f * maxTyFraction) * cosA + (w / h) * (1f + 2f * maxTxFraction) * sinA
+    return max(1.22f, max(reqX, reqY) + 0.06f).coerceAtMost(2.2f)
+}
 
 @Composable
 internal fun PlayerThemeBackground(
@@ -161,13 +200,16 @@ internal fun PlayerThemeBackground(
     val blur by animateFloatAsState(config.blurRadius, backgroundSpec, label = "playerBackgroundBlur")
     val materialMix by animateFloatAsState((config.materialColorMix / 100f).coerceIn(0f, 1f), backgroundSpec, label = "playerMaterialMix")
     val baseSpatialWeight = if (config.spatialLyrics) (compactProgress * (1f - queueBlend)).coerceIn(0f, 1f) else 0f
+    val ditherEffect = remember { rememberBackdropDitherRenderEffect() }
     PlayerBackgroundLayout(modifier, visibility) {
         Box(
             Modifier
                 .fillMaxSize()
                 .graphicsLayer {
                     if (baseSpatialWeight > 0.001f) {
-                        val overscan = 1f + 0.048f * baseSpatialWeight
+                        val padX = 32.dp.toPx() / size.width.coerceAtLeast(1f)
+                        val padY = 24.dp.toPx() / size.height.coerceAtLeast(1f)
+                        val overscan = 1f + (max(0.048f, max(padX, padY)) + 0.04f) * baseSpatialWeight
                         scaleX = overscan
                         scaleY = overscan
                         translationX = -spatialTilt.x * 16.dp.toPx() * baseSpatialWeight
@@ -187,14 +229,25 @@ internal fun PlayerThemeBackground(
                 oklabAmbient != null -> oklabAmbient.surface
                 else -> Color(palette.a2.tone(if (isDark) 14 else 93))
             }
-            Box(Modifier.fillMaxSize().background(baseColor)) {
-                val showAurora = advancedMaterial && (theme == PlayerTheme.AURORA ||
-                    theme == PlayerTheme.AURORA_BLUR ||
-                    (materialMode && (materialBg == MaterialPlayerBackground.AURORA || materialBg == MaterialPlayerBackground.AURORA_BLUR)))
-                val showArtwork = advancedMaterial && (theme == PlayerTheme.AURORA_BLUR ||
-                    theme == PlayerTheme.BLUR ||
-                    theme == PlayerTheme.FULLSCREEN ||
-                    (materialMode && (materialBg == MaterialPlayerBackground.BLUR || materialBg == MaterialPlayerBackground.AURORA_BLUR)))
+            val showAurora = advancedMaterial && (theme == PlayerTheme.AURORA ||
+                theme == PlayerTheme.AURORA_BLUR ||
+                (materialMode && (materialBg == MaterialPlayerBackground.AURORA || materialBg == MaterialPlayerBackground.AURORA_BLUR)))
+            val showArtwork = advancedMaterial && (theme == PlayerTheme.AURORA_BLUR ||
+                theme == PlayerTheme.BLUR ||
+                theme == PlayerTheme.FULLSCREEN ||
+                (materialMode && (materialBg == MaterialPlayerBackground.BLUR || materialBg == MaterialPlayerBackground.AURORA_BLUR)))
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(baseColor)
+                    .then(
+                        if (showArtwork && ditherEffect != null) {
+                            Modifier.graphicsLayer { renderEffect = ditherEffect }
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
                 if (advancedMaterial && materialMode && materialBg == MaterialPlayerBackground.MATERIAL && expressive != null) {
                     MaterialExpressiveSurfaceWash(expressive, { phase }, washStrength = 1f - materialMix * .92f, Modifier.fillMaxSize())
                 }
@@ -217,13 +270,21 @@ internal fun PlayerThemeBackground(
                     val full = theme == PlayerTheme.FULLSCREEN
                     val radius = if (full) 40f * compactProgress else blur
                     Box(Modifier.fillMaxSize().graphicsLayer {
-                        scaleX = if (full) 1.04f else 1.22f; scaleY = scaleX
                         if (flowing) {
-                            translationX = sin(phase * .42f) * size.width * .07f
-                            translationY = cos(phase * .34f) * size.height * .055f
-                            rotationZ = sin(phase * .22f) * 4f
+                            val maxTxFrac = 0.07f
+                            val maxTyFrac = 0.055f
+                            val maxRotDeg = 4f
+                            val coverScale = flowingCoverScale(size.width, size.height, maxTxFrac, maxTyFrac, maxRotDeg)
+                            scaleX = coverScale
+                            scaleY = coverScale
+                            translationX = sin(phase * .42f) * size.width * maxTxFrac
+                            translationY = cos(phase * .34f) * size.height * maxTyFrac
+                            rotationZ = sin(phase * .22f) * maxRotDeg
                             // Let the moving dynamic colors show through the blurred artwork.
                             alpha = if (isDark) .38f else .30f
+                        } else {
+                            scaleX = if (full) 1.04f else 1.22f
+                            scaleY = scaleX
                         }
                     }.blur(radius.dp)) {
                         // The outgoing image stays fully opaque beneath the incoming image;

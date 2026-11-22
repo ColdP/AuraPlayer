@@ -11,8 +11,13 @@ import java.io.File
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicReference
 
-internal fun playbackAudioCacheKey(provider: String, trackId: String, quality: String): String? = when (provider) {
-    "netease" -> "aura://netease/$trackId?quality=$quality"
+internal fun playbackAudioCacheKey(
+    provider: String,
+    trackId: String,
+    quality: String,
+    scope: String = "",
+): String? = when (provider) {
+    "netease" -> if (scope.isNotBlank()) "aura://netease/$trackId?quality=$quality&scope=$scope" else "aura://netease/$trackId?quality=$quality"
     "qqmusic" -> "aura://qqmusic/$trackId?quality=standard"
     else -> null
 }
@@ -30,6 +35,17 @@ internal fun migratePlaybackAudioCache(legacy: File, persistent: File): File = w
 object PlaybackAudioCache {
     private const val MAX_BYTES = 512L * 1024 * 1024
     private val holder = AtomicReference<SimpleCache?>(null)
+    private val trialKeys = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    internal fun markTrialKey(key: String) {
+        if (key.isNotBlank()) trialKeys.add(key)
+    }
+
+    internal fun clearTrialKey(key: String) {
+        if (key.isNotBlank()) trialKeys.remove(key)
+    }
+
+    internal fun isTrialKey(key: String): Boolean = key in trialKeys
 
     @Synchronized
     fun get(context: Context): SimpleCache {
@@ -45,13 +61,21 @@ object PlaybackAudioCache {
 
     fun key(songId: Long, quality: StreamQuality): String = key(songId, quality.level)
 
+    fun key(context: Context, songId: Long, quality: StreamQuality): String = key(context, songId, quality.level)
+
     internal fun key(songId: Long, level: String): String = checkNotNull(playbackAudioCacheKey("netease", "$songId", level))
+
+    internal fun key(context: Context, songId: Long, level: String): String {
+        val scope = (context.applicationContext as? btm.m.auraplayer.AuraApplication)?.neteaseAudioCacheScope().orEmpty()
+        return checkNotNull(playbackAudioCacheKey("netease", "$songId", level, scope))
+    }
 
     fun size(context: Context): Long = holder.get()?.cacheSpace ?: listOf(persistentDirectory(context), legacyDirectory(context))
         .sumOf { directory -> directory.walkTopDown().filter(File::isFile).sumOf(File::length) }
 
     /** Copies a complete cached item, returning false when playback has only cached a partial range. */
     fun copyIfFullyCached(context: Context, key: String, output: File): Boolean {
+        if (isTrialKey(key)) return false
         val cache = get(context)
         val length = ContentMetadata.getContentLength(cache.getContentMetadata(key))
         if (length <= 0L || !cache.isCached(key, 0L, length)) return false

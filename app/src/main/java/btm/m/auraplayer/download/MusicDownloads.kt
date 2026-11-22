@@ -54,7 +54,7 @@ object MusicDownloads {
             artists = btm.m.auraplayer.data.decodeSongArtists(info.optString("artists"))), info.optString("quality"), publishedUri)
     }
     fun enqueue(context: Context, song: Song, source: DownloadSource): Long {
-        val cacheKey = PlaybackAudioCache.key(song.id, source.quality)
+        val cacheKey = PlaybackAudioCache.key(context, song.id, source.quality)
         val cachedId = -System.currentTimeMillis()
         val cached = File(context.cacheDir, "download-cache-$cachedId.source")
         if (PlaybackAudioCache.copyIfFullyCached(context, cacheKey, cached)) {
