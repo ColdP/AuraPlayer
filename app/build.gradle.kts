@@ -11,15 +11,17 @@ val localProps = Properties().apply {
     if (file.isFile) file.inputStream().use(::load)
 }
 
-fun signingValue(key: String, envKey: String): String? =
-    providers.gradleProperty(key).orNull
+fun signingValue(key: String, vararg envKeys: String): String? =
+    providers.gradleProperty(key).orNull?.takeIf { it.isNotBlank() }
+        ?: envKeys.firstNotNullOfOrNull { envKey ->
+            System.getenv(envKey)?.takeIf { it.isNotBlank() }
+        }
         ?: localProps.getProperty(key)?.takeIf { it.isNotBlank() }
-        ?: System.getenv(envKey)?.takeIf { it.isNotBlank() }
 
-val releaseStoreFile = signingValue("releaseStoreFile", "RELEASE_STORE_FILE")
-val releaseStorePassword = signingValue("releaseStorePassword", "RELEASE_STORE_PASSWORD")
-val releaseKeyAlias = signingValue("releaseKeyAlias", "RELEASE_KEY_ALIAS")
-val releaseKeyPassword = signingValue("releaseKeyPassword", "RELEASE_KEY_PASSWORD")
+val releaseStoreFile = signingValue("releaseStoreFile", "KEYSTORE_FILE", "RELEASE_STORE_FILE")
+val releaseStorePassword = signingValue("releaseStorePassword", "KEYSTORE_PASSWORD", "RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = signingValue("releaseKeyAlias", "KEY_ALIAS", "RELEASE_KEY_ALIAS")
+val releaseKeyPassword = signingValue("releaseKeyPassword", "KEY_PASSWORD", "RELEASE_KEY_PASSWORD")
 val hasReleaseSigning = !releaseStoreFile.isNullOrBlank() &&
     !releaseStorePassword.isNullOrEmpty() &&
     !releaseKeyAlias.isNullOrBlank() &&
@@ -41,7 +43,7 @@ android {
         minSdk = 33
         targetSdk = 37
         versionCode = 1010039
-        versionName = "1.0.1"
+        versionName = "1.0.1 Fix"
         buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")
         ndk {
             abiFilters += listOf("arm64-v8a")
