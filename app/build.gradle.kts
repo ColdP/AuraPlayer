@@ -42,7 +42,7 @@ android {
         applicationId = "btm.m.auraplayer"
         minSdk = 33
         targetSdk = 37
-        versionCode = 1010039
+        versionCode = 1010040
         versionName = "1.0.1 Fix"
         buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")
         ndk {
