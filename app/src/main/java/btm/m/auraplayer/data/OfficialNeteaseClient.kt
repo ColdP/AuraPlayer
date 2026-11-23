@@ -273,7 +273,19 @@ internal class OfficialNeteaseClient(
             "song/detail" -> call("/api/v3/song/detail", JSONObject().put("c", JSONArray().apply {
                 value("ids").split(',').mapNotNull(String::toLongOrNull).forEach { put(JSONObject().put("id", it)) }
             }.toString()), authenticated)
-            "song/music/detail" -> call("/api/song/music/detail/get", JSONObject().put("songId", value("id")), authenticated)
+            "song/music/detail" -> {
+                val songId = value("id")
+                val eapiResp = runCatching {
+                    call("/api/song/music/detail/get", JSONObject().put("songId", songId), authenticated, eapi = true)
+                }.getOrNull()
+                if (eapiResp != null && NeteaseApi.hasQualityDetails(eapiResp)) {
+                    eapiResp
+                } else {
+                    runCatching {
+                        call("/api/song/music/detail/get", JSONObject().put("songId", songId), authenticated, eapi = false)
+                    }.getOrNull() ?: eapiResp ?: throw IOException("UNAVAILABLE_SONG")
+                }
+            }
             "lyric/new" -> call("/api/song/lyric/v1", JSONObject().put("id", value("id"))
                 .put("cp", false).put("lv", 0).put("kv", 0).put("tv", 0).put("rv", 0)
                 .put("yv", 0).put("ytv", 0).put("yrv", 0), authenticated, eapi = true)

@@ -16,6 +16,7 @@ const val PROVIDER_QQ = "qq"
 /** True for NetEase-backed cloud songs (the original, default cloud provider). */
 val Song.netease: Boolean get() = cloud && provider != PROVIDER_QQ
 val Song.isQq: Boolean get() = cloud && provider == PROVIDER_QQ
+fun Song.qqMid(): String = uri.substringAfter("aura://qqmusic/", "").substringBefore('?').trim('/')
 
 /**
  * Uses official QQ Music endpoints by default (via [OfficialQqClient]), or an optional
@@ -32,7 +33,142 @@ class QqMusicApi(
     val usingCustomEndpoint: Boolean get() = endpoint().isNotBlank()
     val configured: Boolean get() = true
 
-    private data class CachedQqUrl(val url: String, val expiresAtMs: Long)
+    private data class CachedQqUrl(
+        val url: String,
+        val info: btm.m.auraplayer.playback.StreamInfo,
+        val expiresAtMs: Long,
+    )
+
+    companion object {
+        internal fun parseTrackQualities(trackOrFile: JSONObject, intervalSec: Long = 0L): List<btm.m.auraplayer.playback.CloudQuality> {
+            val file = trackOrFile.optJSONObject("file") ?: trackOrFile
+            val durationSec = trackOrFile.optLong("interval", intervalSec).coerceAtLeast(0L)
+            fun estBitrate(bytes: Long): Int =
+                if (bytes > 0L && durationSec > 0L) ((bytes * 8L) / durationSec).toInt() else 0
+            val size128 = file.optLong("size_128mp3", file.optLong("size_128", 0L))
+            val size96aac = file.optLong("size_96aac", file.optLong("size_48aac", 0L))
+            val size192ogg = file.optLong("size_192ogg", 0L)
+            val size192aac = file.optLong("size_192aac", 0L)
+            val size320 = file.optLong("size_320mp3", file.optLong("size_320", 0L))
+            val sizeFlac = file.optLong("size_flac", 0L)
+            val sizeApe = file.optLong("size_ape", 0L)
+            val sizeHires = file.optLong("size_hires", 0L)
+            val sizeNew = file.optJSONArray("size_new")
+            val sizeMaster = sizeNew?.optLong(0, 0L) ?: 0L
+            val sizeSpatial = sizeNew?.optLong(1, 0L) ?: 0L
+            val sizeVivid = sizeNew?.optLong(2, 0L) ?: 0L
+            return buildList {
+                if (size128 > 0L) {
+                    add(btm.m.auraplayer.playback.CloudQuality(
+                        btm.m.auraplayer.playback.StreamQuality.STANDARD,
+                        btm.m.auraplayer.playback.AudioDetails("MP3", 0, 0, 128_000),
+                    ))
+                } else if (size96aac > 0L) {
+                    add(btm.m.auraplayer.playback.CloudQuality(
+                        btm.m.auraplayer.playback.StreamQuality.STANDARD,
+                        btm.m.auraplayer.playback.AudioDetails("AAC", 0, 0, 96_000),
+                    ))
+                }
+                if (size192ogg > 0L) {
+                    add(btm.m.auraplayer.playback.CloudQuality(
+                        btm.m.auraplayer.playback.StreamQuality.HIGHER,
+                        btm.m.auraplayer.playback.AudioDetails("OGG", 0, 0, 192_000),
+                    ))
+                } else if (size192aac > 0L) {
+                    add(btm.m.auraplayer.playback.CloudQuality(
+                        btm.m.auraplayer.playback.StreamQuality.HIGHER,
+                        btm.m.auraplayer.playback.AudioDetails("AAC", 0, 0, 192_000),
+                    ))
+                }
+                if (size320 > 0L) {
+                    add(btm.m.auraplayer.playback.CloudQuality(
+                        btm.m.auraplayer.playback.StreamQuality.HIGH,
+                        btm.m.auraplayer.playback.AudioDetails("MP3", 0, 0, 320_000),
+                    ))
+                }
+                if (sizeFlac > 0L) {
+                    add(btm.m.auraplayer.playback.CloudQuality(
+                        btm.m.auraplayer.playback.StreamQuality.LOSSLESS,
+                        btm.m.auraplayer.playback.AudioDetails("FLAC", 0, 0, estBitrate(sizeFlac)),
+                    ))
+                } else if (sizeApe > 0L) {
+                    add(btm.m.auraplayer.playback.CloudQuality(
+                        btm.m.auraplayer.playback.StreamQuality.LOSSLESS,
+                        btm.m.auraplayer.playback.AudioDetails("APE", 0, 0, estBitrate(sizeApe)),
+                    ))
+                }
+                if (sizeHires > 0L) {
+                    add(btm.m.auraplayer.playback.CloudQuality(
+                        btm.m.auraplayer.playback.StreamQuality.HIRES,
+                        btm.m.auraplayer.playback.AudioDetails("FLAC", 0, 0, estBitrate(sizeHires)),
+                    ))
+                }
+                if (sizeSpatial > 0L) {
+                    add(btm.m.auraplayer.playback.CloudQuality(
+                        btm.m.auraplayer.playback.StreamQuality.SPATIAL,
+                        btm.m.auraplayer.playback.AudioDetails("FLAC", 0, 0, estBitrate(sizeSpatial)),
+                    ))
+                }
+                if (sizeVivid > 0L) {
+                    add(btm.m.auraplayer.playback.CloudQuality(
+                        btm.m.auraplayer.playback.StreamQuality.VIVID,
+                        btm.m.auraplayer.playback.AudioDetails("FLAC", 0, 0, estBitrate(sizeVivid)),
+                    ))
+                }
+                if (sizeMaster > 0L) {
+                    add(btm.m.auraplayer.playback.CloudQuality(
+                        btm.m.auraplayer.playback.StreamQuality.MASTER,
+                        btm.m.auraplayer.playback.AudioDetails("FLAC", 0, 0, estBitrate(sizeMaster)),
+                    ))
+                }
+            }
+        }
+
+        internal fun streamInfoFromUrl(
+            urlOrPurl: String,
+            fallbackLevel: String,
+            details: List<btm.m.auraplayer.playback.CloudQuality> = emptyList(),
+        ): btm.m.auraplayer.playback.StreamInfo {
+            val fileName = urlOrPurl.substringBefore('?').substringAfterLast('/').uppercase()
+            val (detectedLevel, codec, baseBitrate) = when {
+                fileName.startsWith("RS01") -> Triple("hires", "FLAC", 0)
+                fileName.startsWith("AI00") -> Triple("jymaster", "FLAC", 0)
+                fileName.startsWith("Q000") -> Triple("jyeffect", "FLAC", 0)
+                fileName.startsWith("Q001") || fileName.startsWith("Q003") -> Triple("vivid", "FLAC", 0)
+                fileName.startsWith("F000") -> Triple("lossless", "FLAC", 0)
+                fileName.startsWith("A000") -> Triple("lossless", "APE", 0)
+                fileName.startsWith("M800") -> Triple("exhigh", "MP3", 320_000)
+                fileName.startsWith("O600") -> Triple("higher", "OGG", 192_000)
+                fileName.startsWith("C600") -> Triple("higher", "AAC", 192_000)
+                fileName.startsWith("M500") -> Triple("standard", "MP3", 128_000)
+                fileName.startsWith("C400") -> Triple("standard", "AAC", 96_000)
+                fileName.startsWith("C200") -> Triple("standard", "AAC", 48_000)
+                else -> {
+                    val ext = fileName.substringAfterLast('.', "")
+                    val guessedCodec = when (ext) {
+                        "FLAC" -> "FLAC"
+                        "MP3" -> "MP3"
+                        "M4A" -> "AAC"
+                        "OGG" -> "OGG"
+                        "APE" -> "APE"
+                        else -> ""
+                    }
+                    Triple(fallbackLevel, guessedCodec, 0)
+                }
+            }
+            val detail = details.firstOrNull { it.quality.level == detectedLevel }
+            val bitrate = if (baseBitrate > 0) baseBitrate else (detail?.audio?.bitrate ?: 0)
+            val sampleRate = detail?.audio?.sampleRate ?: 0
+            val bits = detail?.audio?.bits ?: 0
+            return btm.m.auraplayer.playback.StreamInfo(
+                level = detectedLevel,
+                codec = codec.ifBlank { detail?.audio?.codec.orEmpty() },
+                bitrate = bitrate,
+                sampleRate = sampleRate,
+                bits = bits,
+            )
+        }
+    }
 
     private val resolvedUrlCache = object : LinkedHashMap<String, CachedQqUrl>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedQqUrl>?) = size > 128
@@ -220,21 +356,63 @@ class QqMusicApi(
         CloudPage(albums, offset + albums.size, hasMore, total.takeIf { it > 0 })
     }
 
-    fun resolveBlocking(songmid: String): String {
-        val urlKey = "${cacheScope()}:$songmid"
+    suspend fun qualityDetails(songmid: String): List<btm.m.auraplayer.playback.CloudQuality> = withContext(Dispatchers.IO) {
+        if (songmid.isBlank()) return@withContext emptyList()
+        if (!usingCustomEndpoint) {
+            return@withContext official.qualityDetails(songmid)
+        }
+        val response = runCatching { requestBlocking("song", mapOf("songmid" to songmid)) }
+        val track = response.getOrNull()?.optJSONObject("data")?.optJSONObject("track_info")
+        if (track != null) {
+            official.rememberTrackInfo(songmid, track)
+            val parsed = parseTrackQualities(track)
+            if (parsed.isNotEmpty()) return@withContext parsed
+        }
+        val cached = official.cachedQualities(songmid)
+        if (cached.isNotEmpty()) return@withContext cached
+        response.exceptionOrNull()?.let { throw it }
+        emptyList()
+    }
+
+    fun resolveBlocking(songmid: String, level: String = "standard"): String {
+        val urlKey = "${cacheScope()}:$songmid:$level"
         val now = System.currentTimeMillis()
         synchronized(resolvedUrlCache) {
-            resolvedUrlCache[urlKey]?.takeIf { it.expiresAtMs > now }?.let { return it.url }
+            resolvedUrlCache[urlKey]?.takeIf { it.expiresAtMs > now }?.let { cached ->
+                btm.m.auraplayer.playback.PlaybackStreams.qqRecords[songmid] = cached.info
+                return cached.url
+            }
         }
         val resolved = if (!usingCustomEndpoint) {
-            official.resolveBlocking(songmid)
+            official.resolveBlocking(songmid, level)
         } else {
-            val response = requestBlocking("song/url", mapOf("id" to songmid, "type" to "128"))
-            val url = response.optString("data").takeIf { it.isNotBlank() && it != "null" } ?: throw IOException("UNAVAILABLE_SONG")
-            url.toHttpUrl().newBuilder().scheme("https").build().toString()
+            val types = when (level) {
+                "hires", "lossless", "jymaster", "vivid", "jyeffect", "sky", "dolby" -> listOf("flac", "320", "128")
+                "exhigh", "higher" -> listOf("320", "128")
+                else -> listOf("128")
+            }
+            var resolvedUrl: String? = null
+            for (type in types) {
+                val url = runCatching {
+                    requestBlocking("song/url", mapOf("id" to songmid, "type" to type))
+                        .optString("data").takeIf { it.isNotBlank() && it != "null" }
+                }.getOrNull()
+                if (url != null) {
+                    resolvedUrl = url.toHttpUrl().newBuilder().scheme("https").build().toString()
+                    break
+                }
+            }
+            val finalUrl = resolvedUrl ?: throw IOException("UNAVAILABLE_SONG")
+            val info = streamInfoFromUrl(finalUrl, level, official.cachedQualities(songmid))
+            btm.m.auraplayer.playback.PlaybackStreams.qqRecords[songmid] = info
+            finalUrl
         }
+        val streamInfo = btm.m.auraplayer.playback.PlaybackStreams.qqRecords[songmid]
+            ?: streamInfoFromUrl(resolved, level, official.cachedQualities(songmid)).also {
+                btm.m.auraplayer.playback.PlaybackStreams.qqRecords[songmid] = it
+            }
         synchronized(resolvedUrlCache) {
-            resolvedUrlCache[urlKey] = CachedQqUrl(resolved, now + 8L * 60 * 1000)
+            resolvedUrlCache[urlKey] = CachedQqUrl(resolved, streamInfo, now + 8L * 60 * 1000)
         }
         return resolved
     }
@@ -303,6 +481,7 @@ class QqMusicApi(
         val albumMid = o.optString("albummid", o.optJSONObject("album")?.optString("mid").orEmpty())
         val album = o.optString("albumname", o.optJSONObject("album")?.optString("name").orEmpty())
         val seconds = o.optLong("interval", 0L)
+        if (o.has("file")) official.rememberTrackInfo(mid, o, seconds)
         val pay = o.optJSONObject("pay")
         val vip = pay?.optInt("pay_play", pay.optInt("payplay", 0)) == 1 || o.optInt("isvip", 0) == 1
         Song(id, o.optString("songname", o.optString("name", o.optString("title"))), artist, album, 0, 0, seconds * 1000L,

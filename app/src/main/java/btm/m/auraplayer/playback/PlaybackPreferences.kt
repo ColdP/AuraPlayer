@@ -18,6 +18,18 @@ class PlaybackPreferences(context: Context) {
     var quality: StreamQuality
         get() = StreamQuality.entries.firstOrNull { it.level == prefs.getString("quality", "standard") } ?: StreamQuality.STANDARD
         set(value) { prefs.edit().putString("quality", value.level).apply() }
+    var neteaseQuality: StreamQuality
+        get() {
+            val raw = prefs.getString("netease_quality", null) ?: prefs.getString("quality", StreamQuality.STANDARD.level)
+            return StreamQuality.entries.firstOrNull { it.level == raw } ?: StreamQuality.STANDARD
+        }
+        set(value) { prefs.edit().putString("netease_quality", value.level).putString("quality", value.level).apply() }
+    var qqQuality: StreamQuality
+        get() = StreamQuality.entries.firstOrNull { it.level == prefs.getString("qq_quality", StreamQuality.STANDARD.level) }
+            ?: StreamQuality.STANDARD
+        set(value) { prefs.edit().putString("qq_quality", value.level).apply() }
+
+    fun defaultQualityFor(isQq: Boolean): StreamQuality = if (isQq) qqQuality else neteaseQuality
     /** Maximum stream quality allowed on metered (cellular) networks; null means follow [quality]. */
     var cellularQuality: StreamQuality?
         get() {
@@ -67,4 +79,15 @@ data class CloudQuality(val quality: StreamQuality, val audio: AudioDetails)
 data class DownloadSource(val url: String, val codec: String, val quality: StreamQuality)
 object PlaybackStreams {
     val records = java.util.concurrent.ConcurrentHashMap<Long, StreamInfo>()
+    val qqRecords = java.util.concurrent.ConcurrentHashMap<String, StreamInfo>()
+
+    fun forSong(song: btm.m.auraplayer.data.Song): StreamInfo? =
+        if (song.provider == btm.m.auraplayer.data.PROVIDER_QQ) {
+            val mid = song.uri.substringAfter("aura://qqmusic/", "").substringBefore('?').trim('/')
+            if (mid.isNotEmpty()) qqRecords[mid] else null
+        } else if (song.cloud) {
+            records[song.id]
+        } else {
+            null
+        }
 }

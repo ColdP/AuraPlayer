@@ -17,8 +17,9 @@ internal fun playbackAudioCacheKey(
     quality: String,
     scope: String = "",
 ): String? = when (provider) {
-    "netease" -> if (scope.isNotBlank()) "aura://netease/$trackId?quality=$quality&scope=$scope" else "aura://netease/$trackId?quality=$quality"
-    "qqmusic" -> "aura://qqmusic/$trackId?quality=standard"
+    "netease", "qqmusic" ->
+        if (scope.isNotBlank()) "aura://$provider/$trackId?quality=$quality&scope=$scope"
+        else "aura://$provider/$trackId?quality=$quality"
     else -> null
 }
 
@@ -36,6 +37,47 @@ object PlaybackAudioCache {
     private const val DEFAULT_MAX_BYTES = 2048L * 1024 * 1024
     private val holder = AtomicReference<SimpleCache?>(null)
     private val trialKeys = java.util.Collections.synchronizedSet(HashSet<String>())
+    private val streamMetaMemory = java.util.concurrent.ConcurrentHashMap<String, StreamInfo>()
+
+    private fun streamMetaPrefs(context: Context) =
+        context.applicationContext.getSharedPreferences("aura.playback.stream_meta", Context.MODE_PRIVATE)
+
+    internal fun saveStreamInfo(context: Context, key: String, info: StreamInfo) {
+        if (key.isBlank()) return
+        streamMetaMemory[key] = info
+        val encoded = org.json.JSONObject()
+            .put("level", info.level)
+            .put("codec", info.codec)
+            .put("bitrate", info.bitrate)
+            .put("sampleRate", info.sampleRate)
+            .put("bits", info.bits)
+            .put("isTrial", info.isTrial)
+            .toString()
+        streamMetaPrefs(context).edit().putString(key, encoded).apply()
+    }
+
+    internal fun readStreamInfo(context: Context, key: String): StreamInfo? {
+        if (key.isBlank()) return null
+        streamMetaMemory[key]?.let { return it }
+        val raw = streamMetaPrefs(context).getString(key, null) ?: return null
+        return runCatching {
+            val o = org.json.JSONObject(raw)
+            StreamInfo(
+                level = o.optString("level"),
+                codec = o.optString("codec"),
+                bitrate = o.optInt("bitrate"),
+                sampleRate = o.optInt("sampleRate"),
+                bits = o.optInt("bits"),
+                isTrial = o.optBoolean("isTrial"),
+            ).also { streamMetaMemory[key] = it }
+        }.getOrNull()
+    }
+
+    internal fun removeStreamInfo(context: Context, key: String) {
+        if (key.isBlank()) return
+        streamMetaMemory.remove(key)
+        streamMetaPrefs(context).edit().remove(key).apply()
+    }
 
     internal fun markTrialKey(key: String) {
         if (key.isNotBlank()) trialKeys.add(key)
@@ -86,6 +128,23 @@ object PlaybackAudioCache {
         return null
     }
 
+    /** Returns an already-cached QQ Music quality at or above [minQuality], preferring [preferred]. */
+    fun findCachedQqQuality(
+        context: Context,
+        mid: String,
+        preferred: StreamQuality,
+        minQuality: StreamQuality,
+    ): StreamQuality? {
+        if (mid.isBlank()) return null
+        if (isFullyCached(context, qqKey(context, mid, preferred.level))) return preferred
+        for (candidate in StreamQuality.entries.asReversed()) {
+            if (candidate.ordinal < minQuality.ordinal) break
+            if (candidate == preferred) continue
+            if (isFullyCached(context, qqKey(context, mid, candidate.level))) return candidate
+        }
+        return null
+    }
+
     @Synchronized
     fun trimToLimit(context: Context, maxBytes: Long) {
         val cache = holder.get() ?: return
@@ -109,6 +168,11 @@ object PlaybackAudioCache {
     internal fun key(context: Context, songId: Long, level: String): String {
         val scope = (context.applicationContext as? btm.m.auraplayer.AuraApplication)?.neteaseAudioCacheScope().orEmpty()
         return checkNotNull(playbackAudioCacheKey("netease", "$songId", level, scope))
+    }
+
+    internal fun qqKey(context: Context, mid: String, level: String): String {
+        val scope = (context.applicationContext as? btm.m.auraplayer.AuraApplication)?.qqAudioCacheScope().orEmpty()
+        return checkNotNull(playbackAudioCacheKey("qqmusic", mid, level, scope))
     }
 
     fun size(context: Context): Long = holder.get()?.cacheSpace ?: listOf(persistentDirectory(context), legacyDirectory(context))
@@ -137,6 +201,8 @@ object PlaybackAudioCache {
 
     @Synchronized
     fun clear(context: Context) {
+        streamMetaMemory.clear()
+        streamMetaPrefs(context).edit().clear().apply()
         holder.get()?.let { cache -> cache.keys.toList().forEach(cache::removeResource) }
         if (holder.get() == null) {
             persistentDirectory(context).deleteRecursively()

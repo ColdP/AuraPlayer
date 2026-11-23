@@ -18,12 +18,8 @@ object NetworkTrafficPolicy {
         val network = cm.activeNetwork ?: return cm.isActiveNetworkMetered
         val caps = cm.getNetworkCapabilities(network) ?: return cm.isActiveNetworkMetered
         if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) return false
-        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
-        ) {
-            return cm.isActiveNetworkMetered
-        }
-        true
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) return true
+        cm.isActiveNetworkMetered
     }.getOrDefault(false)
 }
 

@@ -107,6 +107,13 @@ class AuraApplication : Application(), SingletonImageLoader.Factory {
         val activeCookie = cookie.trim()
         return if (activeCookie.isNotEmpty()) "c${CloudMetadataCache.digest(activeCookie).take(12)}" else "guest"
     }
+    fun qqAudioCacheScope(): String {
+        activeStoredQqAccount()?.userId?.takeIf { it > 0L }?.let { return "q$it" }
+        val uin = qqUin.trim()
+        if (uin.isNotEmpty() && uin != "0") return "q$uin"
+        val activeCookie = qqCookie.trim()
+        return if (activeCookie.isNotEmpty()) "c${CloudMetadataCache.digest(activeCookie).take(12)}" else "guest"
+    }
     fun saveAccountSession(user: CloudAccount, cookieValue: String) =
         persistAccounts(MultiAccountStateCodec.upsertAndActivate(accountsState, user, cookieValue))
     fun switchAccount(userId: Long): StoredCloudAccount? {

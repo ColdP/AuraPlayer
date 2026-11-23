@@ -44,6 +44,7 @@ import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.R
 import btm.m.auraplayer.audio.usb.UsbExclusiveStatus
 import btm.m.auraplayer.data.AppleMusicMotionCoverManager
+import btm.m.auraplayer.data.isQq
 import btm.m.auraplayer.lyrics.PlayerLyricView
 import btm.m.auraplayer.lyrics.rememberSpatialGyroTilt
 import btm.m.auraplayer.lyrics.scaleSpatialParallaxTilt
@@ -2561,7 +2562,7 @@ internal fun PlayerProgressSection(
                     if (model.qualityError) add(DropdownItem(tr("quality_retry", "获取音质失败，点击重试"), onClick = model::refreshQualities))
                     val menuQualities = model.availableQualities.ifEmpty { actualQuality?.let { listOf(it) }.orEmpty() }
                     menuQualities.forEach { item ->
-                        add(DropdownItem(qualityName(item), selected = item == (actualQuality ?: model.quality), onClick = { model.selectQuality(item) }))
+                        add(DropdownItem(qualityName(item, song.isQq), selected = item == (actualQuality ?: model.quality), onClick = { model.selectQuality(item) }))
                     }
                     if (isEmpty()) add(DropdownItem(tr("quality_unavailable", "此歌曲暂无可用音质"), enabled = false))
                 }
@@ -2594,7 +2595,7 @@ internal fun PlayerProgressSection(
                                 .padding(horizontal = if (badgeBg != null) 11.dp else 7.dp, vertical = 2.dp),
                         ) {
                             Text(
-                                usbExclusivePrefix + qualityName(actualQuality ?: model.quality),
+                                usbExclusivePrefix + qualityName(actualQuality ?: model.quality, song.isQq),
                                 color = badgeFg,
                                 fontSize = 11.sp,
                                 lineHeight = 13.sp,
@@ -3755,17 +3756,32 @@ private fun Speaker(loud: Boolean, modifier: Modifier) {
     )
 }
 
-internal fun qualityName(value: StreamQuality): String = when (value) {
-    StreamQuality.STANDARD -> tr("quality_standard", "标准")
-    StreamQuality.HIGHER -> tr("quality_higher", "较高")
-    StreamQuality.HIGH -> tr("quality_high", "极高")
-    StreamQuality.LOSSLESS -> tr("quality_lossless", "无损")
-    StreamQuality.HIRES -> tr("quality_hires", "Hi-Res")
-    StreamQuality.SPATIAL -> tr("quality_spatial", "高清臻音")
-    StreamQuality.SURROUND -> tr("quality_surround", "沉浸环绕声")
-    StreamQuality.DOLBY -> tr("quality_dolby", "杜比全景声")
-    StreamQuality.VIVID -> tr("quality_vivid", "臻音全景声")
-    StreamQuality.MASTER -> tr("quality_master", "超清母带")
+internal fun qualityName(value: StreamQuality, isQq: Boolean = false): String = if (isQq) {
+    when (value) {
+        StreamQuality.STANDARD -> tr("quality_standard", "标准")
+        StreamQuality.HIGHER -> tr("quality_higher", "较高")
+        StreamQuality.HIGH -> tr("qq_quality_high", "HQ 高品质")
+        StreamQuality.LOSSLESS -> tr("qq_quality_lossless", "SQ 无损品质")
+        StreamQuality.HIRES -> tr("quality_hires", "Hi-Res")
+        StreamQuality.SPATIAL -> tr("qq_quality_spatial", "臻品音质")
+        StreamQuality.SURROUND -> tr("quality_surround", "沉浸环绕声")
+        StreamQuality.DOLBY -> tr("quality_dolby", "杜比全景声")
+        StreamQuality.VIVID -> tr("qq_quality_vivid", "臻品全景声")
+        StreamQuality.MASTER -> tr("qq_quality_master", "臻品母带")
+    }
+} else {
+    when (value) {
+        StreamQuality.STANDARD -> tr("quality_standard", "标准")
+        StreamQuality.HIGHER -> tr("quality_higher", "较高")
+        StreamQuality.HIGH -> tr("quality_high", "极高")
+        StreamQuality.LOSSLESS -> tr("quality_lossless", "无损")
+        StreamQuality.HIRES -> tr("quality_hires", "Hi-Res")
+        StreamQuality.SPATIAL -> tr("quality_spatial", "高清臻音")
+        StreamQuality.SURROUND -> tr("quality_surround", "沉浸环绕声")
+        StreamQuality.DOLBY -> tr("quality_dolby", "杜比全景声")
+        StreamQuality.VIVID -> tr("quality_vivid", "臻音全景声")
+        StreamQuality.MASTER -> tr("quality_master", "超清母带")
+    }
 }
 
 private fun timeText(ms: Long) = "${ms.coerceAtLeast(0) / 60000}:${(ms.coerceAtLeast(0) / 1000 % 60).toString().padStart(2, '0')}"

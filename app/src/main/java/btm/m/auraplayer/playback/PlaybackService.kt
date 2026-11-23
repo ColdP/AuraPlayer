@@ -82,20 +82,32 @@ class PlaybackService : MediaSessionService() {
         val resolving = ResolvingDataSource.Factory(http) { spec ->
             if (spec.uri.scheme == "aura" && spec.uri.host == "netease") {
                 val id = spec.uri.lastPathSegment?.toLongOrNull() ?: throw java.io.IOException("INVALID_SONG")
-                val level = spec.uri.getQueryParameter("quality") ?: PlaybackPreferences(this).quality.level
+                val level = spec.uri.getQueryParameter("quality") ?: PlaybackPreferences(this).defaultQualityFor(isQq = false).level
                 val resolvedUrl = app.api.resolveBlocking(id, level)
                 val cacheKey = playbackAudioCacheKey("netease", "$id", level, app.neteaseAudioCacheScope())
+                val resolvedInfo = PlaybackStreams.records[id]
                 if (cacheKey != null) {
-                    if (PlaybackStreams.records[id]?.isTrial == true) {
+                    if (resolvedInfo?.isTrial == true) {
                         PlaybackAudioCache.markTrialKey(cacheKey)
+                        PlaybackAudioCache.removeStreamInfo(this, cacheKey)
                     } else {
                         PlaybackAudioCache.clearTrialKey(cacheKey)
+                        if (resolvedInfo != null) {
+                            PlaybackAudioCache.saveStreamInfo(this, cacheKey, resolvedInfo)
+                        }
                     }
                 }
                 spec.withUri(Uri.parse(resolvedUrl))
             } else if (spec.uri.scheme == "aura" && spec.uri.host == "qqmusic") {
                 val mid = spec.uri.lastPathSegment ?: throw java.io.IOException("INVALID_SONG")
-                spec.withUri(Uri.parse(app.qq.resolveBlocking(mid)))
+                val level = spec.uri.getQueryParameter("quality") ?: PlaybackPreferences(this).defaultQualityFor(isQq = true).level
+                val resolvedUrl = app.qq.resolveBlocking(mid, level)
+                val cacheKey = playbackAudioCacheKey("qqmusic", mid, level, app.qqAudioCacheScope())
+                val resolvedInfo = PlaybackStreams.qqRecords[mid]
+                if (cacheKey != null && resolvedInfo != null) {
+                    PlaybackAudioCache.saveStreamInfo(this, cacheKey, resolvedInfo)
+                }
+                spec.withUri(Uri.parse(resolvedUrl))
             } else spec
         }
         val cacheSource = androidx.media3.datasource.cache.CacheDataSource.Factory()
@@ -105,29 +117,42 @@ class PlaybackService : MediaSessionService() {
         val cloudSource = ResolvingDataSource.Factory(cacheSource) { spec ->
             val uri = spec.uri
             if (uri.scheme == "aura") {
+                val host = uri.host.orEmpty()
                 val trackId = uri.lastPathSegment
-                if (trackId != null) {
+                if (trackId != null && (host == "netease" || host == "qqmusic")) {
                     val prefs = PlaybackPreferences(this)
-                    val requestedLevel = uri.getQueryParameter("quality") ?: prefs.quality.level
-                    val effectiveLevel = if (uri.host == "netease") {
-                        val songId = trackId.toLongOrNull() ?: 0L
-                        val requestedQuality = StreamQuality.entries.firstOrNull { it.level == requestedLevel } ?: StreamQuality.STANDARD
-                        val metered = btm.m.auraplayer.data.NetworkTrafficPolicy.isMetered(this)
-                        val targetQuality = prefs.effectiveQuality(requestedQuality, metered)
-                        if (metered && targetQuality != requestedQuality && songId > 0L) {
-                            (PlaybackAudioCache.findCachedQuality(this, songId, requestedQuality, targetQuality) ?: targetQuality).level
+                    val requestedLevel = uri.getQueryParameter("quality") ?: prefs.defaultQualityFor(host == "qqmusic").level
+                    val manualOverride = uri.getQueryParameter("manual") == "1"
+                    val requestedQuality = StreamQuality.entries.firstOrNull { it.level == requestedLevel } ?: StreamQuality.STANDARD
+                    val metered = !manualOverride && btm.m.auraplayer.data.NetworkTrafficPolicy.isMetered(this)
+                    val targetQuality = prefs.effectiveQuality(requestedQuality, metered)
+                    val scope = if (host == "netease") app.neteaseAudioCacheScope() else app.qqAudioCacheScope()
+                    val effectiveLevel = if (metered && targetQuality != requestedQuality) {
+                        val cached = if (host == "netease") {
+                            trackId.toLongOrNull()?.let { songId ->
+                                PlaybackAudioCache.findCachedQuality(this, songId, requestedQuality, targetQuality)
+                            }
                         } else {
-                            targetQuality.level
+                            PlaybackAudioCache.findCachedQqQuality(this, trackId, requestedQuality, targetQuality)
                         }
+                        (cached ?: targetQuality).level
                     } else {
-                        requestedLevel
+                        targetQuality.level
                     }
-                    val scope = if (uri.host == "netease") app.neteaseAudioCacheScope() else ""
-                    val key = playbackAudioCacheKey(uri.host.orEmpty(), trackId, effectiveLevel, scope)
+                    val key = playbackAudioCacheKey(host, trackId, effectiveLevel, scope)
                     if (key != null && PlaybackAudioCache.isTrialKey(key)) {
                         runCatching { audioCache.removeResource(key) }
                     }
-                    val effectiveUri = if (uri.host == "netease" && effectiveLevel != uri.getQueryParameter("quality")) {
+                    if (key != null && PlaybackAudioCache.isFullyCached(this, key)) {
+                        val restored = PlaybackAudioCache.readStreamInfo(this, key)
+                            ?: StreamInfo(level = effectiveLevel, codec = "", bitrate = 0, sampleRate = 0)
+                        if (host == "netease") {
+                            trackId.toLongOrNull()?.let { songId -> PlaybackStreams.records[songId] = restored }
+                        } else {
+                            PlaybackStreams.qqRecords[trackId] = restored
+                        }
+                    }
+                    val effectiveUri = if (effectiveLevel != uri.getQueryParameter("quality") || manualOverride) {
                         uri.buildUpon().clearQuery().appendQueryParameter("quality", effectiveLevel).build()
                     } else {
                         uri
@@ -540,9 +565,18 @@ class PlaybackService : MediaSessionService() {
         repeat(player.mediaItemCount) { index ->
             val item = player.getMediaItemAt(index)
             val md = item.mediaMetadata
+            val rawUri = item.localConfiguration?.uri
+            val savedUri = if (rawUri != null && rawUri.scheme == "aura" && rawUri.getQueryParameter("manual") != null) {
+                val q = rawUri.getQueryParameter("quality")
+                rawUri.buildUpon().clearQuery().apply {
+                    if (!q.isNullOrBlank()) appendQueryParameter("quality", q)
+                }.build().toString()
+            } else {
+                rawUri?.toString().orEmpty()
+            }
             editor.putString("item.$index", JSONObject().apply {
                 put("id", item.mediaId)
-                put("uri", item.localConfiguration?.uri?.toString().orEmpty())
+                put("uri", savedUri)
                 put("title", md.title?.toString().orEmpty())
                 put("artist", md.artist?.toString().orEmpty())
                 put("album", md.albumTitle?.toString().orEmpty())

@@ -123,9 +123,9 @@ internal fun SongActionsSheet(model: AuraViewModel, request: SongActionRequest, 
             divider()
             val groupModifier = if (expressive != null) Modifier.fillMaxWidth().padding(horizontal = 16.dp) else Modifier.fillMaxWidth()
             Column(groupModifier, verticalArrangement = Arrangement.spacedBy(if (expressive != null) 2.dp else 0.dp)) {
-                if (song.cloud) SongDownloadPreference(model, song, show, request.backdrop, expressive = expressive, position = SheetItemPosition.TOP)
+                if (song.netease) SongDownloadPreference(model, song, show, request.backdrop, expressive = expressive, position = SheetItemPosition.TOP)
                 action(MiuixIcons.Regular.Layers, tr("play_next", "下一首播放"),
-                    position = if (song.cloud) SheetItemPosition.MIDDLE else SheetItemPosition.TOP) { model.enqueueNext(song); dismiss() }
+                    position = if (song.netease) SheetItemPosition.MIDDLE else SheetItemPosition.TOP) { model.enqueueNext(song); dismiss() }
                 action(MiuixIcons.Regular.Playlist, tr("add_to_queue", "添加到播放队列"), position = SheetItemPosition.MIDDLE) { model.enqueue(song); dismiss() }
                 action(MiuixIcons.Regular.AddFolder, tr("add_to_playlist", "收藏到歌单"),
                     position = if (request.remove != null) SheetItemPosition.MIDDLE else SheetItemPosition.BOTTOM) { playlistMounted = true; playlistOpen = true }

@@ -506,6 +506,34 @@ private fun LazyListScope.neteaseCloudItems(
     }
     item(key = "netease_features") {
         SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+            val neteaseQualityOptions = listOf(
+                btm.m.auraplayer.playback.StreamQuality.STANDARD,
+                btm.m.auraplayer.playback.StreamQuality.HIGHER,
+                btm.m.auraplayer.playback.StreamQuality.HIGH,
+                btm.m.auraplayer.playback.StreamQuality.LOSSLESS,
+                btm.m.auraplayer.playback.StreamQuality.SPATIAL,
+                btm.m.auraplayer.playback.StreamQuality.SURROUND,
+                btm.m.auraplayer.playback.StreamQuality.VIVID,
+                btm.m.auraplayer.playback.StreamQuality.MASTER,
+            )
+            val neteaseQualityLabels = listOf(
+                tr("quality_standard", "标准"),
+                tr("quality_higher", "较高"),
+                tr("quality_high", "极高"),
+                tr("quality_lossless", "无损"),
+                tr("quality_spatial", "高清臻音"),
+                tr("quality_surround", "沉浸环绕声"),
+                tr("quality_vivid", "臻音全景声"),
+                tr("quality_master", "超清母带"),
+            )
+            GlassDropdownPreference(
+                title = tr("default_playback_quality", "默认播放音质"),
+                items = neteaseQualityLabels,
+                selectedIndex = neteaseQualityOptions.indexOf(model.neteaseQuality).coerceAtLeast(0),
+                backdrop = LocalToolbarBackdrop.current,
+            ) { index ->
+                model.changeNeteaseQuality(neteaseQualityOptions[index])
+            }
             Preference(tr("downloaded_music", "已下载的音乐"), onClick = { open("downloads") })
             if (includeCachePreference) CloudCachePreference(model)
             SwitchPreference(tr("heartbeat_mode", "心动模式"), checked = model.settings.value.heartbeatEnabled,
@@ -592,6 +620,32 @@ private fun LazyListScope.qqCloudItems(
     }
     item(key = "qq_features") {
         SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+            val qqQualityOptions = listOf(
+                btm.m.auraplayer.playback.StreamQuality.STANDARD,
+                btm.m.auraplayer.playback.StreamQuality.HIGH,
+                btm.m.auraplayer.playback.StreamQuality.LOSSLESS,
+                btm.m.auraplayer.playback.StreamQuality.HIRES,
+                btm.m.auraplayer.playback.StreamQuality.SPATIAL,
+                btm.m.auraplayer.playback.StreamQuality.VIVID,
+                btm.m.auraplayer.playback.StreamQuality.MASTER,
+            )
+            val qqQualityLabels = listOf(
+                tr("quality_standard", "标准"),
+                tr("qq_quality_high", "HQ 高品质"),
+                tr("qq_quality_lossless", "SQ 无损品质"),
+                tr("quality_hires", "Hi-Res"),
+                tr("qq_quality_spatial", "臻品音质"),
+                tr("qq_quality_vivid", "臻品全景声"),
+                tr("qq_quality_master", "臻品母带"),
+            )
+            GlassDropdownPreference(
+                title = tr("default_playback_quality", "默认播放音质"),
+                items = qqQualityLabels,
+                selectedIndex = qqQualityOptions.indexOf(model.qqQuality).coerceAtLeast(0),
+                backdrop = LocalToolbarBackdrop.current,
+            ) { index ->
+                model.changeQqQuality(qqQualityOptions[index])
+            }
             SwitchPreference(
                 title = tr("show_vip_badge", "显示 VIP 歌曲标识"),
                 checked = model.settings.value.qqShowVipBadge,

@@ -79,4 +79,12 @@ class OfficialNeteaseClientTest {
         assertEquals("/weapi/playlist/manipulate/tracks", server.takeRequest().path)
         assertEquals(2, server.requestCount)
     }
+    @Test fun musicDetailUsesEapiFirstAndFallsBackToWeapiWhenEmpty() = withServer { server, client ->
+        server.enqueue(MockResponse().setBody("""{"code":200,"data":{}}"""))
+        server.enqueue(MockResponse().setBody("""{"code":200,"data":{"l":{"br":128000},"sq":{"br":900000}}}"""))
+        val result = client.request("song/music/detail", mapOf("id" to "42"), true)
+        assertTrue(NeteaseApi.hasQualityDetails(result))
+        assertEquals("/eapi/song/music/detail/get", server.takeRequest().path)
+        assertEquals("/weapi/song/music/detail/get", server.takeRequest().path)
+    }
 }

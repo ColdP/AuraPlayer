@@ -118,7 +118,10 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     var playing by mutableStateOf(false); private set
     var playbackRequested by mutableStateOf(false); private set
     val playbackPreferences = btm.m.auraplayer.playback.PlaybackPreferences(application)
-    var quality by mutableStateOf(playbackPreferences.quality); private set
+    var neteaseQuality by mutableStateOf(playbackPreferences.neteaseQuality); private set
+    var qqQuality by mutableStateOf(playbackPreferences.qqQuality); private set
+    val quality: btm.m.auraplayer.playback.StreamQuality
+        get() = if (current?.isQq == true) qqQuality else neteaseQuality
     var cellularQuality by mutableStateOf(playbackPreferences.cellularQuality); private set
     var wifiOnlyMotionCover by mutableStateOf(playbackPreferences.wifiOnlyMotionCover); private set
     var audioCacheMaxMb by mutableIntStateOf(playbackPreferences.audioCacheMaxMb); private set
@@ -149,6 +152,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private val downloadsListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> refreshDownloadedSongs() }
     var streamInfo by mutableStateOf<btm.m.auraplayer.playback.StreamInfo?>(null); private set
     private var qualityJob: Job? = null
+    private var qualitySongKey: String? = null
     var localAudioDetails by mutableStateOf<btm.m.auraplayer.playback.AudioDetails?>(null); private set
     private var localAudioBase: btm.m.auraplayer.playback.AudioDetails? = null
     private var audioJob: Job? = null
@@ -403,8 +407,15 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
             current = player.currentMediaItem?.let(::songFor)
-            current?.takeIf { it.key != lastCurrentKey }?.let { song ->
-                lastCurrentKey = song.key
+            if (current?.key != lastCurrentKey) {
+                lastCurrentKey = current?.key
+                qualityJob?.cancel()
+                qualitySongKey = null
+                qualityLoading = false
+                qualityError = false
+                availableQualities = emptyList()
+                qualityDetails = emptyList()
+                streamInfo = current?.let(btm.m.auraplayer.playback.PlaybackStreams::forSong)
             }
             queue = (0 until player.mediaItemCount).map { songFor(player.getMediaItemAt(it)) }
             queueIndex = player.currentMediaItemIndex
@@ -450,7 +461,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             while (isActive) {
                 controller?.let { player ->
-                    streamInfo = current?.takeIf { it.netease }?.let { btm.m.auraplayer.playback.PlaybackStreams.records[it.id] }
+                    streamInfo = current?.let(btm.m.auraplayer.playback.PlaybackStreams::forSong)
                     position = player.currentPosition.coerceAtLeast(0)
                     duration = player.duration.takeIf { it > 0 } ?: current?.duration ?: 0
                     sleepRemaining = (playbackPreferences.sleepDeadline - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0L)
@@ -724,8 +735,27 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         player.prepare()
         player.play()
     }
-    private fun mediaItem(song: Song): MediaItem = mediaItem(song, 0L)
-    private fun mediaItem(song: Song, sourceId: Long) = MediaItem.Builder().setMediaId(song.key).setUri(if (song.cloud) android.net.Uri.parse(song.uri).buildUpon().appendQueryParameter("quality", quality.level).build().toString() else song.uri)
+    private fun mediaItem(song: Song): MediaItem = mediaItem(song, 0L, false, null)
+    private fun mediaItem(
+        song: Song,
+        sourceId: Long = 0L,
+        manualQuality: Boolean = false,
+        qualityOverride: btm.m.auraplayer.playback.StreamQuality? = null,
+    ): MediaItem {
+        val targetQuality = qualityOverride ?: if (song.isQq) qqQuality else neteaseQuality
+        val uri = if (song.cloud) {
+            val base = android.net.Uri.parse(song.uri)
+            base.buildUpon().clearQuery().apply {
+                for (name in base.queryParameterNames) {
+                    if (name != "quality" && name != "manual") {
+                        base.getQueryParameters(name).forEach { value -> appendQueryParameter(name, value) }
+                    }
+                }
+                appendQueryParameter("quality", targetQuality.level)
+                if (manualQuality) appendQueryParameter("manual", "1")
+            }.build().toString()
+        } else song.uri
+        return MediaItem.Builder().setMediaId(song.key).setUri(uri)
         .setMediaMetadata(MediaMetadata.Builder().setTitle(song.title).setArtist(song.artist).setAlbumTitle(song.album)
             .setExtras(android.os.Bundle().apply {
                 putLong("albumId", song.albumId); putLong("artistId", song.artistId)
@@ -733,6 +763,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 putString("artists", encodeSongArtists(song.artists))
             })
             .setDurationMs(song.duration).setArtworkUri(song.artwork.takeIf { it.isNotBlank() }?.let(android.net.Uri::parse)).build()).build()
+    }
 
     /** Retro home suggestions queue immediately after the current song. */
     fun playNext(tracks: List<Song>) {
@@ -751,13 +782,24 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private fun songFor(item: MediaItem): Song = knownSongs.getOrPut(item.mediaId) {
         val md = item.mediaMetadata
         val cloud = item.mediaId.startsWith("cloud:")
-        Song(item.mediaId.substringAfter(':').toLongOrNull() ?: item.mediaId.hashCode().toLong(),
+        val isQq = item.mediaId.startsWith("cloud:qq:")
+        val itemUri = item.localConfiguration?.uri
+        val cleanUri = when {
+            !cloud -> item.mediaId.removePrefix("local:")
+            itemUri != null && itemUri.scheme == "aura" -> itemUri.buildUpon().clearQuery().build().toString()
+            isQq -> "aura://qqmusic/${item.mediaId.removePrefix("cloud:qq:")}"
+            else -> "aura://netease/${item.mediaId.removePrefix("cloud:")}"
+        }
+        val numericId = item.mediaId.removePrefix("cloud:qq:").removePrefix("cloud:").toLongOrNull()
+            ?: item.mediaId.hashCode().toLong()
+        Song(numericId,
             md.title?.toString().orEmpty(), md.artist?.toString().orEmpty(), md.albumTitle?.toString().orEmpty(),
             albumId = md.extras?.getLong("albumId") ?: 0L, artistId = md.extras?.getLong("artistId") ?: 0L,
             duration = item.mediaMetadata.durationMs ?: 0,
-            uri = if (cloud) "aura://netease/${item.mediaId.substringAfter(':')}" else item.mediaId.removePrefix("local:"),
+            uri = cleanUri,
             artwork = md.artworkUri?.toString().orEmpty(), cloud = cloud,
-            artists = decodeSongArtists(md.extras?.getString("artists")))
+            artists = decodeSongArtists(md.extras?.getString("artists")),
+            provider = if (isQq) PROVIDER_QQ else "")
     }
     private fun loadLyrics(song: Song?) {
         if (lyricKey == song?.key) return
@@ -841,39 +883,116 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         player.repeatMode = Player.REPEAT_MODE_ALL
     }
     fun refreshQualities() {
-        val song = current?.takeIf { it.netease } ?: return
+        val song = current?.takeIf { it.cloud } ?: return
         qualityJob?.cancel()
+        val sameSong = qualitySongKey == song.key
         qualityJob = viewModelScope.launch {
-            qualityLoading = true; qualityError = false; availableQualities = emptyList(); qualityDetails = emptyList()
+            qualityLoading = true; qualityError = false
+            if (!sameSong) {
+                availableQualities = emptyList()
+                qualityDetails = emptyList()
+            }
+            qualitySongKey = song.key
+            val streamFallback = streamInfo?.let { stream ->
+                btm.m.auraplayer.playback.StreamQuality.entries.firstOrNull { it.level == stream.level }?.let {
+                    listOf(btm.m.auraplayer.playback.CloudQuality(it, btm.m.auraplayer.playback.AudioDetails(
+                        codec = stream.codec, sampleRate = stream.sampleRate, bits = stream.bits, bitrate = stream.bitrate)))
+                }
+            }.orEmpty()
             try {
-                val fetched = app.api.qualityDetails(song.id)
+                val fetched = if (song.isQq) app.qq.qualityDetails(song.qqMid()) else app.api.qualityDetails(song.id)
                 // The stream endpoint can already have resolved a usable level while
-                // music/detail returns no catalogue (this is common for guest/DRM
-                // tracks). Keep that actual level selectable instead of showing an
-                // empty menu.
-                val levels = if (fetched.isNotEmpty()) fetched else streamInfo?.let { stream ->
-                    btm.m.auraplayer.playback.StreamQuality.entries.firstOrNull { it.level == stream.level }?.let {
-                        listOf(btm.m.auraplayer.playback.CloudQuality(it, btm.m.auraplayer.playback.AudioDetails(
-                            codec = stream.codec, sampleRate = stream.sampleRate, bits = stream.bits, bitrate = stream.bitrate)))
-                    }
-                }.orEmpty()
+                // detail returns no catalogue (this is common for guest/DRM tracks).
+                val levels = if (fetched.isNotEmpty()) fetched else streamFallback
                 if (current?.key == song.key) { qualityDetails = levels; availableQualities = levels.map { it.quality } }
             }
             catch (e: CancellationException) { throw e }
-            catch (_: Exception) { qualityError = true }
-            finally { qualityLoading = false }
+            catch (_: Exception) {
+                if (current?.key == song.key) {
+                    qualityError = true
+                    if (qualityDetails.isEmpty() && streamFallback.isNotEmpty()) {
+                        qualityDetails = streamFallback
+                        availableQualities = streamFallback.map { it.quality }
+                    }
+                }
+            }
+            finally { if (current?.key == song.key) qualityLoading = false }
         }
     }
     fun selectQuality(value: btm.m.auraplayer.playback.StreamQuality) {
-        if (quality == value) return
-        quality = value; playbackPreferences.quality = value
-        val player = controller ?: return
+        val player = controller
+        val activeSong = current
+        val activeIsQq = activeSong?.isQq == true
+        val activeDefault = if (activeIsQq) qqQuality else neteaseQuality
+        val currentUriQuality = player?.currentMediaItem?.localConfiguration?.uri?.getQueryParameter("quality")
+        val actualLevel = streamInfo?.level
+        val metered = btm.m.auraplayer.data.NetworkTrafficPolicy.isMetered(app)
+        val cappedByCellular = metered && cellularQuality != null && value.ordinal > cellularQuality!!.ordinal
+        val needsReload = activeDefault != value ||
+            (activeSong?.cloud == true && (currentUriQuality != value.level || (actualLevel != null && actualLevel != value.level))) ||
+            cappedByCellular
+        if (!needsReload) return
+        if (activeIsQq) {
+            qqQuality = value
+            playbackPreferences.qqQuality = value
+        } else {
+            neteaseQuality = value
+            playbackPreferences.neteaseQuality = value
+        }
+        if (player == null) return
+        activeSong?.let { active ->
+            if (active.isQq) btm.m.auraplayer.playback.PlaybackStreams.qqRecords.remove(active.qqMid())
+            else if (active.netease) btm.m.auraplayer.playback.PlaybackStreams.records.remove(active.id)
+            streamInfo = null
+        }
         val index = player.currentMediaItemIndex
         val pos = player.currentPosition
         val resume = player.playWhenReady
         // Replace cloud URIs so ExoPlayer resolves the newly requested level, preserving queue/time.
-        val items = (0 until player.mediaItemCount).map { mediaItem(songFor(player.getMediaItemAt(it))) }
+        val items = (0 until player.mediaItemCount).map { i ->
+            val itemSong = songFor(player.getMediaItemAt(i))
+            mediaItem(itemSong, manualQuality = itemSong.isQq == activeIsQq, qualityOverride = if (itemSong.isQq == activeIsQq) value else null)
+        }
         if (items.isNotEmpty()) { player.setMediaItems(items, index.coerceIn(items.indices), pos); player.prepare(); player.playWhenReady = resume }
+    }
+    fun changeNeteaseQuality(value: btm.m.auraplayer.playback.StreamQuality) {
+        if (neteaseQuality == value) return
+        neteaseQuality = value
+        playbackPreferences.neteaseQuality = value
+        applyDefaultQualityToQueue(targetIsQq = false, value = value)
+    }
+    fun changeQqQuality(value: btm.m.auraplayer.playback.StreamQuality) {
+        if (qqQuality == value) return
+        qqQuality = value
+        playbackPreferences.qqQuality = value
+        applyDefaultQualityToQueue(targetIsQq = true, value = value)
+    }
+    private fun applyDefaultQualityToQueue(targetIsQq: Boolean, value: btm.m.auraplayer.playback.StreamQuality) {
+        val player = controller ?: return
+        if (player.mediaItemCount == 0) return
+        val index = player.currentMediaItemIndex
+        val currentSong = player.currentMediaItem?.let(::songFor)
+        val currentMatches = currentSong?.cloud == true && currentSong.isQq == targetIsQq
+        if (currentMatches) {
+            currentSong?.let { active ->
+                if (active.isQq) btm.m.auraplayer.playback.PlaybackStreams.qqRecords.remove(active.qqMid())
+                else if (active.netease) btm.m.auraplayer.playback.PlaybackStreams.records.remove(active.id)
+                streamInfo = null
+            }
+            val pos = player.currentPosition
+            val resume = player.playWhenReady
+            val items = (0 until player.mediaItemCount).map { i -> mediaItem(songFor(player.getMediaItemAt(i))) }
+            player.setMediaItems(items, index.coerceIn(items.indices), pos)
+            player.prepare()
+            player.playWhenReady = resume
+        } else {
+            for (i in 0 until player.mediaItemCount) {
+                val itemSong = songFor(player.getMediaItemAt(i))
+                if (itemSong.cloud && itemSong.isQq == targetIsQq) {
+                    player.replaceMediaItem(i, mediaItem(itemSong, qualityOverride = value))
+                }
+            }
+        }
     }
     fun changeCellularQuality(value: btm.m.auraplayer.playback.StreamQuality?) {
         cellularQuality = value

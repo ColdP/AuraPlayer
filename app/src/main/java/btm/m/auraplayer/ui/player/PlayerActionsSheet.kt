@@ -20,6 +20,8 @@ import androidx.compose.ui.unit.*
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.AuraApplication
 import btm.m.auraplayer.data.creditedArtists
+import btm.m.auraplayer.data.isQq
+import btm.m.auraplayer.data.netease
 import btm.m.auraplayer.playback.*
 import btm.m.auraplayer.ui.*
 import top.yukonga.miuix.kmp.basic.*
@@ -110,18 +112,20 @@ internal fun PlayerActionsSheet(model: AuraViewModel, show: Boolean, menuBackdro
             val group1Modifier = if (effectiveExpressive != null) Modifier.fillMaxWidth().padding(horizontal = 16.dp) else Modifier.fillMaxWidth()
             Column(group1Modifier, verticalArrangement = Arrangement.spacedBy(if (effectiveExpressive != null) 2.dp else 0.dp)) {
                 if (song.cloud) {
-                    SongDownloadPreference(model, song, show, menuBackdrop, expressive = effectiveExpressive, position = SheetItemPosition.TOP)
+                    if (song.netease) {
+                        SongDownloadPreference(model, song, show, menuBackdrop, expressive = effectiveExpressive, position = SheetItemPosition.TOP)
+                    }
                     val current = model.streamInfo?.let { stream -> levels.firstOrNull { it.quality.level == stream.level } }
                         ?: levels.firstOrNull { it.quality == model.quality }
-                    val summary = current?.let { cloudQualityText(it, model.streamInfo?.takeIf { s -> s.level == it.quality.level }, model.audioFormat) }
-                        ?: model.streamInfo?.let { stream -> StreamQuality.entries.firstOrNull { it.level == stream.level }?.let { cloudQualityText(CloudQuality(it, AudioDetails()), stream, model.audioFormat) } }
-                        ?: if (model.qualityLoading) tr("loading", "加载中…") else qualityName(model.quality)
+                    val summary = current?.let { cloudQualityText(it, model.streamInfo?.takeIf { s -> s.level == it.quality.level }, model.audioFormat, song.isQq) }
+                        ?: model.streamInfo?.let { stream -> StreamQuality.entries.firstOrNull { it.level == stream.level }?.let { cloudQualityText(CloudQuality(it, AudioDetails()), stream, model.audioFormat, song.isQq) } }
+                        ?: if (model.qualityLoading) tr("loading", "加载中…") else qualityName(model.quality, song.isQq)
                     SheetDropdown(MiuixIcons.Regular.AppRecording, tr("select_quality", "选择音质"), summary, menuBackdrop,
                         DropdownEntry(buildList {
                             if (model.qualityError) add(DropdownItem(tr("quality_retry", "获取音质失败，点击重试"), onClick = model::refreshQualities))
-                            addAll(qualityDropdownItems(levels, current?.quality ?: model.quality, { cloudQualityText(it) }) { model.selectQuality(it.quality) })
+                            addAll(qualityDropdownItems(levels, current?.quality ?: model.quality, { cloudQualityText(it, isQq = song.isQq) }) { model.selectQuality(it.quality) })
                             if (isEmpty()) add(DropdownItem(if (model.qualityLoading) tr("loading", "加载中…") else tr("quality_unavailable", "此歌曲暂无可用音质"), enabled = false))
-                        }), expressive = effectiveExpressive, position = SheetItemPosition.MIDDLE)
+                        }), expressive = effectiveExpressive, position = if (song.netease) SheetItemPosition.MIDDLE else SheetItemPosition.TOP)
                 }
                 action(MiuixIcons.Regular.VolumeUp, tr("audio_effects", "音效"), presetName(effectsState.current),
                     position = if (song.cloud) SheetItemPosition.BOTTOM else SheetItemPosition.SINGLE) { dismiss(); closePlayer(); openPage("audio_effects") }
@@ -209,12 +213,12 @@ internal fun qualityDropdownItems(
     DropdownItem(label(level), selected = level.quality == selected, onClick = { onSelected(level) })
 }
 
-internal fun cloudQualityText(value: CloudQuality, stream: StreamInfo? = null, format: androidx.media3.common.Format? = null): String {
+internal fun cloudQualityText(value: CloudQuality, stream: StreamInfo? = null, format: androidx.media3.common.Format? = null, isQq: Boolean = false): String {
     var audio = value.audio
     if (stream != null) audio = audio.copy(codec = stream.codec.ifBlank { audio.codec }, sampleRate = stream.sampleRate.takeIf { it > 0 } ?: audio.sampleRate,
         bitrate = stream.bitrate.takeIf { it > 0 } ?: audio.bitrate, bits = stream.bits.takeIf { it > 0 } ?: audio.bits).withFormat(format)
     return buildList {
-        add(qualityName(value.quality)); if (audio.codec.isNotBlank()) add(audio.codec.uppercase())
+        add(qualityName(value.quality, isQq)); if (audio.codec.isNotBlank()) add(audio.codec.uppercase())
         val specs = buildList {
             if (audio.sampleRate > 0) add("${java.text.DecimalFormat("0.###").format(audio.sampleRate / 1000.0)} ${tr("khz", "kHz")}")
             if (audio.bits > 0) add("${audio.bits}-${tr("bit", "bit")}")

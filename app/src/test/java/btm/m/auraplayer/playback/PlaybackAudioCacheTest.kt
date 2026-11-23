@@ -14,11 +14,12 @@ class PlaybackAudioCacheTest {
         assertEquals(DataSpec.FLAG_ALLOW_CACHE_FRAGMENTATION or DataSpec.FLAG_ALLOW_GZIP, flags)
     }
 
-    @Test fun neteaseCacheDistinguishesQualityAndQqCacheDoesNot() {
+    @Test fun cloudCacheDistinguishesQualityForBothNeteaseAndQq() {
         assertEquals("aura://netease/42?quality=lossless", playbackAudioCacheKey("netease", "42", "lossless"))
         assertNotEquals(playbackAudioCacheKey("netease", "42", "standard"), playbackAudioCacheKey("netease", "42", "lossless"))
-        assertEquals("aura://qqmusic/test?quality=standard", playbackAudioCacheKey("qqmusic", "test", "lossless"))
-        assertEquals(playbackAudioCacheKey("qqmusic", "test", "lossless"), playbackAudioCacheKey("qqmusic", "test", "standard"))
+        assertEquals("aura://qqmusic/test?quality=lossless", playbackAudioCacheKey("qqmusic", "test", "lossless"))
+        assertNotEquals(playbackAudioCacheKey("qqmusic", "test", "standard"), playbackAudioCacheKey("qqmusic", "test", "lossless"))
+        assertEquals("aura://qqmusic/test?quality=lossless&scope=q10086", playbackAudioCacheKey("qqmusic", "test", "lossless", "q10086"))
         assertNull(playbackAudioCacheKey("local", "42", "standard"))
     }
 

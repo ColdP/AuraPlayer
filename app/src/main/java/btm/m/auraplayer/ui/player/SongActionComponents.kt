@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.data.Song
+import btm.m.auraplayer.data.isQq
+import btm.m.auraplayer.data.qqMid
 import btm.m.auraplayer.download.MusicDownloads
 import btm.m.auraplayer.playback.*
 import btm.m.auraplayer.ui.*
@@ -284,12 +286,14 @@ internal fun SongDownloadPreference(
     LaunchedEffect(active, song.key, retry) {
         if (!active || !song.cloud) return@LaunchedEffect
         loading = true; failed = false
-        try { levels = model.app.api.qualityDetails(song.id) }
+        try {
+            levels = if (song.isQq) model.app.qq.qualityDetails(song.qqMid()) else model.app.api.qualityDetails(song.id)
+        }
         catch (e: CancellationException) { throw e }
         catch (_: Exception) { failed = true }
         finally { loading = false }
     }
-    val actual = if (model.current?.key == song.key) streamQuality(model.streamInfo) else streamQuality(PlaybackStreams.records[song.id])
+    val actual = if (model.current?.key == song.key) streamQuality(model.streamInfo) else streamQuality(PlaybackStreams.forSong(song))
     val options = (levels + listOfNotNull(actual)).distinctBy { it.quality }
     val revision = downloadRevision.intValue
     fun downloaded(quality: StreamQuality) = MusicDownloads.isDownloaded(context, song, quality)

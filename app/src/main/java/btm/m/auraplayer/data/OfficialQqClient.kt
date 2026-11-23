@@ -19,6 +19,70 @@ internal class OfficialQqClient(
 ) {
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
     private val ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+    private val trackInfoCache = java.util.concurrent.ConcurrentHashMap<String, QqTrackFileInfo>()
+
+    internal data class QqTrackFileInfo(
+        val mediaMid: String,
+        val intervalSec: Long,
+        val fileJson: JSONObject,
+        val qualities: List<btm.m.auraplayer.playback.CloudQuality>,
+    )
+
+    internal fun rememberTrackInfo(songmid: String, trackOrFile: JSONObject, intervalSec: Long = 0L) {
+        if (songmid.isBlank()) return
+        val file = trackOrFile.optJSONObject("file") ?: trackOrFile
+        val durationSec = trackOrFile.optLong("interval", intervalSec).coerceAtLeast(0L)
+        val mediaMid = file.optString("media_mid").ifBlank { songmid }
+        val qualities = QqMusicApi.parseTrackQualities(trackOrFile, durationSec)
+        if (qualities.isNotEmpty() || file.has("media_mid")) {
+            trackInfoCache[songmid] = QqTrackFileInfo(mediaMid, durationSec, file, qualities)
+        }
+    }
+
+    internal fun cachedQualities(songmid: String): List<btm.m.auraplayer.playback.CloudQuality> =
+        trackInfoCache[songmid]?.qualities.orEmpty()
+
+    internal fun qualityDetails(songmid: String): List<btm.m.auraplayer.playback.CloudQuality> {
+        val fetched = runCatching { fetchTrackInfo(songmid) }
+        fetched.getOrNull()?.let { info ->
+            if (info.qualities.isNotEmpty()) return info.qualities
+        }
+        val cached = trackInfoCache[songmid]?.qualities.orEmpty()
+        if (cached.isNotEmpty()) return cached
+        fetched.exceptionOrNull()?.let { throw it }
+        return emptyList()
+    }
+
+    private fun fetchTrackInfo(songmid: String): QqTrackFileInfo? {
+        val primary = runCatching {
+            musicu(mapOf("songinfo" to JSONObject().apply {
+                put("module", "music.pf_song_detail_svr")
+                put("method", "get_song_detail_yqq")
+                put("param", JSONObject().apply {
+                    put("song_mid", songmid)
+                    put("song_type", 0)
+                })
+            })).optJSONObject("songinfo")?.optJSONObject("data")?.optJSONObject("track_info")
+        }
+        val primaryTrack = primary.getOrNull()
+        if (primaryTrack != null) {
+            rememberTrackInfo(songmid, primaryTrack)
+            trackInfoCache[songmid]?.takeIf { it.qualities.isNotEmpty() }?.let { return it }
+        }
+        val fallback = runCatching {
+            val url = "$cOrigin/v8/fcg-bin/fcg_play_single_song.fcg?songmid=$songmid&tpl=yqq_song_detail&format=json"
+            getJson(url).optJSONArray("data")?.optJSONObject(0)
+        }
+        val fallbackTrack = fallback.getOrNull()
+        if (fallbackTrack != null) {
+            rememberTrackInfo(songmid, fallbackTrack)
+            trackInfoCache[songmid]?.let { return it }
+        }
+        if (primary.isFailure && fallback.isFailure) {
+            throw (primary.exceptionOrNull() ?: fallback.exceptionOrNull()!!)
+        }
+        return trackInfoCache[songmid]
+    }
 
     private fun cookies(): Map<String, String> = QqSession(cookie()).cookies
 
@@ -232,26 +296,116 @@ internal class OfficialQqClient(
         return CloudPage(songs, page, songs.isNotEmpty() && (total == 0 || page * pageSize < total), total.takeIf { it > 0 })
     }
 
-    fun resolveBlocking(songmid: String): String {
+    fun resolveBlocking(songmid: String, level: String = "standard"): String {
         val map = cookies()
         val effUin = effectiveUin()
-        val resp = musicu(mapOf("req_0" to JSONObject().apply {
-            put("module", "vkey.GetVkeyServer")
-            put("method", "CgiGetVkey")
-            put("param", JSONObject().apply {
-                put("guid", guid(map))
-                put("songmid", JSONArray().put(songmid))
-                put("songtype", JSONArray().put(0))
-                put("uin", effUin)
-                put("loginflag", 1)
-                put("platform", "20")
-            })
-        }))
-        val data = resp.optJSONObject("req_0")?.optJSONObject("data") ?: throw IOException("UNAVAILABLE_SONG")
-        val purl = data.optJSONArray("midurlinfo")?.optJSONObject(0)?.optString("purl").orEmpty()
-        if (purl.isBlank()) throw IOException("UNAVAILABLE_SONG")
-        val sip = data.optJSONArray("sip")?.optString(0)?.takeIf { it.isNotBlank() } ?: "https://isure.stream.qqmusic.qq.com/"
-        return sip.https().trimEnd('/') + "/" + purl.trimStart('/')
+        var info = trackInfoCache[songmid]
+        if (info == null && level != "standard") {
+            info = runCatching { fetchTrackInfo(songmid) }.getOrNull()
+        }
+        val mediaMid = info?.mediaMid?.takeIf { it.isNotBlank() } ?: songmid
+        val file = info?.fileJson
+        fun hasSize(vararg keys: String): Boolean {
+            if (file == null) return true
+            val present = keys.any { file.has(it) }
+            return !present || keys.any { file.optLong(it, 0L) > 0L }
+        }
+        fun hasNewSize(index: Int): Boolean {
+            if (file == null || !file.has("size_new")) return true
+            val arr = file.optJSONArray("size_new") ?: return true
+            return arr.optLong(index, 0L) > 0L
+        }
+        val candidates = buildList<String?> {
+            when (level) {
+                "jymaster" -> {
+                    if (hasNewSize(0)) add("AI00$mediaMid.flac")
+                    if (hasSize("size_hires")) add("RS01$mediaMid.flac")
+                    if (hasSize("size_flac")) add("F000$mediaMid.flac")
+                    if (hasSize("size_320mp3", "size_320")) add("M800$mediaMid.mp3")
+                    if (hasSize("size_192ogg")) add("O600$mediaMid.ogg")
+                    if (hasSize("size_128mp3", "size_128")) add("M500$mediaMid.mp3")
+                    add(null)
+                }
+                "vivid" -> {
+                    if (hasNewSize(2)) add("Q001$mediaMid.flac")
+                    if (hasNewSize(1)) add("Q000$mediaMid.flac")
+                    if (hasSize("size_hires")) add("RS01$mediaMid.flac")
+                    if (hasSize("size_flac")) add("F000$mediaMid.flac")
+                    if (hasSize("size_320mp3", "size_320")) add("M800$mediaMid.mp3")
+                    if (hasSize("size_128mp3", "size_128")) add("M500$mediaMid.mp3")
+                    add(null)
+                }
+                "jyeffect" -> {
+                    if (hasNewSize(1)) add("Q000$mediaMid.flac")
+                    if (hasSize("size_hires")) add("RS01$mediaMid.flac")
+                    if (hasSize("size_flac")) add("F000$mediaMid.flac")
+                    if (hasSize("size_320mp3", "size_320")) add("M800$mediaMid.mp3")
+                    if (hasSize("size_128mp3", "size_128")) add("M500$mediaMid.mp3")
+                    add(null)
+                }
+                "hires", "sky", "dolby" -> {
+                    if (hasSize("size_hires")) add("RS01$mediaMid.flac")
+                    if (hasSize("size_flac")) add("F000$mediaMid.flac")
+                    if (hasSize("size_320mp3", "size_320")) add("M800$mediaMid.mp3")
+                    if (hasSize("size_192ogg")) add("O600$mediaMid.ogg")
+                    if (hasSize("size_128mp3", "size_128")) add("M500$mediaMid.mp3")
+                    add(null)
+                }
+                "lossless" -> {
+                    if (hasSize("size_flac")) add("F000$mediaMid.flac")
+                    if (hasSize("size_320mp3", "size_320")) add("M800$mediaMid.mp3")
+                    if (hasSize("size_192ogg")) add("O600$mediaMid.ogg")
+                    if (hasSize("size_128mp3", "size_128")) add("M500$mediaMid.mp3")
+                    add(null)
+                }
+                "exhigh" -> {
+                    if (hasSize("size_320mp3", "size_320")) add("M800$mediaMid.mp3")
+                    if (hasSize("size_192ogg")) add("O600$mediaMid.ogg")
+                    if (hasSize("size_128mp3", "size_128")) add("M500$mediaMid.mp3")
+                    add(null)
+                }
+                "higher" -> {
+                    if (hasSize("size_192ogg")) add("O600$mediaMid.ogg")
+                    if (hasSize("size_192aac")) add("C600$mediaMid.m4a")
+                    if (hasSize("size_128mp3", "size_128")) add("M500$mediaMid.mp3")
+                    add(null)
+                }
+                else -> {
+                    if (info != null) {
+                        if (hasSize("size_128mp3", "size_128")) add("M500$mediaMid.mp3")
+                        if (hasSize("size_96aac", "size_48aac")) add("C400$mediaMid.m4a")
+                    }
+                    add(null)
+                }
+            }
+        }.distinct()
+
+        for (filename in candidates) {
+            val resp = runCatching {
+                musicu(mapOf("req_0" to JSONObject().apply {
+                    put("module", "vkey.GetVkeyServer")
+                    put("method", "CgiGetVkey")
+                    put("param", JSONObject().apply {
+                        put("guid", guid(map))
+                        put("songmid", JSONArray().put(songmid))
+                        put("songtype", JSONArray().put(0))
+                        if (filename != null) put("filename", JSONArray().put(filename))
+                        put("uin", effUin)
+                        put("loginflag", 1)
+                        put("platform", "20")
+                    })
+                }))
+            }.getOrNull() ?: continue
+            val data = resp.optJSONObject("req_0")?.optJSONObject("data") ?: continue
+            val purl = data.optJSONArray("midurlinfo")?.optJSONObject(0)?.optString("purl").orEmpty()
+            if (purl.isBlank()) continue
+            val sip = data.optJSONArray("sip")?.optString(0)?.takeIf { it.isNotBlank() } ?: "https://isure.stream.qqmusic.qq.com/"
+            val resolved = sip.https().trimEnd('/') + "/" + purl.trimStart('/')
+            btm.m.auraplayer.playback.PlaybackStreams.qqRecords[songmid] =
+                QqMusicApi.streamInfoFromUrl(resolved, level, info?.qualities.orEmpty())
+            return resolved
+        }
+        throw IOException("UNAVAILABLE_SONG")
     }
 
     fun albumTracks(albumMidOrId: String, parseSongs: (JSONArray) -> List<Song>): List<Song> {

@@ -175,4 +175,43 @@ class QqMusicApiTest {
         val songListBody = JSONObject(server.takeRequest().body.readUtf8())
         assertEquals("GetAlbumSongList", songListBody.getJSONObject("req_0").getString("method"))
     }
+
+    @Test
+    fun officialAndCustomFetchQualitiesAndResolveRequestedTier() = runBlocking {
+        reply("""{"code":0,"songinfo":{"code":0,"data":{"track_info":{"mid":"003Song","interval":240,"file":{"media_mid":"003Media","size_128mp3":3840000,"size_192ogg":5760000,"size_320mp3":9600000,"size_flac":28800000,"size_hires":72000000,"size_new":[90000000,60000000,75000000]}}}}}""")
+        val officialQualities = official.qualityDetails("003Song")
+        assertEquals(
+            listOf(
+                btm.m.auraplayer.playback.StreamQuality.STANDARD,
+                btm.m.auraplayer.playback.StreamQuality.HIGHER,
+                btm.m.auraplayer.playback.StreamQuality.HIGH,
+                btm.m.auraplayer.playback.StreamQuality.LOSSLESS,
+                btm.m.auraplayer.playback.StreamQuality.HIRES,
+                btm.m.auraplayer.playback.StreamQuality.SPATIAL,
+                btm.m.auraplayer.playback.StreamQuality.VIVID,
+                btm.m.auraplayer.playback.StreamQuality.MASTER,
+            ),
+            officialQualities.map { it.quality },
+        )
+        val detailBody = JSONObject(server.takeRequest().body.readUtf8())
+        assertEquals("get_song_detail_yqq", detailBody.getJSONObject("songinfo").getString("method"))
+
+        reply("""{"code":0,"req_0":{"data":{"sip":["http://isure.stream.qqmusic.qq.com/"],"midurlinfo":[{"purl":"F000003Media.flac?vkey=flac"}]}}}""")
+        val flacUrl = official.resolveBlocking("003Song", "lossless")
+        assertEquals("https://isure.stream.qqmusic.qq.com/F000003Media.flac?vkey=flac", flacUrl)
+        val vkeyReq = JSONObject(server.takeRequest().body.readUtf8())
+        assertEquals("F000003Media.flac", vkeyReq.getJSONObject("req_0").getJSONObject("param").getJSONArray("filename").getString(0))
+        assertEquals("lossless", btm.m.auraplayer.playback.PlaybackStreams.qqRecords["003Song"]?.level)
+
+        reply("""{"result":100,"data":{"track_info":{"mid":"004Custom","interval":200,"file":{"media_mid":"004Custom","size_128mp3":3200000,"size_320mp3":8000000,"size_flac":24000000}}}}""")
+        val customQualities = customApi.qualityDetails("004Custom")
+        assertEquals(listOf("standard", "exhigh", "lossless"), customQualities.map { it.quality.level })
+        assertEquals("/song?songmid=004Custom", server.takeRequest().path)
+
+        reply("""{"result":100,"data":"http://isure.stream.qqmusic.qq.com/M800004Custom.mp3?vkey=320"}""")
+        val custom320 = customApi.resolveBlocking("004Custom", "exhigh")
+        assertEquals("https://isure.stream.qqmusic.qq.com/M800004Custom.mp3?vkey=320", custom320)
+        assertEquals("/song/url?id=004Custom&type=320", server.takeRequest().path)
+        assertEquals("exhigh", btm.m.auraplayer.playback.PlaybackStreams.qqRecords["004Custom"]?.level)
+    }
 }

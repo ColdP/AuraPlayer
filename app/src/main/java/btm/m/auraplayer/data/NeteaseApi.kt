@@ -83,6 +83,41 @@ class NeteaseApi(
             require(url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null) { "INVALID_ENDPOINT" }
             return url.toString().trimEnd('/')
         }
+
+        internal fun hasQualityDetails(response: JSONObject): Boolean = parseQualityDetails(response).isNotEmpty()
+
+        internal fun parseQualityDetails(response: JSONObject): List<btm.m.auraplayer.playback.CloudQuality> {
+            val data = response.optJSONObject("data") ?: response.optJSONArray("data")?.optJSONObject(0)
+            val qualityArray = data?.optJSONArray("qualities") ?: response.optJSONArray("qualities")
+            val fields = mapOf("standard" to "l", "higher" to "m", "exhigh" to "h", "lossless" to "sq", "hires" to "hr",
+                "jyeffect" to "je", "sky" to "sk", "dolby" to "db", "vivid" to "vi", "jymaster" to "jm")
+            fun detail(quality: btm.m.auraplayer.playback.StreamQuality, info: JSONObject) =
+                btm.m.auraplayer.playback.CloudQuality(quality, btm.m.auraplayer.playback.AudioDetails(
+                    info.optString("type", info.optString("format", "")).uppercase(),
+                    info.optInt("sr", info.optInt("sampleRate")), info.optInt("bitDepth", info.optInt("bits")),
+                    info.optInt("br", info.optInt("bitrate"))))
+            val result = if (data == null) emptyList() else btm.m.auraplayer.playback.StreamQuality.entries.mapNotNull { quality ->
+                val info = data.optJSONObject(fields[quality.level] ?: "") ?: data.optJSONObject(quality.level)
+                    ?: return@mapNotNull null
+                detail(quality, info)
+            }
+            if (result.isNotEmpty()) return result
+            if (qualityArray != null) {
+                val arrayResult = (0 until qualityArray.length()).mapNotNull { index ->
+                    val info = qualityArray.optJSONObject(index) ?: return@mapNotNull null
+                    val level = info.optString("level", info.optString("quality")).lowercase()
+                    val quality = btm.m.auraplayer.playback.StreamQuality.entries.firstOrNull { it.level == level }
+                        ?: return@mapNotNull null
+                    detail(quality, info)
+                }
+                if (arrayResult.isNotEmpty()) return arrayResult
+            }
+            val single = data?.takeIf { it.has("level") || it.has("quality") }
+                ?: response.takeIf { it.has("level") || it.has("quality") }
+            val level = single?.optString("level", single.optString("quality")).orEmpty().lowercase()
+            val quality = btm.m.auraplayer.playback.StreamQuality.entries.firstOrNull { it.level == level }
+            return if (quality != null && single != null) listOf(detail(quality, single)) else emptyList()
+        }
     }
 
     fun requestBlocking(path: String, values: Map<String, String> = emptyMap(), authenticated: Boolean = true): JSONObject {
@@ -94,7 +129,8 @@ class NeteaseApi(
         if (ttlMs != null && !bypassRead) metadataCache?.read(key, ttlMs)?.let { return it }
         return try {
             requestNetwork(path, values, authenticated).also {
-                if (cacheable) {
+                val shouldCache = cacheable && (path != "song/music/detail" || hasQualityDetails(it))
+                if (shouldCache) {
                     val writeKey = if (bypassRead) {
                         val normalizedValues = values.toMutableMap().apply { remove("afresh") }
                         cacheScope() + "/" + path + "/" + (normalizedValues["uid"] ?: normalizedValues["id"]).orEmpty() + "/" +
@@ -814,36 +850,7 @@ class NeteaseApi(
     }
     suspend fun qualityDetails(id: Long): List<btm.m.auraplayer.playback.CloudQuality> {
         val response = request("song/music/detail", mapOf("id" to "$id"))
-        val data = response.optJSONObject("data") ?: response.optJSONArray("data")?.optJSONObject(0)
-        val qualityArray = data?.optJSONArray("qualities") ?: response.optJSONArray("qualities")
-        val fields = mapOf("standard" to "l", "higher" to "m", "exhigh" to "h", "lossless" to "sq", "hires" to "hr",
-            "jyeffect" to "je", "sky" to "sk", "dolby" to "db", "vivid" to "vi", "jymaster" to "jm")
-        fun detail(quality: btm.m.auraplayer.playback.StreamQuality, info: JSONObject) =
-            btm.m.auraplayer.playback.CloudQuality(quality, btm.m.auraplayer.playback.AudioDetails(
-                info.optString("type", info.optString("format", "")).uppercase(),
-                info.optInt("sr", info.optInt("sampleRate")), info.optInt("bitDepth", info.optInt("bits")),
-                info.optInt("br", info.optInt("bitrate"))))
-        val result = if (data == null) emptyList() else btm.m.auraplayer.playback.StreamQuality.entries.mapNotNull { quality ->
-            val info = data.optJSONObject(fields[quality.level] ?: "") ?: data.optJSONObject(quality.level)
-                ?: return@mapNotNull null
-            detail(quality, info)
-        }
-        if (result.isNotEmpty()) return result
-        if (qualityArray != null) {
-            val arrayResult = (0 until qualityArray.length()).mapNotNull { index ->
-                val info = qualityArray.optJSONObject(index) ?: return@mapNotNull null
-                val level = info.optString("level", info.optString("quality")).lowercase()
-                val quality = btm.m.auraplayer.playback.StreamQuality.entries.firstOrNull { it.level == level }
-                    ?: return@mapNotNull null
-                detail(quality, info)
-            }
-            if (arrayResult.isNotEmpty()) return arrayResult
-        }
-        val single = data?.takeIf { it.has("level") || it.has("quality") }
-            ?: response.takeIf { it.has("level") || it.has("quality") }
-        val level = single?.optString("level", single.optString("quality")).orEmpty().lowercase()
-        val quality = btm.m.auraplayer.playback.StreamQuality.entries.firstOrNull { it.level == level }
-        return if (quality != null && single != null) listOf(detail(quality, single)) else emptyList()
+        return parseQualityDetails(response)
     }
     suspend fun albumTracks(id: Long): List<Song> {
         val response = request("album", mapOf("id" to "$id"))
