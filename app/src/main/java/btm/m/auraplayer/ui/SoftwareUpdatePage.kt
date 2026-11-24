@@ -51,6 +51,7 @@ import btm.m.auraplayer.BuildConfig
 import btm.m.auraplayer.ui.navigation.DampedDragAnimation
 import btm.m.auraplayer.ui.navigation.InteractiveHighlight
 import btm.m.auraplayer.update.AppUpdateManager
+import btm.m.auraplayer.update.UpdateChannel
 import btm.m.auraplayer.update.UpdateInfo
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -60,6 +61,7 @@ import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.shadow.Shadow
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -134,19 +136,29 @@ fun SoftwareUpdatePage(
     var installing by remember { mutableStateOf(false) }
     val installPreferences = remember { context.getSharedPreferences("software_update", Context.MODE_PRIVATE) }
     var installMode by remember { mutableStateOf(installPreferences.getString("install_mode", "manual") ?: "manual") }
+    var updateChannel by remember { mutableStateOf(AppUpdateManager.getUpdateChannel(context)) }
+    var showRedirectDialog by remember { mutableStateOf(false) }
+    var checkJob by remember { mutableStateOf<Job?>(null) }
     val updateInfo = (state as? UpdateState.Ready)?.info
     val hasUpdate = updateInfo?.versionCode?.let { it > BuildConfig.VERSION_CODE.toLong() } == true
+    val useThemePrimary = LocalAuraColorStyle.current.isDynamicEnabled ||
+        LocalAppUiStyle.current != AppUiStyle.HYPER ||
+        LocalAuraOklabScheme.current != null
 
-    fun checkUpdate() {
+    fun checkUpdate(channel: UpdateChannel = updateChannel) {
+        checkJob?.cancel()
         state = UpdateState.Checking
         downloaded = false
-        scope.launch {
-            state = withContext(Dispatchers.IO) {
+        checkJob = scope.launch {
+            val nextState = withContext(Dispatchers.IO) {
                 runCatching {
-                    val info = AppUpdateManager.fetchUpdateInfo()
+                    val info = AppUpdateManager.fetchUpdateInfo(channel)
                     val note = AppUpdateManager.fetchReleaseNote(info.releaseNoteUrl)
                     UpdateState.Ready(info, note)
                 }.getOrElse { UpdateState.Error }
+            }
+            if (channel == updateChannel) {
+                state = nextState
             }
         }
     }
@@ -254,6 +266,29 @@ fun SoftwareUpdatePage(
         item {
             SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
                 GlassDropdownPreference(
+                    title = tr("update_channel", "更新通道"),
+                    items = listOf(
+                        tr("update_channel_github", "GitHub"),
+                        tr("update_channel_cloud_disk", "网盘"),
+                    ),
+                    selectedIndex = if (updateChannel == UpdateChannel.CLOUD_DISK) 1 else 0,
+                    backdrop = backdrop,
+                ) { index ->
+                    val nextChannel = if (index == 1) UpdateChannel.CLOUD_DISK else UpdateChannel.GITHUB
+                    if (nextChannel != updateChannel) {
+                        updateChannel = nextChannel
+                        AppUpdateManager.setUpdateChannel(context, nextChannel)
+                        showRedirectDialog = false
+                        downloadId?.let { id ->
+                            context.getSystemService(DownloadManager::class.java)?.remove(id)
+                        }
+                        downloadId = null
+                        downloadProgress = 0
+                        downloaded = false
+                        checkUpdate(nextChannel)
+                    }
+                }
+                GlassDropdownPreference(
                     title = tr("update_install_mode", "安装方式"),
                     items = listOf(
                         tr("update_install_manual", "手动安装"),
@@ -317,7 +352,7 @@ fun SoftwareUpdatePage(
                         )
                         Text(
                             tr("update_learn_more", "了解更多..."),
-                            color = Color(0xFF1976D2),
+                            color = if (useThemePrimary) MiuixTheme.colorScheme.primary else Color(0xFF1976D2),
                             style = MiuixTheme.textStyles.body1,
                             modifier = Modifier
                                 .padding(top = 8.dp)
@@ -333,16 +368,24 @@ fun SoftwareUpdatePage(
                                         .layerBackdrop(buttonBackdrop)
                                         .background(MiuixTheme.colorScheme.surfaceContainer.copy(alpha = .12f)),
                                 )
+                                val isCloudDisk = updateChannel == UpdateChannel.CLOUD_DISK
                                 UpdateToolbarButton(
-                                    onClick = ::startDownload,
+                                    onClick = {
+                                        if (isCloudDisk) {
+                                            showRedirectDialog = true
+                                        } else {
+                                            startDownload()
+                                        }
+                                    },
                                     text = when {
+                                        isCloudDisk -> tr("update_redirect", "跳转")
                                         installing -> tr("update_installing", "安装中")
                                         downloaded -> tr("update_install_now", "立即安装")
                                         downloadId != null -> "${tr("update_downloading", "下载中")} $downloadProgress%"
                                         else -> tr("update_download_now", "立即下载")
                                     },
                                     primary = true,
-                                    enabled = !installing,
+                                    enabled = isCloudDisk || !installing,
                                     modifier = Modifier.fillMaxWidth(),
                                     backdrop = buttonBackdrop,
                                 )
@@ -353,15 +396,69 @@ fun SoftwareUpdatePage(
             }
         }
     }
+
+    WindowDialog(
+        show = showRedirectDialog && updateInfo != null,
+        title = tr("update_redirect_dialog_title", "前往网盘下载"),
+        summary = tr("update_redirect_dialog_message", "将跳转到网盘页面下载更新安装包，也可以复制链接后在浏览器中打开。"),
+        titleTextAlign = TextAlign.Start,
+        summaryTextAlign = TextAlign.Start,
+        onDismissRequest = { showRedirectDialog = false },
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            GlassDialogButton(
+                onClick = {
+                    val url = updateInfo?.apkUrl ?: return@GlassDialogButton
+                    showRedirectDialog = false
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }.onFailure {
+                        Toast.makeText(
+                            context,
+                            tr("update_open_link_failed", "无法打开浏览器，请复制链接后手动访问"),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColorsPrimary(),
+            ) {
+                Text(tr("update_redirect_now", "立即跳转"))
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                GlassDialogButton(
+                    onClick = {
+                        val url = updateInfo?.apkUrl ?: return@GlassDialogButton
+                        copyToClipboard(context, tr("update_channel_cloud_disk", "网盘"), url)
+                        Toast.makeText(context, tr("copied", "已复制"), Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(tr("copy", "复制"))
+                }
+                GlassDialogButton(
+                    onClick = { showRedirectDialog = false },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(tr("cancel", "取消"))
+                }
+            }
+        }
+    }
 }
 
 @Composable
 fun UpdateLogPage(padding: PaddingValues) {
+    val context = LocalContext.current
     var note by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
+        val channel = AppUpdateManager.getUpdateChannel(context)
         val loaded = withContext(Dispatchers.IO) {
-            runCatching { AppUpdateManager.fetchReleaseNote(AppUpdateManager.fetchUpdateInfo().releaseNoteUrl) }.getOrNull()
+            runCatching { AppUpdateManager.fetchReleaseNote(AppUpdateManager.fetchUpdateInfo(channel).releaseNoteUrl) }.getOrNull()
         }
         note = loaded
         failed = loaded == null
@@ -421,8 +518,12 @@ internal fun UpdateToolbarButton(
             Offset(offset.x.coerceIn(0f, size.width), offset.y.coerceIn(0f, size.height))
         }
     }
+    val colorStyle = LocalAuraColorStyle.current
+    val useThemePrimary = colorStyle.isDynamicEnabled ||
+        LocalAppUiStyle.current != AppUiStyle.HYPER ||
+        LocalAuraOklabScheme.current != null
     val tint = surfaceColor ?: if (primary) {
-        Color(0xFF0088FF).copy(alpha = .92f)
+        (if (useThemePrimary) MiuixTheme.colorScheme.primary else Color(0xFF0088FF)).copy(alpha = .92f)
     } else {
         MiuixTheme.colorScheme.surfaceContainer.copy(alpha = .82f)
     }
@@ -469,7 +570,11 @@ internal fun UpdateToolbarButton(
             }
             Text(
                 text,
-                color = if (primary) primaryContentColor ?: Color.White else MiuixTheme.colorScheme.onSurface,
+                color = if (primary) {
+                    primaryContentColor ?: if (useThemePrimary) MiuixTheme.colorScheme.onPrimary else Color.White
+                } else {
+                    MiuixTheme.colorScheme.onSurface
+                },
                 style = MiuixTheme.textStyles.body1,
                 fontWeight = FontWeight.Bold,
             )

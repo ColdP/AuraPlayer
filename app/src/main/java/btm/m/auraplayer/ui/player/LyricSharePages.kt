@@ -75,6 +75,7 @@ import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.R
 import btm.m.auraplayer.lyrics.LyricLine
 import btm.m.auraplayer.lyrics.LyricSize
+import btm.m.auraplayer.playback.LyricCopyMode
 import btm.m.auraplayer.playback.PlayerWeather
 import btm.m.auraplayer.playback.TokyoSceneLandmark
 import btm.m.auraplayer.playback.TokyoSceneTime
@@ -177,6 +178,8 @@ internal fun LyricShareRoute(model: AuraViewModel, onBack: () -> Unit, isActive:
     var exportDialogOpen by remember { mutableStateOf(false) }
     var exportPreviewBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
     var pendingSaveAsBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var copyDialogOpen by rememberSaveable { mutableStateOf(false) }
+    var rememberCopyChoice by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
 
     val pickCustomBg = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -276,7 +279,7 @@ internal fun LyricShareRoute(model: AuraViewModel, onBack: () -> Unit, isActive:
     val coverPalette = rememberPlayerMonetPalette(artwork)
     val posterLayer = rememberGraphicsLayer()
 
-    val modalDialogOpen = customBgDialogOpen || customFontDialogOpen || exportDialogOpen
+    val modalDialogOpen = customBgDialogOpen || customFontDialogOpen || exportDialogOpen || copyDialogOpen
     PredictiveBackHandler(
         enabled = isActive && generated && !modalDialogOpen && model.settings.value.predictive,
     ) { events ->
@@ -335,6 +338,22 @@ internal fun LyricShareRoute(model: AuraViewModel, onBack: () -> Unit, isActive:
         }
     }
 
+    fun performLyricCopy(mode: LyricCopyMode, saveChoice: Boolean) {
+        val selectedLines = selected.sorted().mapNotNull { lines.getOrNull(it) }
+        val text = formatLyricsForCopy(selectedLines, mode)
+        if (text.isBlank()) {
+            Toast.makeText(context, tr("lyric_copy_empty", "所选歌词暂无可复制的内容"), Toast.LENGTH_SHORT).show()
+        } else {
+            val label = song?.title?.ifBlank { tr("lyrics", "歌词") } ?: tr("lyrics", "歌词")
+            copyToClipboard(context, label, text)
+            Toast.makeText(context, tr("copied", "已复制"), Toast.LENGTH_SHORT).show()
+        }
+        if (saveChoice) {
+            model.app.nowPlaying.update { it.copy(lyricCopyMode = mode) }
+        }
+        copyDialogOpen = false
+    }
+
     val templates = remember(I18n.language) { lyricShareTemplates() }
     val activeTemplate = templates.firstOrNull { it.id == templateId } ?: templates.first()
     val enterActive = transition?.active == true
@@ -371,25 +390,53 @@ internal fun LyricShareRoute(model: AuraViewModel, onBack: () -> Unit, isActive:
                 contentAlignment = Alignment.CenterEnd,
             ) {
                 AnimatedVisibility(!generated && selected.isNotEmpty(), enter = fadeIn() + scaleIn(), exit = fadeOut() + scaleOut()) {
-                    InteractiveToolbarGlass(
-                        modifier = Modifier.size(60.dp).graphicsLayer {
-                            if (enterActive) {
-                                alpha = lyricShareSmoothStep(.22f, 1f, enterProgress)
-                                val scale = .86f + .14f * enterProgress
-                                scaleX = scale
-                                scaleY = scale
-                            }
-                        },
-                        backdrop = LocalToolbarBackdrop.current,
-                        tint = MiuixTheme.colorScheme.primary.copy(alpha = .85f),
-                        onClick = { generated = true },
+                    val fabModifier = Modifier.size(60.dp).graphicsLayer {
+                        if (enterActive) {
+                            alpha = lyricShareSmoothStep(.22f, 1f, enterProgress)
+                            val scale = .86f + .14f * enterProgress
+                            scaleX = scale
+                            scaleY = scale
+                        }
+                    }
+                    val fabTint = MiuixTheme.colorScheme.primary.copy(alpha = .85f)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Image(
-                            MiuixIcons.Basic.Check,
-                            tr("generate_share_image", "生成分享图片"),
-                            Modifier.size(24.dp),
-                            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onPrimary),
-                        )
+                        InteractiveToolbarGlass(
+                            modifier = fabModifier,
+                            backdrop = LocalToolbarBackdrop.current,
+                            tint = fabTint,
+                            onClick = {
+                                val savedMode = nowPlayingConfig.lyricCopyMode
+                                if (savedMode == LyricCopyMode.ASK_EVERY_TIME) {
+                                    rememberCopyChoice = false
+                                    copyDialogOpen = true
+                                } else {
+                                    performLyricCopy(savedMode, saveChoice = false)
+                                }
+                            },
+                        ) {
+                            Image(
+                                MiuixIcons.Regular.Copy,
+                                tr("copy_lyrics", "复制歌词"),
+                                Modifier.size(24.dp),
+                                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onPrimary),
+                            )
+                        }
+                        InteractiveToolbarGlass(
+                            modifier = fabModifier,
+                            backdrop = LocalToolbarBackdrop.current,
+                            tint = fabTint,
+                            onClick = { generated = true },
+                        ) {
+                            Image(
+                                MiuixIcons.Basic.Check,
+                                tr("generate_share_image", "生成分享图片"),
+                                Modifier.size(24.dp),
+                                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onPrimary),
+                            )
+                        }
                     }
                 }
             }
@@ -762,6 +809,93 @@ internal fun LyricShareRoute(model: AuraViewModel, onBack: () -> Unit, isActive:
             }
         }
     }
+
+    WindowDialog(
+        show = copyDialogOpen,
+        title = tr("lyric_copy_dialog_title", "复制歌词"),
+        summary = tr("lyric_copy_dialog_summary", "选择要复制到剪贴板的歌词内容"),
+        titleTextAlign = TextAlign.Start,
+        summaryTextAlign = TextAlign.Start,
+        onDismissRequest = { copyDialogOpen = false },
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(role = Role.Checkbox) { rememberCopyChoice = !rememberCopyChoice }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Start,
+            ) {
+                AuraCheckbox(
+                    checked = rememberCopyChoice,
+                    onCheckedChange = { rememberCopyChoice = !rememberCopyChoice },
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = tr("remember_choice", "记住选择"),
+                    color = MiuixTheme.colorScheme.onSurface,
+                    style = MiuixTheme.textStyles.body2,
+                )
+            }
+            val copyModes = listOf(
+                LyricCopyMode.ORIGINAL_ONLY to tr("lyric_copy_mode_original_only", "仅原文"),
+                LyricCopyMode.ORIGINAL_AND_TRANSLATION to tr("lyric_copy_mode_original_translation", "原文与翻译"),
+                LyricCopyMode.ORIGINAL_AND_PRONUNCIATION to tr("lyric_copy_mode_original_pronunciation", "原文与发音"),
+                LyricCopyMode.ORIGINAL_PRONUNCIATION_AND_TRANSLATION to tr("lyric_copy_mode_original_pronunciation_translation", "原文与发音与翻译"),
+                LyricCopyMode.PRONUNCIATION_AND_TRANSLATION to tr("lyric_copy_mode_pronunciation_translation", "发音与翻译"),
+            )
+            copyModes.forEach { (mode, label) ->
+                GlassDialogButton(
+                    onClick = { performLyricCopy(mode, saveChoice = rememberCopyChoice) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(label)
+                }
+            }
+            GlassDialogButton(
+                onClick = { copyDialogOpen = false },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(tr("cancel", "取消"))
+            }
+        }
+    }
+}
+
+internal fun formatLyricsForCopy(lines: List<LyricLine>, mode: LyricCopyMode): String {
+    if (lines.isEmpty() || mode == LyricCopyMode.ASK_EVERY_TIME) return ""
+    val blocks = lines.mapNotNull { line ->
+        val parts = when (mode) {
+            LyricCopyMode.ASK_EVERY_TIME -> emptyList()
+            LyricCopyMode.ORIGINAL_ONLY -> listOfNotNull(line.text.trim().takeIf { it.isNotEmpty() })
+            LyricCopyMode.ORIGINAL_AND_TRANSLATION -> listOfNotNull(
+                line.text.trim().takeIf { it.isNotEmpty() },
+                line.translation?.trim()?.takeIf { it.isNotEmpty() },
+            )
+            LyricCopyMode.ORIGINAL_AND_PRONUNCIATION -> listOfNotNull(
+                line.text.trim().takeIf { it.isNotEmpty() },
+                line.roma?.trim()?.takeIf { it.isNotEmpty() },
+            )
+            LyricCopyMode.ORIGINAL_PRONUNCIATION_AND_TRANSLATION -> listOfNotNull(
+                line.text.trim().takeIf { it.isNotEmpty() },
+                line.roma?.trim()?.takeIf { it.isNotEmpty() },
+                line.translation?.trim()?.takeIf { it.isNotEmpty() },
+            )
+            LyricCopyMode.PRONUNCIATION_AND_TRANSLATION -> listOfNotNull(
+                line.roma?.trim()?.takeIf { it.isNotEmpty() },
+                line.translation?.trim()?.takeIf { it.isNotEmpty() },
+            )
+        }
+        parts.takeIf { it.isNotEmpty() }?.joinToString("\n")
+    }
+    val separator = if (blocks.any { '\n' in it }) "\n\n" else "\n"
+    return blocks.joinToString(separator)
 }
 
 @Composable

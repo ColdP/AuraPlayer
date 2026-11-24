@@ -214,10 +214,11 @@ private fun AuraShell(model: AuraViewModel, onEnterOobe: () -> Unit = {}) {
             return@LaunchedEffect
         }
         var resolved: UpdateInfo? = null
+        val updateChannel = AppUpdateManager.getUpdateChannel(context)
         for (attempt in 0 until 3) {
             if (attempt > 0) delay(3_000L)
             val result = withContext(Dispatchers.IO) {
-                runCatching { AppUpdateManager.fetchUpdateInfo() }
+                runCatching { AppUpdateManager.fetchUpdateInfo(updateChannel) }
             }
             if (result.isSuccess) {
                 resolved = result.getOrNull()

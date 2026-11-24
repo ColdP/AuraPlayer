@@ -424,11 +424,11 @@ internal fun PlayerHost(model: AuraViewModel, backdrop: Backdrop, miniVisible: B
         }
         val settledFullScreen = open && !playerSwipeGesturing && !backExiting && !settlingSwipe &&
             !expansion.isRunning && miniDrag.axis != MiniPlayerDragAxis.EXPAND && e >= .999f
-        val restingCorner by animateDpAsState(if (settledFullScreen) 18.dp else screenCorner,
+        val restingCorner by animateDpAsState(if (settledFullScreen) 0.dp else screenCorner,
             animationSpec = if (settledFullScreen) tween(180, easing = FastOutSlowInEasing) else snap(),
             label = "playerRestingCorner")
         val radius = if (settledFullScreen) restingCorner else playerMorphCornerRadius(e, miniHeight / 2, screenCorner)
-        val shape = RoundedCornerShape(radius)
+        val shape = if (radius <= 0.dp) RectangleShape else RoundedCornerShape(radius)
         Box(Modifier.offset(metrics.outerInset * (1f - e), miniY * (1f - e))
             .size(lerp(miniWidth, screenWidth, e), lerp(miniHeight, screenHeight, e))
             .then(when {

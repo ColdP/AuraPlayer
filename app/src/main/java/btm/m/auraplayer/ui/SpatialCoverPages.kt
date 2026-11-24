@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package btm.m.auraplayer.ui
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -62,14 +67,20 @@ import androidx.compose.ui.unit.sp
 import btm.m.auraplayer.AuraApplication
 import btm.m.auraplayer.lyrics.rememberSpatialGyroTilt
 import btm.m.auraplayer.lyrics.scaleSpatialParallaxTilt
+import btm.m.auraplayer.sing.AuraSingModel
+import btm.m.auraplayer.sing.AuraSingQualcommNpu
+import btm.m.auraplayer.spatialcover.ImportFailureReason
 import btm.m.auraplayer.spatialcover.SpatialCoverAssets
 import btm.m.auraplayer.spatialcover.SpatialCoverCacheEntry
 import btm.m.auraplayer.spatialcover.SpatialCoverManager
 import btm.m.auraplayer.spatialcover.SpatialCoverRenderer
 import btm.m.auraplayer.spatialcover.SpatialDepthModel
+import btm.m.auraplayer.spatialcover.SpatialDomesticMirror
 import btm.m.auraplayer.spatialcover.SpatialMattingModel
 import btm.m.auraplayer.spatialcover.SpatialModelDownloadManager
 import btm.m.auraplayer.spatialcover.SpatialModelDownloadState
+import btm.m.auraplayer.spatialcover.SpatialModelImportResult
+import btm.m.auraplayer.spatialcover.SpatialModelImporter
 import btm.m.auraplayer.spatialcover.SpatialModelResource
 import btm.m.auraplayer.spatialcover.SpatialModelStore
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -101,6 +112,189 @@ internal fun formatSpatialBytes(bytes: Long): String {
     return String.format(Locale.US, "%.2f GB", mb / 1024.0)
 }
 
+internal fun resolveSpatialResourceDisplayName(resource: SpatialModelResource): String {
+    if (resource.id == SpatialModelStore.RUNTIME_RESOURCE_ID) {
+        val abi = SpatialModelStore.runtimeAbi()?.abi ?: "arm64-v8a"
+        return tr("spatial_runtime_title", "ONNX Runtime 推理引擎（%s）").format(abi)
+    }
+    if (resource.id == AuraSingQualcommNpu.QNN_RESOURCE_ID) {
+        return tr("aura_sing_qnn_runtime_title", "Qualcomm QNN NPU 运行库（骁龙 8 Elite+）")
+    }
+    SpatialDepthModel.entries.firstOrNull { it.id == resource.id }?.let { return it.displayName }
+    SpatialMattingModel.downloadableEntries.firstOrNull { it.id == resource.id }?.let { return it.displayName }
+    AuraSingModel.entries.firstOrNull { it.resource.id == resource.id }?.let {
+        return tr(it.labelKey, it.fallbackLabel)
+    }
+    return resource.fileName
+}
+
+internal fun formatImportFailureMessage(failure: SpatialModelImportResult.Failure): String = when (failure.reason) {
+    ImportFailureReason.CANNOT_OPEN ->
+        tr("model_import_fail_open", "无法读取所选文件「%s」，请确认文件访问权限后重试。").format(failure.fileName)
+    ImportFailureReason.EMPTY_FILE ->
+        tr("model_import_fail_empty", "所选文件「%s」为空文件，无法导入。").format(failure.fileName)
+    ImportFailureReason.ARCHIVE_CORRUPTED_OR_INCOMPLETE -> {
+        val candidateName = failure.candidateResource?.let { resolveSpatialResourceDisplayName(it) }
+        if (candidateName != null) {
+            tr(
+                "model_import_fail_archive_candidate",
+                "文件「%s」匹配到「%s」，但压缩包损坏、缺少必要组件或校验失败，无法导入。",
+            ).format(failure.fileName, candidateName)
+        } else {
+            tr(
+                "model_import_fail_archive",
+                "压缩包「%s」损坏或未包含完整匹配的模型/运行库文件，无法导入。",
+            ).format(failure.fileName)
+        }
+    }
+    ImportFailureReason.WRITE_FAILED -> {
+        val reasonText = failure.detail.ifBlank { tr("unknown_error", "未知错误") }
+        tr("model_import_fail_write", "保存模型文件「%s」失败：%s").format(failure.fileName, reasonText)
+    }
+    ImportFailureReason.NOT_A_KNOWN_MODEL -> {
+        val sizeText = formatSpatialBytes(failure.fileSize)
+        val candidateName = failure.candidateResource?.let { resolveSpatialResourceDisplayName(it) }
+        if (candidateName != null) {
+            tr(
+                "model_import_fail_mismatch_candidate",
+                "文件「%s」（%s）与现有模型「%s」的特征/校验值不匹配，可能文件已损坏、不完整或并非当前支持的版本。",
+            ).format(failure.fileName, sizeText, candidateName)
+        } else {
+            tr(
+                "model_import_fail_unknown",
+                "文件「%s」（%s）不是现有的 Aura Sing 或空间封面模型/运行库，未检测到匹配的特征信息，导入失败。",
+            ).format(failure.fileName, sizeText)
+        }
+    }
+}
+
+@Composable
+internal fun ModelDownloadToolsSection() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var fetchingDomesticUrl by remember { mutableStateOf(false) }
+    var importingModel by remember { mutableStateOf(false) }
+    var domesticError by remember { mutableStateOf<Pair<String, String?>?>(null) }
+    var importFailure by remember { mutableStateOf<SpatialModelImportResult.Failure?>(null) }
+
+    val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null || importingModel) return@rememberLauncherForActivityResult
+        importingModel = true
+        scope.launch {
+            val result = SpatialModelImporter.importFromUri(context, uri)
+            importingModel = false
+            when (result) {
+                is SpatialModelImportResult.Success -> {
+                    (context.applicationContext as? AuraApplication)?.auraSing?.refreshReadiness()
+                    val name = resolveSpatialResourceDisplayName(result.resource)
+                    Toast.makeText(
+                        context,
+                        tr("model_import_success", "已成功导入：%s").format(name),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                is SpatialModelImportResult.Failure -> {
+                    importFailure = result
+                }
+            }
+        }
+    }
+
+    EffectsCard {
+        Preference(
+            title = tr("model_domestic_download", "国内用户下载"),
+            summary = if (fetchingDomesticUrl) {
+                tr("model_domestic_fetching", "正在获取国内下载链接…")
+            } else {
+                tr("model_domestic_download_summary", "获取国内网盘下载链接并跳转浏览器")
+            },
+            enabled = !fetchingDomesticUrl,
+        ) {
+            fetchingDomesticUrl = true
+            scope.launch {
+                val result = runCatching { SpatialDomesticMirror.fetchDownloadUrl() }
+                fetchingDomesticUrl = false
+                result.onSuccess { url ->
+                    val opened = runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }.isSuccess
+                    if (!opened) {
+                        domesticError = tr("model_domestic_open_failed", "未能打开系统浏览器或对应应用，请复制以下链接手动访问：\n%s").format(url) to url
+                    }
+                }.onFailure { err ->
+                    val msg = err.message?.takeIf { it.isNotBlank() } ?: tr("unknown_error", "未知错误")
+                    domesticError = tr("model_domestic_fetch_failed", "获取国内下载链接失败：%s").format(msg) to null
+                }
+            }
+        }
+        Preference(
+            title = tr("model_import_local", "导入模型"),
+            summary = if (importingModel) {
+                tr("model_importing", "正在校验并导入模型…")
+            } else {
+                tr("model_import_local_summary", "从本地选择已下载的模型或运行库文件，自动识别特征并校验导入")
+            },
+            enabled = !importingModel,
+        ) {
+            modelPicker.launch(arrayOf("*/*"))
+        }
+    }
+
+    domesticError?.let { (message, copyableUrl) ->
+        WindowDialog(
+            show = true,
+            title = tr("model_domestic_download", "国内用户下载"),
+            summary = message,
+            titleTextAlign = TextAlign.Start,
+            summaryTextAlign = TextAlign.Start,
+            onDismissRequest = { domesticError = null },
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (!copyableUrl.isNullOrBlank()) {
+                    GlassDialogButton(
+                        onClick = {
+                            copyToClipboard(context, "download_url", copyableUrl)
+                            Toast.makeText(context, tr("copied", "已复制"), Toast.LENGTH_SHORT).show()
+                            domesticError = null
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(tr("copy_link", "复制链接"))
+                    }
+                }
+                GlassDialogButton(
+                    onClick = { domesticError = null },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) {
+                    Text(tr("confirm", "确定"))
+                }
+            }
+        }
+    }
+
+    importFailure?.let { failure ->
+        WindowDialog(
+            show = true,
+            title = tr("model_import_failed_title", "导入模型失败"),
+            summary = formatImportFailureMessage(failure),
+            titleTextAlign = TextAlign.Start,
+            summaryTextAlign = TextAlign.Start,
+            onDismissRequest = { importFailure = null },
+        ) {
+            GlassDialogButton(
+                onClick = { importFailure = null },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColorsPrimary(),
+            ) {
+                Text(tr("confirm", "确定"))
+            }
+        }
+    }
+}
+
 @Composable
 fun SpatialCoverDownloadsPage(padding: PaddingValues) {
     val context = LocalContext.current
@@ -128,6 +322,9 @@ fun SpatialCoverDownloadsPage(padding: PaddingValues) {
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
+        }
+        item(key = "spatial_model_download_tools") {
+            ModelDownloadToolsSection()
         }
         item(key = "onnxruntime_runtime") {
             if (runtimeResource != null && runtimeAbi != null) {

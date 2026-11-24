@@ -224,7 +224,7 @@ object SpatialModelStore {
     const val RUNTIME_SUBDIR = "onnxruntime_runtime"
     const val RUNTIME_CORE_SO = "libonnxruntime.so"
     const val RUNTIME_JNI_SO = "libonnxruntime4j_jni.so"
-    private val RUNTIME_REQUIRED_LIBS = setOf(RUNTIME_CORE_SO, RUNTIME_JNI_SO)
+    internal val RUNTIME_REQUIRED_LIBS = setOf(RUNTIME_CORE_SO, RUNTIME_JNI_SO)
 
     fun runtimeAbi(): SpatialRuntimeAbi? = SpatialRuntimeAbi.forSupportedAbis()
 
@@ -246,7 +246,7 @@ object SpatialModelStore {
     fun file(context: Context, resource: SpatialModelResource): File =
         File(directory(context, resource.subDir), resource.fileName)
 
-    private fun markerFile(context: Context, resource: SpatialModelResource): File =
+    internal fun markerFile(context: Context, resource: SpatialModelResource): File =
         File(directory(context, resource.subDir), "${resource.fileName}.verified")
 
     fun partialFile(context: Context, resource: SpatialModelResource): File =
@@ -485,7 +485,7 @@ object SpatialModelStore {
         }
     }
 
-    private fun sha256(file: File): String {
+    internal fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val buffer = ByteArray(BUFFER_SIZE)
@@ -553,6 +553,22 @@ object SpatialModelDownloadManager {
 
     fun cancel(id: String) {
         jobs[id]?.cancel()
+    }
+
+    suspend fun cancelAndJoin(id: String) {
+        val job = withContext(Dispatchers.Main.immediate) {
+            jobs[id]?.also { it.cancel() }
+        }
+        job?.join()
+    }
+
+    fun markReady(context: Context, resource: SpatialModelResource) {
+        val appContext = context.applicationContext
+        if (SpatialModelStore.isReady(appContext, resource)) {
+            states[resource.id] = SpatialModelDownloadState.Done
+        } else {
+            syncFromDisk(appContext)
+        }
     }
 
     fun delete(context: Context, resource: SpatialModelResource) {

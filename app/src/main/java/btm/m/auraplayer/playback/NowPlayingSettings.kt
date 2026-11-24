@@ -15,6 +15,14 @@ enum class PlayerWeather { NONE, SNOW, RAIN }
 enum class CoverAnimation { DEFAULT, CARD, BLUR, COVER, PAGE, STACK, VERTICAL_FLIP, HORIZONTAL_FLIP }
 enum class CoverTheme { SQUARE, COVERFLOW, TILED }
 enum class StatusBarHideMode { NEVER, ALWAYS, NOW_PLAYING_ONLY, LANDSCAPE_ONLY }
+enum class LyricCopyMode {
+    ASK_EVERY_TIME,
+    ORIGINAL_ONLY,
+    ORIGINAL_AND_TRANSLATION,
+    ORIGINAL_AND_PRONUNCIATION,
+    ORIGINAL_PRONUNCIATION_AND_TRANSLATION,
+    PRONUNCIATION_AND_TRANSLATION,
+}
 enum class LyricTheme {
     BLUR,
     DEEP_STAR_SEA,
@@ -134,6 +142,7 @@ data class NowPlayingConfig(
     val mainLyricScalePercent: Float = LYRIC_SCALE_DEFAULT_PERCENT,
     val bgLyricScalePercent: Float = LYRIC_SCALE_DEFAULT_PERCENT,
     val statusBarHideMode: StatusBarHideMode = StatusBarHideMode.NEVER,
+    val lyricCopyMode: LyricCopyMode = LyricCopyMode.ASK_EVERY_TIME,
     val colorThemes: Map<PlayerTheme, PlayerColorTheme> = emptyMap(),
 ) {
     val usesArtworkBackground: Boolean
@@ -234,6 +243,7 @@ internal object NowPlayingCodec {
         put("mainLyricScalePercent", c.mainLyricScalePercent.toDouble())
         put("bgLyricScalePercent", c.bgLyricScalePercent.toDouble())
         put("statusBarHideMode", c.statusBarHideMode.name)
+        put("lyricCopyMode", c.lyricCopyMode.name)
     }.toString()
     fun decode(raw: String): NowPlayingConfig = runCatching {
         val j = JSONObject(raw); val defaults = NowPlayingConfig()
@@ -314,6 +324,8 @@ internal object NowPlayingCodec {
             ).toFloat().let(::clampLyricScalePercent),
             statusBarHideMode = StatusBarHideMode.entries.firstOrNull { it.name == j.optString("statusBarHideMode") }
                 ?: defaults.statusBarHideMode,
+            lyricCopyMode = LyricCopyMode.entries.firstOrNull { it.name == j.optString("lyricCopyMode") }
+                ?: defaults.lyricCopyMode,
         )
     }.getOrDefault(NowPlayingConfig())
 }

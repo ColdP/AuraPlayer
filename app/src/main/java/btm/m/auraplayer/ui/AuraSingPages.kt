@@ -415,6 +415,9 @@ fun AuraSingDownloadsPage(padding: PaddingValues) {
                 )
             }
         }
+        item(key = "aura_sing_model_download_tools") {
+            ModelDownloadToolsSection()
+        }
         item(key = "aura_sing_shared_onnxruntime") {
             if (runtimeResource != null && runtimeAbi != null) {
                 val title = tr("aura_sing_runtime_shared_title", "ONNX Runtime 推理引擎（%s · 与空间封面共用）")

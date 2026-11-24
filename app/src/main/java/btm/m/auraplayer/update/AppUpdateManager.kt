@@ -11,6 +11,19 @@ import java.net.URL
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
+internal enum class UpdateChannel(val prefValue: String) {
+    GITHUB("github"),
+    CLOUD_DISK("cloud_disk"),
+    ;
+
+    companion object {
+        fun fromPref(raw: String?): UpdateChannel = when (raw) {
+            CLOUD_DISK.prefValue -> CLOUD_DISK
+            else -> GITHUB
+        }
+    }
+}
+
 internal data class UpdateInfo(
     val versionCode: Long,
     val versionName: String,
@@ -20,8 +33,11 @@ internal data class UpdateInfo(
 )
 
 internal object AppUpdateManager {
+    private const val PREFS_NAME = "software_update"
+    private const val KEY_UPDATE_CHANNEL = "update_channel"
     private const val PRIMARY_UPDATE_URL = "https://coldp.github.io/auraplayer-updateinfo/update.json"
     private const val RAW_UPDATE_URL = "https://raw.githubusercontent.com/ColdP/auraplayer-updateinfo/main/update.json"
+    private const val CLOUD_DISK_UPDATE_URL = "https://raw.giteeusercontent.com/btm_m/aura-update-info/raw/master/update-info.json"
     private const val PAGES_NOTES_PREFIX = "https://coldp.github.io/AuraPlayer/"
     private const val RAW_NOTES_PREFIX = "https://raw.githubusercontent.com/ColdP/AuraPlayer/main/"
 
@@ -31,9 +47,25 @@ internal object AppUpdateManager {
     @Volatile
     var startupUpdatePending: UpdateInfo? = null
 
-    fun fetchUpdateInfo(): UpdateInfo {
+    fun getUpdateChannel(context: Context): UpdateChannel {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return UpdateChannel.fromPref(prefs.getString(KEY_UPDATE_CHANNEL, null))
+    }
+
+    fun setUpdateChannel(context: Context, channel: UpdateChannel) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_UPDATE_CHANNEL, channel.prefValue)
+            .apply()
+    }
+
+    fun fetchUpdateInfo(channel: UpdateChannel = UpdateChannel.GITHUB): UpdateInfo {
+        val urls = when (channel) {
+            UpdateChannel.GITHUB -> listOf(PRIMARY_UPDATE_URL, RAW_UPDATE_URL)
+            UpdateChannel.CLOUD_DISK -> listOf(CLOUD_DISK_UPDATE_URL)
+        }
         var lastError: Throwable? = null
-        for (url in listOf(PRIMARY_UPDATE_URL, RAW_UPDATE_URL)) {
+        for (url in urls) {
             val attempt = runCatching { parseUpdateInfo(httpGet(url, acceptJson = true)) }
             if (attempt.isSuccess) return attempt.getOrThrow()
             lastError = attempt.exceptionOrNull()

@@ -300,6 +300,14 @@ fun NowPlayingSettingsPage(padding: PaddingValues, open: (String) -> Unit = {}) 
                 ) { value ->
                     store.update { it.copy(bgLyricScalePercent = clampLyricScalePercent(value)) }
                 }
+                GlassDropdownPreference(
+                    title = tr("player_lyric_copy_mode", "歌词复制方式"),
+                    items = lyricCopyModeLabels(),
+                    selectedIndex = state.lyricCopyMode.ordinal,
+                    backdrop = LocalToolbarBackdrop.current,
+                ) { index ->
+                    store.update { it.copy(lyricCopyMode = LyricCopyMode.entries[index]) }
+                }
             }
         }
         item {
@@ -464,6 +472,15 @@ internal fun playerWeatherLabels(): List<String> = listOf(
     tr("player_effect_none", "不显示"),
     tr("player_effect_snow", "降雪"),
     tr("player_effect_rain", "降雨"),
+)
+
+internal fun lyricCopyModeLabels(): List<String> = listOf(
+    tr("lyric_copy_mode_ask", "每次询问"),
+    tr("lyric_copy_mode_original_only", "仅原文"),
+    tr("lyric_copy_mode_original_translation", "原文与翻译"),
+    tr("lyric_copy_mode_original_pronunciation", "原文与发音"),
+    tr("lyric_copy_mode_original_pronunciation_translation", "原文与发音与翻译"),
+    tr("lyric_copy_mode_pronunciation_translation", "发音与翻译"),
 )
 
 @Composable
