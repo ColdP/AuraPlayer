@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,11 +44,15 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import btm.m.auraplayer.AuraApplication
 import btm.m.auraplayer.AuraViewModel
 import btm.m.auraplayer.BuildConfig
+import btm.m.auraplayer.data.PROVIDER_QQ
+import btm.m.auraplayer.data.SongSort
+import btm.m.auraplayer.data.netease
 import btm.m.auraplayer.update.AppUpdateManager
 import btm.m.auraplayer.update.UpdateInfo
 import btm.m.auraplayer.ui.navigation.*
 import btm.m.auraplayer.ui.player.LocalSongActions
 import btm.m.auraplayer.ui.player.LocalOpenTagEditor
+import btm.m.auraplayer.ui.player.PlayerNavigationGeometry
 import btm.m.auraplayer.ui.player.SongActionRequest
 import btm.m.auraplayer.ui.player.SongActionsSheet
 import btm.m.auraplayer.ui.player.LyricShareRoute
@@ -88,7 +93,11 @@ internal val paletteStyles = listOf(ThemePaletteStyle.TonalSpot, ThemePaletteSty
 fun AuraRoot(model: AuraViewModel) {
     val settings = model.settings.value
     SideEffect { I18n.language = settings.language }
-    ProvideAuraAppTheme(settings = settings, previewColor = model.settings.previewColor) {
+    ProvideAuraAppTheme(
+        settings = settings,
+        previewColor = model.settings.previewColor,
+        coverArtwork = model.current?.artwork.orEmpty(),
+    ) {
         AuraAdaptiveLayout {
             val context = LocalContext.current
             val oobePreferences = remember(context) { context.getSharedPreferences("oobe", android.content.Context.MODE_PRIVATE) }
@@ -285,7 +294,22 @@ private fun AuraShell(model: AuraViewModel, onEnterOobe: () -> Unit = {}) {
     var searchAnchor by remember { mutableStateOf(Rect.Zero) }
     var bannerOverviewRequest by remember { mutableStateOf<BannerOverviewRequest?>(null) }
     var bannerOverviewProgress by remember { mutableFloatStateOf(0f) }
+    var localSelectionMode by remember { mutableStateOf(false) }
+    var localSelectedKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var localConfirmDelete by remember { mutableStateOf(false) }
+    var localPlaylistSheetOpen by remember { mutableStateOf(false) }
+    var localPlaylistSheetMounted by remember { mutableStateOf(false) }
+    LaunchedEffect(selected.intValue) {
+        if (selected.intValue != 2 && localSelectionMode) {
+            localSelectionMode = false
+            localSelectedKeys = emptySet()
+        }
+    }
     val page = pages.lastOrNull()
+    BackHandler(enabled = page == null && selected.intValue == 2 && localSelectionMode && !searchVisible && !playerOpen) {
+        localSelectionMode = false
+        localSelectedKeys = emptySet()
+    }
     val open: (String) -> Unit = { target ->
         if (!closing && pages.lastOrNull() != target) {
             seamless.open(pages.size, enabled = false)
@@ -453,6 +477,19 @@ private fun AuraShell(model: AuraViewModel, onEnterOobe: () -> Unit = {}) {
                             } else {
                                 null
                             }
+                            val localSongs = model.sortedSongs
+                            val selectedLocalSongs = remember(localSongs, localSelectedKeys) {
+                                localSongs.filter { it.key in localSelectedKeys }
+                            }
+                            val localToolbarBottomPadding = settings.navigationOffsetDp.coerceAtLeast(0).dp +
+                                PlayerNavigationGeometry.barHeight +
+                                PlayerNavigationGeometry.bottomSpacing +
+                                12.dp +
+                                if (model.current != null) {
+                                    PlayerNavigationGeometry.miniHeight + PlayerNavigationGeometry.miniGap
+                                } else {
+                                    0.dp
+                                }
                             Box(Modifier.fillMaxSize().blur(tabBlur.dp)) {
                                 AppPage(
                                     title = if (immersiveHomeBanner) "" else if (tab == 0) "Aura Player" else rootLabels[tab],
@@ -473,7 +510,52 @@ private fun AuraShell(model: AuraViewModel, onEnterOobe: () -> Unit = {}) {
                                     },
                                     actions = {
                                         if (tab == 0) GlassToolbarIconButton(MiuixIcons.Regular.Settings, tr("settings", "设置")) { open("settings") }
-                                        else if (tab == 2) SongsToolbarMenu(model)
+                                        else if (tab == 2) SongsToolbarMenu(model) {
+                                            localSelectionMode = true
+                                            localSelectedKeys = emptySet()
+                                        }
+                                    },
+                                    floatingToolbarPosition = ToolbarPosition.BottomCenter,
+                                    floatingToolbar = {
+                                        if (tab == 2) {
+                                            SongMultiSelectFloatingToolbar(
+                                                visible = localSelectionMode,
+                                                hasTracks = localSongs.isNotEmpty(),
+                                                selectedCount = selectedLocalSongs.size,
+                                                showDownload = false,
+                                                downloadEnabled = false,
+                                                showDelete = true,
+                                                deleteAsHide = true,
+                                                busy = false,
+                                                bottomPadding = localToolbarBottomPadding,
+                                                onSelectAll = {
+                                                    val allKeys = localSongs.mapTo(linkedSetOf()) { it.key }
+                                                    val allSelected = allKeys.isNotEmpty() && allKeys.all { it in localSelectedKeys }
+                                                    localSelectedKeys = if (allSelected) emptySet() else allKeys
+                                                },
+                                                onDownload = {},
+                                                onDelete = { localConfirmDelete = true },
+                                                onAddToQueue = {
+                                                    if (model.enqueueAll(selectedLocalSongs)) {
+                                                        Toast.makeText(
+                                                            context,
+                                                            tr("added_to_queue_count", "已添加 %d 首歌曲到播放队列").format(selectedLocalSongs.size),
+                                                            Toast.LENGTH_SHORT,
+                                                        ).show()
+                                                        localSelectionMode = false
+                                                        localSelectedKeys = emptySet()
+                                                    }
+                                                },
+                                                onAddToPlaylist = {
+                                                    localPlaylistSheetMounted = true
+                                                    localPlaylistSheetOpen = true
+                                                },
+                                                onClose = {
+                                                    localSelectionMode = false
+                                                    localSelectedKeys = emptySet()
+                                                },
+                                            )
+                                        }
                                     },
                                 ) { padding, _ ->
                                     val chromeSpace = if (model.current != null) 184 else 112
@@ -504,7 +586,24 @@ private fun AuraShell(model: AuraViewModel, onEnterOobe: () -> Unit = {}) {
                                             )
                                         }
                                         1 -> CloudHubPage(model, contentPadding, { open("login") }, { open("qq_login") }, { open("cloud_follows") }, { open("cloud_report") })
-                                        2 -> SongsPage(model, contentPadding, requestPermission) { secondary ->
+                                        2 -> SongsPage(
+                                            model = model,
+                                            padding = contentPadding,
+                                            requestPermission = requestPermission,
+                                            selectionMode = localSelectionMode,
+                                            selectedKeys = localSelectedKeys,
+                                            onEnterSelection = { song ->
+                                                localSelectionMode = true
+                                                localSelectedKeys = localSelectedKeys + song.key
+                                            },
+                                            onToggleSelect = { song ->
+                                                localSelectedKeys = if (song.key in localSelectedKeys) {
+                                                    localSelectedKeys - song.key
+                                                } else {
+                                                    localSelectedKeys + song.key
+                                                }
+                                            },
+                                        ) { secondary ->
                                             open(when (secondary) { 0 -> "albums"; 1 -> "artists"; else -> "localPlaylists" })
                                         }
                                     }
@@ -622,6 +721,41 @@ private fun AuraShell(model: AuraViewModel, onEnterOobe: () -> Unit = {}) {
                             openPage = open)
                     }
                 } }
+                val activeLocalSelectedSongs = remember(model.sortedSongs, localSelectedKeys) {
+                    model.sortedSongs.filter { it.key in localSelectedKeys }
+                }
+                BatchDeleteConfirmDialog(
+                    show = localConfirmDelete && activeLocalSelectedSongs.isNotEmpty(),
+                    title = tr("batch_block_songs_title", "屏蔽选中的 %d 首歌曲？").format(activeLocalSelectedSongs.size),
+                    summary = tr(
+                        "batch_block_songs_summary",
+                        "屏蔽后这些歌曲将不会在本地音乐库中显示，你可以在“设置 - 音频 - 扫描 - 已屏蔽的歌曲”中随时取消屏蔽。",
+                    ),
+                    confirmLabel = tr("block_song_confirm_action", "屏蔽"),
+                    onDismiss = { localConfirmDelete = false },
+                    onConfirm = {
+                        model.blockSongs(activeLocalSelectedSongs)
+                        localConfirmDelete = false
+                        localSelectionMode = false
+                        localSelectedKeys = emptySet()
+                    },
+                )
+                if (localPlaylistSheetMounted) {
+                    CompositionLocalProvider(LocalDialogBackdrop provides backdrop) {
+                        BatchPlaylistPickerSheet(
+                            model = model,
+                            songs = activeLocalSelectedSongs,
+                            show = localPlaylistSheetOpen,
+                            backdrop = backdrop,
+                            dismiss = { localPlaylistSheetOpen = false },
+                            onDismissFinished = { if (!localPlaylistSheetOpen) localPlaylistSheetMounted = false },
+                            onCompleted = {
+                                localSelectionMode = false
+                                localSelectedKeys = emptySet()
+                            },
+                        )
+                    }
+                }
                 }
                 IosUsbVolumeHud(
                     effects = model.app.effects,
@@ -814,9 +948,41 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         )
         return
     }
+    val detailContext = LocalContext.current
     val playlistPage = page == "collection" && !catalog && effectiveCollection != null
     val playlistSearchSupported = playlistPage
     val playlistRevision = model.history.revision
+    val playlistSortRevision = model.playlistSort.revision
+    val playlistCloud = destination?.cloud
+    val playlistSortOrder = if (playlistPage && effectiveCollection != null) {
+        remember(effectiveCollection.key, playlistSortRevision) {
+            model.playlistSortOrder(effectiveCollection.key)
+        }
+    } else SongSort.DEFAULT
+    val localPlaylist = if (playlistPage && effectiveCollection != null) {
+        remember(effectiveCollection.key, playlistRevision) {
+            model.history.playlists().find { "playlist:${it.id}" == effectiveCollection.key }
+        }
+    } else null
+    val isLocalUserPlaylist = localPlaylist != null
+    val isOwnedCloudPlaylist = playlistPage && model.isOwnedNeteasePlaylist(playlistCloud)
+    val isDailyCollection = effectiveCollection?.key == "cloud:daily"
+    val playlistVisibleByKey = remember(model.songs) { model.songs.associateBy { it.key } }
+    val playlistRawTracks = remember(
+        playlistPage,
+        localPlaylist,
+        model.songs,
+        playlistCloud?.songs,
+        effectiveCollection?.songs,
+        playlistVisibleByKey,
+    ) {
+        if (!playlistPage || effectiveCollection == null) emptyList()
+        else if (localPlaylist != null) localPlaylist.songKeys.mapNotNull(playlistVisibleByKey::get).distinctBy { it.key }
+        else (playlistCloud?.songs ?: effectiveCollection.songs.filter { it.cloud || it.key in playlistVisibleByKey }).distinctBy { it.key }
+    }
+    val playlistSortedTracks = remember(playlistRawTracks, playlistSortOrder) {
+        playlistSortOrder.applyToPlaylist(playlistRawTracks)
+    }
     val playlistCoverUri = if (playlistPage && effectiveCollection != null) {
         remember(effectiveCollection.key, effectiveCollection.artwork, destination?.cloud?.songs, model.songs, playlistRevision) {
             resolvePlaylistCoverUri(model, effectiveCollection, destination?.cloud)
@@ -826,6 +992,25 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
     var playlistAddSongs by remember(effectiveCollection?.key) { mutableStateOf(false) }
     var playlistSearchQuery by rememberSaveable { mutableStateOf("") }
     var playlistSearchExpanded by rememberSaveable { mutableStateOf(false) }
+    val playlistDisplayedTracks = remember(playlistSortedTracks, playlistSearchQuery) {
+        filterPlaylistSongs(playlistSortedTracks, playlistSearchQuery)
+    }
+    var playlistSelectionMode by remember(effectiveCollection?.key) { mutableStateOf(false) }
+    var playlistSelectedKeys by remember(effectiveCollection?.key) { mutableStateOf<Set<String>>(emptySet()) }
+    var playlistConfirmDelete by remember(effectiveCollection?.key) { mutableStateOf(false) }
+    var playlistDeleting by remember(effectiveCollection?.key) { mutableStateOf(false) }
+    var playlistDownloadSheetOpen by remember(effectiveCollection?.key) { mutableStateOf(false) }
+    var playlistDownloadSheetMounted by remember(effectiveCollection?.key) { mutableStateOf(false) }
+    var playlistAddSheetOpen by remember(effectiveCollection?.key) { mutableStateOf(false) }
+    var playlistAddSheetMounted by remember(effectiveCollection?.key) { mutableStateOf(false) }
+    val selectedPlaylistSongs = remember(playlistDisplayedTracks, playlistSelectedKeys) {
+        playlistDisplayedTracks.filter { it.key in playlistSelectedKeys }
+    }
+    val closePlaylistSelection = {
+        playlistSelectionMode = false
+        playlistSelectedKeys = emptySet()
+        Unit
+    }
     val keyboard = LocalSoftwareKeyboardController.current
     val closePlaylistSearch = {
         playlistSearchExpanded = false
@@ -834,9 +1019,19 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         Unit
     }
     BackHandler(
-        enabled = playlistSearchSupported && (playlistSearchExpanded || playlistSearchQuery.isNotEmpty()),
+        enabled = playlistPage && playlistSelectionMode,
+        onBack = closePlaylistSelection,
+    )
+    BackHandler(
+        enabled = playlistSearchSupported && !playlistSelectionMode && (playlistSearchExpanded || playlistSearchQuery.isNotEmpty()),
         onBack = closePlaylistSearch,
     )
+    val playlistToolbarBottomPadding = model.settings.value.navigationOffsetDp.coerceAtLeast(0).dp +
+        if (model.current != null) {
+            PlayerNavigationGeometry.miniHeight + PlayerNavigationGeometry.bottomSpacing + 14.dp
+        } else {
+            0.dp
+        }
     AppPage(title, back, showLargeTitle = page != "about" && page != "collection" && (!catalog || page in setOf("artistSongs", "artistAlbums", "artistSingles")),
         actions = {
             if (page == "cloud_report") {
@@ -844,14 +1039,66 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
             } else if (page == "cloud_charts") {
                 GlassToolbarIconButton(MiuixIcons.Regular.Refresh, tr("refresh", "刷新")) { model.refreshCloudCharts(force = true) }
             } else if (playlistPage && effectiveCollection != null) {
-                val cloud = destination?.cloud
-                if (effectiveCollection.key.startsWith("playlist:")) {
-                    GlassToolbarIconButton(MiuixIcons.Regular.Add, tr("add_songs", "添加歌曲")) { playlistAddSongs = true }
-                } else if (cloud != null) {
-                    GlassToolbarIconButton(MiuixIcons.Regular.Refresh, tr("refresh", "刷新")) {
-                        if (!cloud.loading) model.refreshCloudSongs()
-                    }
-                }
+                PlaylistToolbarMenu(
+                    model = model,
+                    isLocalUserPlaylist = isLocalUserPlaylist,
+                    cloud = playlistCloud,
+                    isDailyCollection = isDailyCollection,
+                    tracks = playlistDisplayedTracks,
+                    sortOrder = playlistSortOrder,
+                    onAddSongs = { playlistAddSongs = true },
+                    onEnterMultiSelect = {
+                        playlistSelectionMode = true
+                        playlistSelectedKeys = emptySet()
+                    },
+                    onSelectSort = { sort ->
+                        model.setPlaylistSortOrder(effectiveCollection.key, sort)
+                    },
+                )
+            }
+        },
+        floatingToolbarPosition = ToolbarPosition.BottomCenter,
+        floatingToolbar = {
+            if (playlistPage && effectiveCollection != null) {
+                val showDownload = playlistCloud?.playlist?.provider != PROVIDER_QQ &&
+                    (playlistCloud != null || playlistDisplayedTracks.any { it.netease })
+                val downloadEnabled = selectedPlaylistSongs.any { it.netease }
+                val showDelete = isLocalUserPlaylist || isOwnedCloudPlaylist
+                SongMultiSelectFloatingToolbar(
+                    visible = playlistSelectionMode,
+                    hasTracks = playlistDisplayedTracks.isNotEmpty(),
+                    selectedCount = selectedPlaylistSongs.size,
+                    showDownload = showDownload,
+                    downloadEnabled = downloadEnabled,
+                    showDelete = showDelete,
+                    busy = playlistDeleting || model.downloadBusy,
+                    bottomPadding = playlistToolbarBottomPadding,
+                    onSelectAll = {
+                        val allKeys = playlistDisplayedTracks.mapTo(linkedSetOf()) { it.key }
+                        val allSelected = allKeys.isNotEmpty() && allKeys.all { it in playlistSelectedKeys }
+                        playlistSelectedKeys = if (allSelected) emptySet() else allKeys
+                    },
+                    onDownload = {
+                        playlistDownloadSheetMounted = true
+                        playlistDownloadSheetOpen = true
+                    },
+                    onDelete = { playlistConfirmDelete = true },
+                    onAddToQueue = {
+                        if (model.enqueueAll(selectedPlaylistSongs)) {
+                            Toast.makeText(
+                                detailContext,
+                                tr("added_to_queue_count", "已添加 %d 首歌曲到播放队列").format(selectedPlaylistSongs.size),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            closePlaylistSelection()
+                        }
+                    },
+                    onAddToPlaylist = {
+                        playlistAddSheetMounted = true
+                        playlistAddSheetOpen = true
+                    },
+                    onClose = closePlaylistSelection,
+                )
             }
         },
         header = {
@@ -903,6 +1150,75 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
         },
         useLegacyTopBarBackdrop = page == "about",
         topBarTint = catalogTopBarTint ?: playlistHeroTheme?.topBarTint,
+        overlay = {
+            if (playlistPage && effectiveCollection != null) {
+                val backdrop = LocalDialogBackdrop.current
+                BatchDeleteConfirmDialog(
+                    show = playlistConfirmDelete && selectedPlaylistSongs.isNotEmpty(),
+                    title = tr("batch_remove_from_playlist_title", "从歌单移除选中的 %d 首歌曲？").format(selectedPlaylistSongs.size),
+                    summary = if (isLocalUserPlaylist) {
+                        tr("batch_remove_local_playlist_summary", "只会从当前歌单移除，不会删除本地音频文件。")
+                    } else {
+                        tr("batch_remove_cloud_playlist_summary", "确认将选中的歌曲从该云端歌单中移除吗？")
+                    },
+                    confirmLabel = tr("delete", "删除"),
+                    busy = playlistDeleting,
+                    onDismiss = { playlistConfirmDelete = false },
+                    onConfirm = {
+                        if (localPlaylist != null) {
+                            model.removeSongsFromLocalPlaylist(localPlaylist.id, selectedPlaylistSongs.mapTo(hashSetOf()) { it.key })
+                            playlistConfirmDelete = false
+                            closePlaylistSelection()
+                        } else if (playlistCloud != null && isOwnedCloudPlaylist) {
+                            playlistDeleting = true
+                            model.removeSongsFromCloudPlaylist(playlistCloud.playlist, selectedPlaylistSongs) { success ->
+                                playlistDeleting = false
+                                if (success) {
+                                    playlistConfirmDelete = false
+                                    closePlaylistSelection()
+                                } else {
+                                    Toast.makeText(
+                                        detailContext,
+                                        tr("playlist_remove_failed", "移除失败，请重试"),
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            }
+                        }
+                    },
+                )
+                if (playlistDownloadSheetMounted) {
+                    BatchDownloadQualitySheet(
+                        model = model,
+                        songs = selectedPlaylistSongs,
+                        show = playlistDownloadSheetOpen,
+                        backdrop = backdrop,
+                        dismiss = { playlistDownloadSheetOpen = false },
+                        onDismissFinished = { if (!playlistDownloadSheetOpen) playlistDownloadSheetMounted = false },
+                        onComplete = { succeeded, failed ->
+                            val message = when {
+                                succeeded > 0 && failed == 0 -> tr("batch_download_started", "已开始下载 %d 首歌曲").format(succeeded)
+                                succeeded > 0 && failed > 0 -> tr("batch_download_partial", "已开始下载 %d 首，%d 首失败").format(succeeded, failed)
+                                else -> tr("download_unavailable", "下载失败，此音质可能需要会员或购买，请选择其他音质重试")
+                            }
+                            Toast.makeText(detailContext, message, Toast.LENGTH_SHORT).show()
+                            if (succeeded > 0) closePlaylistSelection()
+                        },
+                    )
+                }
+                if (playlistAddSheetMounted) {
+                    BatchPlaylistPickerSheet(
+                        model = model,
+                        songs = selectedPlaylistSongs,
+                        show = playlistAddSheetOpen,
+                        backdrop = backdrop,
+                        dismiss = { playlistAddSheetOpen = false },
+                        onDismissFinished = { if (!playlistAddSheetOpen) playlistAddSheetMounted = false },
+                        onCompleted = closePlaylistSelection,
+                    )
+                }
+            }
+        },
         pageBackground = when {
             page in setOf("albumInfo", "artistInfo") && effectiveCollection != null -> ({ AlbumInfoBackground(effectiveCollection, Modifier.matchParentSize()) })
             catalog && page !in setOf("artistSongs", "artistAlbums", "artistSingles") -> ({
@@ -995,6 +1311,23 @@ private fun DetailPage(route: String, model: AuraViewModel, back: () -> Unit, op
                     bannerTheme = playlistHeroTheme,
                     addToPlaylist = playlistAddSongs,
                     onDismissAddToPlaylist = { playlistAddSongs = false },
+                    sortOrder = playlistSortOrder,
+                    selectionMode = playlistSelectionMode,
+                    selectedKeys = playlistSelectedKeys,
+                    onEnterSelection = { song ->
+                        playlistSelectionMode = true
+                        playlistSelectedKeys = playlistSelectedKeys + song.key
+                    },
+                    onToggleSelect = { song ->
+                        playlistSelectedKeys = if (song.key in playlistSelectedKeys) {
+                            playlistSelectedKeys - song.key
+                        } else {
+                            playlistSelectedKeys + song.key
+                        }
+                    },
+                    onResetSortToDefault = {
+                        model.setPlaylistSortOrder(effectiveCollection.key, SongSort.DEFAULT)
+                    },
                 )
             }
             "artistSongs", "artistAlbums", "artistSingles" -> if (collection != null && albumInfoDestination != null) {

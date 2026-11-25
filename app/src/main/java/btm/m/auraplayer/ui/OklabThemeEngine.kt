@@ -2,12 +2,16 @@
 package btm.m.auraplayer.ui
 
 import android.graphics.Bitmap
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
@@ -838,53 +842,78 @@ internal fun Colors.withOklabColors(s: OklabColorScheme): Colors = copy(
     sliderBackground = s.secondaryContainer,
 )
 
+internal fun lerpOklabColorScheme(start: OklabColorScheme, stop: OklabColorScheme, fraction: Float): OklabColorScheme {
+    val t = fraction.coerceIn(0f, 1f)
+    return OklabColorScheme(
+        dark = stop.dark,
+        surface = lerp(start.surface, stop.surface, t),
+        surfaceContainerLowest = lerp(start.surfaceContainerLowest, stop.surfaceContainerLowest, t),
+        surfaceContainerLow = lerp(start.surfaceContainerLow, stop.surfaceContainerLow, t),
+        surfaceContainer = lerp(start.surfaceContainer, stop.surfaceContainer, t),
+        surfaceContainerHigh = lerp(start.surfaceContainerHigh, stop.surfaceContainerHigh, t),
+        surfaceContainerHighest = lerp(start.surfaceContainerHighest, stop.surfaceContainerHighest, t),
+        onSurface = lerp(start.onSurface, stop.onSurface, t),
+        onSurfaceVariant = lerp(start.onSurfaceVariant, stop.onSurfaceVariant, t),
+        primary = lerp(start.primary, stop.primary, t),
+        onPrimary = lerp(start.onPrimary, stop.onPrimary, t),
+        primaryContainer = lerp(start.primaryContainer, stop.primaryContainer, t),
+        onPrimaryContainer = lerp(start.onPrimaryContainer, stop.onPrimaryContainer, t),
+        secondary = lerp(start.secondary, stop.secondary, t),
+        onSecondary = lerp(start.onSecondary, stop.onSecondary, t),
+        secondaryContainer = lerp(start.secondaryContainer, stop.secondaryContainer, t),
+        onSecondaryContainer = lerp(start.onSecondaryContainer, stop.onSecondaryContainer, t),
+        tertiary = lerp(start.tertiary, stop.tertiary, t),
+        onTertiary = lerp(start.onTertiary, stop.onTertiary, t),
+        tertiaryContainer = lerp(start.tertiaryContainer, stop.tertiaryContainer, t),
+        onTertiaryContainer = lerp(start.onTertiaryContainer, stop.onTertiaryContainer, t),
+        error = lerp(start.error, stop.error, t),
+        onError = lerp(start.onError, stop.onError, t),
+        errorContainer = lerp(start.errorContainer, stop.errorContainer, t),
+        onErrorContainer = lerp(start.onErrorContainer, stop.onErrorContainer, t),
+        outline = lerp(start.outline, stop.outline, t),
+        outlineVariant = lerp(start.outlineVariant, stop.outlineVariant, t),
+        oneUiBackground = lerp(start.oneUiBackground, stop.oneUiBackground, t),
+        oneUiCard = lerp(start.oneUiCard, stop.oneUiCard, t),
+        oneUiCardAlt = lerp(start.oneUiCardAlt, stop.oneUiCardAlt, t),
+        oneUiText = lerp(start.oneUiText, stop.oneUiText, t),
+        oneUiSubText = lerp(start.oneUiSubText, stop.oneUiSubText, t),
+        oneUiDivider = lerp(start.oneUiDivider, stop.oneUiDivider, t),
+        oneUiAccent = lerp(start.oneUiAccent, stop.oneUiAccent, t),
+        oneUiAccentDeep = lerp(start.oneUiAccentDeep, stop.oneUiAccentDeep, t),
+        oneUiOnAccent = lerp(start.oneUiOnAccent, stop.oneUiOnAccent, t),
+        oneUiChip = lerp(start.oneUiChip, stop.oneUiChip, t),
+        oneUiOnChip = lerp(start.oneUiOnChip, stop.oneUiOnChip, t),
+        oneUiTrack = lerp(start.oneUiTrack, stop.oneUiTrack, t),
+        oneUiSegmentTrack = lerp(start.oneUiSegmentTrack, stop.oneUiSegmentTrack, t),
+        oneUiSegmentThumb = lerp(start.oneUiSegmentThumb, stop.oneUiSegmentThumb, t),
+    )
+}
+
 @Composable
-internal fun rememberOklabScheme(seed: Int, isDark: Boolean, paletteIndex: Int): OklabColorScheme {
+internal fun rememberOklabScheme(
+    seed: Int,
+    isDark: Boolean,
+    paletteIndex: Int,
+    durationMillis: Int = THEME_COLOR_TRANSITION_MS,
+): OklabColorScheme {
     val target = remember(seed, isDark, paletteIndex) {
         OklabThemeEngine.generateScheme(seed, isDark, paletteIndex)
     }
-    val spec = tween<Color>(340, easing = FastOutSlowInEasing)
-    return OklabColorScheme(
-        dark = target.dark,
-        surface = animateColorAsState(target.surface, spec, label = "oklabSurface").value,
-        surfaceContainerLowest = animateColorAsState(target.surfaceContainerLowest, spec, label = "oklabSurfaceLowest").value,
-        surfaceContainerLow = animateColorAsState(target.surfaceContainerLow, spec, label = "oklabSurfaceLow").value,
-        surfaceContainer = animateColorAsState(target.surfaceContainer, spec, label = "oklabSurfaceCont").value,
-        surfaceContainerHigh = animateColorAsState(target.surfaceContainerHigh, spec, label = "oklabSurfaceHigh").value,
-        surfaceContainerHighest = animateColorAsState(target.surfaceContainerHighest, spec, label = "oklabSurfaceHighest").value,
-        onSurface = animateColorAsState(target.onSurface, spec, label = "oklabOnSurface").value,
-        onSurfaceVariant = animateColorAsState(target.onSurfaceVariant, spec, label = "oklabOnSurfaceVar").value,
-        primary = animateColorAsState(target.primary, spec, label = "oklabPrimary").value,
-        onPrimary = animateColorAsState(target.onPrimary, spec, label = "oklabOnPrimary").value,
-        primaryContainer = animateColorAsState(target.primaryContainer, spec, label = "oklabPrimaryCont").value,
-        onPrimaryContainer = animateColorAsState(target.onPrimaryContainer, spec, label = "oklabOnPrimaryCont").value,
-        secondary = animateColorAsState(target.secondary, spec, label = "oklabSecondary").value,
-        onSecondary = animateColorAsState(target.onSecondary, spec, label = "oklabOnSecondary").value,
-        secondaryContainer = animateColorAsState(target.secondaryContainer, spec, label = "oklabSecondaryCont").value,
-        onSecondaryContainer = animateColorAsState(target.onSecondaryContainer, spec, label = "oklabOnSecondaryCont").value,
-        tertiary = animateColorAsState(target.tertiary, spec, label = "oklabTertiary").value,
-        onTertiary = animateColorAsState(target.onTertiary, spec, label = "oklabOnTertiary").value,
-        tertiaryContainer = animateColorAsState(target.tertiaryContainer, spec, label = "oklabTertiaryCont").value,
-        onTertiaryContainer = animateColorAsState(target.onTertiaryContainer, spec, label = "oklabOnTertiaryCont").value,
-        error = animateColorAsState(target.error, spec, label = "oklabError").value,
-        onError = animateColorAsState(target.onError, spec, label = "oklabOnError").value,
-        errorContainer = animateColorAsState(target.errorContainer, spec, label = "oklabErrorCont").value,
-        onErrorContainer = animateColorAsState(target.onErrorContainer, spec, label = "oklabOnErrorCont").value,
-        outline = animateColorAsState(target.outline, spec, label = "oklabOutline").value,
-        outlineVariant = animateColorAsState(target.outlineVariant, spec, label = "oklabOutlineVar").value,
-        oneUiBackground = animateColorAsState(target.oneUiBackground, spec, label = "oklabOneBg").value,
-        oneUiCard = animateColorAsState(target.oneUiCard, spec, label = "oklabOneCard").value,
-        oneUiCardAlt = animateColorAsState(target.oneUiCardAlt, spec, label = "oklabOneCardAlt").value,
-        oneUiText = animateColorAsState(target.oneUiText, spec, label = "oklabOneText").value,
-        oneUiSubText = animateColorAsState(target.oneUiSubText, spec, label = "oklabOneSubText").value,
-        oneUiDivider = animateColorAsState(target.oneUiDivider, spec, label = "oklabOneDivider").value,
-        oneUiAccent = animateColorAsState(target.oneUiAccent, spec, label = "oklabOneAccent").value,
-        oneUiAccentDeep = animateColorAsState(target.oneUiAccentDeep, spec, label = "oklabOneAccentDeep").value,
-        oneUiOnAccent = animateColorAsState(target.oneUiOnAccent, spec, label = "oklabOneOnAccent").value,
-        oneUiChip = animateColorAsState(target.oneUiChip, spec, label = "oklabOneChip").value,
-        oneUiOnChip = animateColorAsState(target.oneUiOnChip, spec, label = "oklabOneOnChip").value,
-        oneUiTrack = animateColorAsState(target.oneUiTrack, spec, label = "oklabOneTrack").value,
-        oneUiSegmentTrack = animateColorAsState(target.oneUiSegmentTrack, spec, label = "oklabOneSegTrack").value,
-        oneUiSegmentThumb = animateColorAsState(target.oneUiSegmentThumb, spec, label = "oklabOneSegThumb").value,
-    )
+    var from by remember { mutableStateOf(target) }
+    var to by remember { mutableStateOf(target) }
+    val progress = remember { Animatable(1f) }
+    val current = if (progress.value >= 1f) to else lerpOklabColorScheme(from, to, progress.value)
+    val latestCurrent by rememberUpdatedState(current)
+    LaunchedEffect(target) {
+        if (to != target) {
+            from = latestCurrent
+            to = target
+            progress.snapTo(0f)
+            progress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = durationMillis, easing = ThemeColorTransitionEasing),
+            )
+        }
+    }
+    return current
 }

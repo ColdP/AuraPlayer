@@ -21,9 +21,11 @@ import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 /** DownloadManager owns network transfer; WorkManager durably owns conversion, tagging and publishing. */
 object MusicDownloads {
+    private val cachedDownloadIds = AtomicLong(0L)
     private fun prefs(context: Context) = context.getSharedPreferences("aura.downloads", Context.MODE_PRIVATE)
     internal fun completedPreferences(context: Context) = context.getSharedPreferences("aura.downloaded", Context.MODE_PRIVATE)
 
@@ -55,7 +57,7 @@ object MusicDownloads {
     }
     fun enqueue(context: Context, song: Song, source: DownloadSource): Long {
         val cacheKey = PlaybackAudioCache.key(context, song.id, source.quality)
-        val cachedId = -System.currentTimeMillis()
+        val cachedId = -(System.currentTimeMillis() * 1000L + (cachedDownloadIds.incrementAndGet() % 1000L))
         val cached = File(context.cacheDir, "download-cache-$cachedId.source")
         if (PlaybackAudioCache.copyIfFullyCached(context, cacheKey, cached)) {
             val record = downloadRecord(song, source, cached.name, cachedSource = cached.absolutePath)

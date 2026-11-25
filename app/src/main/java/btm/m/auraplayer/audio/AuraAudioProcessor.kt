@@ -6,7 +6,12 @@ import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.abs
+import kotlin.math.exp
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.tanh
 
 /** Kept active even in bypass, so presets can change without re-preparing a track. */
 @UnstableApi
@@ -15,6 +20,7 @@ class AuraAudioProcessor(
     private val smartStyle: () -> SoundStyle? = { null },
     private val trackGeneration: () -> Long = { 0L },
     private val onSmartConfig: (DspConfig) -> Unit = {},
+    private val antiClipping: () -> Boolean = { false },
 ) : BaseAudioProcessor() {
     companion object {
         val encodings = setOf(C.ENCODING_PCM_8BIT, C.ENCODING_PCM_16BIT, C.ENCODING_PCM_24BIT, C.ENCODING_PCM_32BIT, C.ENCODING_PCM_FLOAT,
@@ -29,6 +35,11 @@ class AuraAudioProcessor(
     private var input = DoubleArray(0)
     private var output = DoubleArray(0)
     private var oldOutput = DoubleArray(0)
+    private var tpPrev1 = DoubleArray(0)
+    private var tpPrev2 = DoubleArray(0)
+    private var tpGain = 1.0
+    private var tpAttack = 0.0
+    private var tpRelease = 0.0
     private var remaining = 0
     private var transitionFrames = 1
 
@@ -39,9 +50,15 @@ class AuraAudioProcessor(
     }
     override fun onFlush(streamMetadata: AudioProcessor.StreamMetadata) {
         applied = null; engine = null; previous = null; remaining = 0
-        input = DoubleArray(inputAudioFormat.channelCount.coerceAtLeast(0))
-        output = DoubleArray(input.size); oldOutput = DoubleArray(input.size)
-        transitionFrames = (inputAudioFormat.sampleRate * .03).toInt().coerceAtLeast(1)
+        val chCount = inputAudioFormat.channelCount.coerceAtLeast(0)
+        input = DoubleArray(chCount)
+        output = DoubleArray(chCount); oldOutput = DoubleArray(chCount)
+        tpPrev1 = DoubleArray(chCount); tpPrev2 = DoubleArray(chCount)
+        tpGain = 1.0
+        val sr = inputAudioFormat.sampleRate.coerceAtLeast(1)
+        tpAttack = exp(-1.0 / (sr * 0.0005))
+        tpRelease = exp(-1.0 / (sr * 0.15))
+        transitionFrames = (sr * .03).toInt().coerceAtLeast(1)
         if (input.isNotEmpty() && inputAudioFormat.sampleRate in 8000..384000) {
             val gen = trackGeneration()
             if (analyzer == null || gen != lastTrackGen) {
@@ -74,18 +91,22 @@ class AuraAudioProcessor(
         }
         val bytes = inputBuffer.remaining()
         val encoding = inputAudioFormat.encoding
+        val chCount = input.size
         val bigEndian = encoding == C.ENCODING_PCM_16BIT_BIG_ENDIAN || encoding == C.ENCODING_PCM_24BIT_BIG_ENDIAN || encoding == C.ENCODING_PCM_32BIT_BIG_ENDIAN
         val order = if (bigEndian) ByteOrder.BIG_ENDIAN else ByteOrder.LITTLE_ENDIAN
         val sampleBytes = when (encoding) { C.ENCODING_PCM_8BIT -> 1; C.ENCODING_PCM_16BIT, C.ENCODING_PCM_16BIT_BIG_ENDIAN -> 2; C.ENCODING_PCM_24BIT, C.ENCODING_PCM_24BIT_BIG_ENDIAN -> 3; else -> 4 }
-        require(bytes % (input.size * sampleBytes) == 0) { "PCM_FRAME_ALIGNMENT" }
+        require(bytes % (chCount * sampleBytes) == 0) { "PCM_FRAME_ALIGNMENT" }
         val buffer = replaceOutputBuffer(bytes).order(order)
-        if (desired.bypass && remaining == 0 && activeStyle == null) {
+        val protectBypass = desired.bypass && remaining == 0 && activeStyle == null && antiClipping()
+        if (desired.bypass && remaining == 0 && activeStyle == null && !protectBypass) {
             // Preserve every PCM byte, including -32768. No float conversion, gain or limiter.
+            tpGain = 1.0
+            tpPrev1.fill(0.0); tpPrev2.fill(0.0)
             buffer.put(inputBuffer)
         } else {
             inputBuffer.order(order)
             while (inputBuffer.hasRemaining()) {
-                for (ch in input.indices) input[ch] = when (inputAudioFormat.encoding) {
+                for (ch in 0 until chCount) input[ch] = when (encoding) {
                     C.ENCODING_PCM_8BIT -> ((inputBuffer.get().toInt() and 255) - 128).toDouble() / 128
                     C.ENCODING_PCM_16BIT, C.ENCODING_PCM_16BIT_BIG_ENDIAN -> inputBuffer.short.toDouble() / 32768
                     C.ENCODING_PCM_24BIT, C.ENCODING_PCM_24BIT_BIG_ENDIAN -> {
@@ -95,27 +116,43 @@ class AuraAudioProcessor(
                         value.toDouble() / 8388608
                     }
                     C.ENCODING_PCM_32BIT, C.ENCODING_PCM_32BIT_BIG_ENDIAN -> inputBuffer.int.toDouble() / 2147483648.0
-                    else -> inputBuffer.float.toDouble().let { if (it.isFinite()) it.coerceIn(-1.0, 1.0) else 0.0 }
+                    else -> inputBuffer.float.toDouble().let { if (it.isFinite()) it.coerceIn(-4.0, 4.0) else 0.0 }
                 }
-                if (activeStyle != null && analyzer?.offerFrame(input) == true) {
-                    val updated = BuiltInPresets.styled(analyzer!!.currentConfig, activeStyle)
-                    if (updated != applied) {
-                        previous = engine
-                        engine = DspEngine(updated, inputAudioFormat.sampleRate, input.size)
-                        applied = updated
-                        remaining = if (previous == null) 0 else transitionFrames
-                        onSmartConfig(updated)
+                if (protectBypass) {
+                    var estTruePeak = 0.0
+                    for (ch in 0 until chCount) {
+                        val x = input[ch]
+                        val interp = -0.125 * tpPrev2[ch] + 0.75 * tpPrev1[ch] + 0.375 * x
+                        tpPrev2[ch] = tpPrev1[ch]
+                        tpPrev1[ch] = x
+                        val p = max(abs(x), abs(interp))
+                        if (p > estTruePeak) estTruePeak = p
+                    }
+                    val required = min(1.0, 0.90 / max(1e-12, estTruePeak))
+                    val pole = if (required < tpGain) tpAttack else tpRelease
+                    tpGain = required + pole * (tpGain - required)
+                    for (ch in 0 until chCount) output[ch] = softLimitBypass(input[ch] * tpGain)
+                } else {
+                    if (activeStyle != null && analyzer?.offerFrame(input) == true) {
+                        val updated = BuiltInPresets.styled(analyzer!!.currentConfig, activeStyle)
+                        if (updated != applied) {
+                            previous = engine
+                            engine = DspEngine(updated, inputAudioFormat.sampleRate, chCount)
+                            applied = updated
+                            remaining = if (previous == null) 0 else transitionFrames
+                            onSmartConfig(updated)
+                        }
+                    }
+                    engine!!.processFrame(input, output)
+                    if (remaining > 0) {
+                        previous!!.processFrame(input, oldOutput)
+                        val mix = 1.0 - remaining.toDouble() / transitionFrames
+                        for (ch in 0 until chCount) output[ch] = oldOutput[ch] * (1 - mix) + output[ch] * mix
+                        remaining--
+                        if (remaining == 0) previous = null
                     }
                 }
-                engine!!.processFrame(input, output)
-                if (remaining > 0) {
-                    previous!!.processFrame(input, oldOutput)
-                    val mix = 1.0 - remaining.toDouble() / transitionFrames
-                    for (ch in input.indices) output[ch] = oldOutput[ch] * (1 - mix) + output[ch] * mix
-                    remaining--
-                    if (remaining == 0) previous = null
-                }
-                for (ch in input.indices) when (inputAudioFormat.encoding) {
+                for (ch in 0 until chCount) when (encoding) {
                     C.ENCODING_PCM_8BIT -> buffer.put(((output[ch] * 128).roundToInt() + 128).coerceIn(0, 255).toByte())
                     C.ENCODING_PCM_16BIT, C.ENCODING_PCM_16BIT_BIG_ENDIAN -> buffer.putShort((output[ch] * 32768).roundToInt().coerceIn(-32768, 32767).toShort())
                     C.ENCODING_PCM_24BIT, C.ENCODING_PCM_24BIT_BIG_ENDIAN -> {
@@ -130,5 +167,17 @@ class AuraAudioProcessor(
         }
         buffer.flip()
     }
-    override fun onReset() { engine = null; previous = null; applied = null; analyzer = null; lastTrackGen = -1L; wasSmart = false; input = DoubleArray(0); output = input; oldOutput = input }
+
+    private fun softLimitBypass(x: Double): Double {
+        if (!x.isFinite()) return 0.0
+        val ax = abs(x)
+        if (ax <= 0.88) return x
+        val shaped = (0.88 + 0.10 * tanh((ax - 0.88) / 0.10)).coerceAtMost(0.98)
+        return if (x >= 0.0) shaped else -shaped
+    }
+
+    override fun onReset() {
+        engine = null; previous = null; applied = null; analyzer = null; lastTrackGen = -1L; wasSmart = false
+        tpGain = 1.0; input = DoubleArray(0); output = input; oldOutput = input; tpPrev1 = input; tpPrev2 = input
+    }
 }

@@ -47,13 +47,14 @@ class NeteaseApi(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedStreamUrl>?) = size > 128
     }
 
-    fun invalidateHomeCaches() {
+    suspend fun invalidateHomeCaches() = withContext(Dispatchers.IO) {
         val scope = cacheScope()
-        listOf(
+        val prefixes = listOf(
             "homepage/block/page", "recommend/resource", "personalized/playlist",
             "personalized/newsong", "recommend/songs", "banner", "banner/get",
             "artist/sublist", "record/recent/song", "record/recent/album",
-        ).forEach { path -> metadataCache?.removePrefix("$scope/$path/") }
+        ).map { path -> "$scope/$path/" }
+        metadataCache?.removePrefixes(prefixes)
     }
 
     companion object {
@@ -324,8 +325,8 @@ class NeteaseApi(
     /** Official NetEase chart metadata keyed by playlist ID (merges v2 and v1 detail payloads). */
     internal suspend fun toplistMetaMap(refresh: Boolean = false): Map<Long, NeteaseToplistMeta> = withContext(Dispatchers.IO) {
         if (refresh) {
-            metadataCache?.removePrefix(cacheScope() + "/toplist/detail/v2/")
-            metadataCache?.removePrefix(cacheScope() + "/toplist/detail/")
+            val scope = cacheScope()
+            metadataCache?.removePrefixes(listOf("$scope/toplist/detail/v2/", "$scope/toplist/detail/"))
         }
         val result = linkedMapOf<Long, NeteaseToplistMeta>()
         fun parseTracks(item: JSONObject): List<NeteaseChartTrackPreview> {
@@ -592,8 +593,14 @@ class NeteaseApi(
         }
         return CloudPage(items, offset + rows.length(), rows.length() > 0 && response.optBoolean("more", rows.length() == limit))
     }
-    fun invalidatePlaylist(id: Long) {
-        metadataCache?.removePrefix(cacheScope() + "/playlist/track/all/$id/")
+    suspend fun invalidatePlaylist(id: Long) = withContext(Dispatchers.IO) {
+        val scope = cacheScope()
+        metadataCache?.removePrefixes(
+            listOf(
+                "$scope/playlist/track/all/$id/",
+                "$scope/playlist/detail/$id/",
+            ),
+        )
         official.invalidatePlaylist(id)
     }
     suspend fun likedSongIds(uid: Long): Set<Long> {
@@ -602,10 +609,35 @@ class NeteaseApi(
     }
     suspend fun likeSong(id: Long, liked: Boolean) {
         request("like", mapOf("id" to "$id", "like" to "$liked"))
-        metadataCache?.removePrefix(cacheScope() + "/likelist/")
+        withContext(Dispatchers.IO) {
+            metadataCache?.removePrefix(cacheScope() + "/likelist/")
+        }
     }
     suspend fun addSongToPlaylist(playlistId: Long, songId: Long) {
-        request("playlist/tracks", mapOf("op" to "add", "pid" to "$playlistId", "tracks" to "$songId"))
+        addSongsToPlaylist(playlistId, listOf(songId))
+    }
+    suspend fun addSongsToPlaylist(playlistId: Long, songIds: List<Long>) {
+        if (songIds.isEmpty()) return
+        request("playlist/tracks", mapOf("op" to "add", "pid" to "$playlistId", "tracks" to songIds.joinToString(",")))
+        invalidatePlaylist(playlistId)
+    }
+    suspend fun removeSongsFromPlaylist(playlistId: Long, songIds: List<Long>) {
+        if (songIds.isEmpty()) return
+        request("playlist/tracks", mapOf("op" to "del", "pid" to "$playlistId", "tracks" to songIds.joinToString(",")))
+        invalidatePlaylist(playlistId)
+    }
+    suspend fun playlistTrackIds(playlistId: Long): List<Long> {
+        val ids = request("playlist/detail", mapOf("id" to "$playlistId"))
+            .optJSONObject("playlist")
+            ?.optJSONArray("trackIds")
+            ?: return emptyList()
+        return (0 until ids.length()).mapNotNull { i ->
+            ids.optJSONObject(i)?.optLong("id")?.takeIf { it > 0L }
+        }
+    }
+    suspend fun updatePlaylistSongOrder(playlistId: Long, songIds: List<Long>) {
+        if (songIds.isEmpty()) return
+        request("song/order/update", mapOf("pid" to "$playlistId", "ids" to JSONArray(songIds).toString()))
         invalidatePlaylist(playlistId)
     }
     data class RecentPlayEntry(val song: Song, val playTimeMs: Long)
@@ -785,7 +817,9 @@ class NeteaseApi(
     }
     suspend fun subscribeAlbum(id: Long, subscribe: Boolean) {
         request("album/sub", mapOf("id" to "$id", "t" to if (subscribe) "1" else "0"))
-        metadataCache?.removePrefix(cacheScope() + "/album/sublist/")
+        withContext(Dispatchers.IO) {
+            metadataCache?.removePrefix(cacheScope() + "/album/sublist/")
+        }
     }
     suspend fun albumSubscribed(id: Long): Boolean {
         val response = request("album/detail/dynamic", mapOf("id" to "$id"))
@@ -920,7 +954,9 @@ class NeteaseApi(
     }
     suspend fun followArtist(id: Long, follow: Boolean) {
         request("artist/sub", mapOf("id" to "$id", "t" to if (follow) "1" else "0"))
-        metadataCache?.removePrefix(cacheScope() + "/artist/sublist/")
+        withContext(Dispatchers.IO) {
+            metadataCache?.removePrefix(cacheScope() + "/artist/sublist/")
+        }
     }
     suspend fun songArtists(id: Long): List<SongArtist> =
         parseSongs(request("song/detail", mapOf("ids" to "$id")).optJSONArray("songs") ?: JSONArray()).firstOrNull()?.artists.orEmpty()

@@ -1,15 +1,30 @@
 package btm.m.auraplayer.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
@@ -31,9 +46,16 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -71,6 +93,9 @@ import java.util.Calendar
 import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @Composable
 fun AuraTabIcon(index: Int, color: Color) {
@@ -153,29 +178,126 @@ internal fun SongVipBadge(
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction: (() -> Unit)? = null) {
+fun SongRow(
+    song: Song,
+    model: AuraViewModel,
+    onClick: () -> Unit,
+    onLongAction: (() -> Unit)? = null,
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    showDragHandle: Boolean = false,
+    onLongPress: (() -> Unit)? = null,
+    dragHandleModifier: Modifier = Modifier,
+    outerVerticalPadding: Dp = 2.dp,
+) {
     val layout = LocalAuraLayout.current
     val artworkSize = if (layout.tablet) 48.dp else 44.dp
     val openActions = LocalSongActions.current
     val backdrop = LocalToolbarBackdrop.current
+    val haptics = LocalHapticFeedback.current
     val isCurrent = model.current?.key == song.key
     val showVip = song.shouldShowVipBadge(model.settings.value)
+    val rowInteractionModifier = if (onLongPress != null && !selectionMode) {
+        Modifier.combinedClickable(
+            onClick = onClick,
+            onLongClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                onLongPress()
+            },
+        )
+    } else {
+        Modifier.clickable(onClick = onClick)
+    }
+
+    @Composable
+    fun SelectionLeading() {
+        AnimatedVisibility(
+            visible = selectionMode,
+            enter = expandHorizontally(tween(240, easing = FastOutSlowInEasing), expandFrom = Alignment.Start) +
+                fadeIn(tween(200)) +
+                scaleIn(tween(240), initialScale = 0.78f),
+            exit = shrinkHorizontally(tween(220, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start) +
+                fadeOut(tween(160)) +
+                scaleOut(tween(220), targetScale = 0.78f),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AuraCheckbox(
+                    checked = selected,
+                    onCheckedChange = onClick,
+                    modifier = Modifier.size(28.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+            }
+        }
+    }
+
+    @Composable
+    fun TrailingActions(buttonSize: Dp, iconSize: Dp, moreTint: Color, dragTint: Color) {
+        AnimatedVisibility(
+            visible = !selectionMode,
+            enter = expandHorizontally(tween(240, easing = FastOutSlowInEasing), expandFrom = Alignment.End) +
+                fadeIn(tween(200)) +
+                scaleIn(tween(240), initialScale = 0.8f),
+            exit = shrinkHorizontally(tween(200, easing = FastOutSlowInEasing), shrinkTowards = Alignment.End) +
+                fadeOut(tween(160)) +
+                scaleOut(tween(200), targetScale = 0.8f),
+        ) {
+            IconButton(onClick = { openActions(SongActionRequest(song, backdrop, onLongAction)) }, modifier = Modifier.size(buttonSize)) {
+                Image(AuraMoreHorizontalIcon, tr("more", "更多"), Modifier.size(iconSize), colorFilter = ColorFilter.tint(moreTint))
+            }
+        }
+        if (showDragHandle) {
+            AnimatedVisibility(
+                visible = selectionMode,
+                enter = expandHorizontally(tween(240, easing = FastOutSlowInEasing), expandFrom = Alignment.End) +
+                    fadeIn(tween(200)) +
+                    scaleIn(tween(240), initialScale = 0.8f),
+                exit = shrinkHorizontally(tween(200, easing = FastOutSlowInEasing), shrinkTowards = Alignment.End) +
+                    fadeOut(tween(160)) +
+                    scaleOut(tween(200), targetScale = 0.8f),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(buttonSize)
+                        .clip(CircleShape)
+                        .then(dragHandleModifier),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Image(
+                        imageVector = AuraDragHandleIcon,
+                        contentDescription = tr("drag_to_reorder", "拖动排序"),
+                        modifier = Modifier.size(20.dp),
+                        colorFilter = ColorFilter.tint(dragTint),
+                    )
+                }
+            }
+        }
+    }
+
     when (LocalAppUiStyle.current) {
         AppUiStyle.ONE -> {
             val palette = rememberActiveOneUiPalette()
-            val rowBg = if (isCurrent) Color(palette.chip).copy(alpha = 0.72f) else Color.Transparent
+            val targetBg = when {
+                selectionMode && selected -> Color(palette.chip).copy(alpha = 0.86f)
+                isCurrent -> Color(palette.chip).copy(alpha = 0.72f)
+                else -> Color.Transparent
+            }
+            val rowBg by animateColorAsState(targetBg, tween(180), label = "oneRowBg")
             val titleColor = if (isCurrent) Color(palette.accentDeep) else Color(palette.text)
             val subColor = Color(palette.subText)
             Row(
                 Modifier
                     .fillMaxWidth()
+                    .padding(vertical = outerVerticalPadding)
                     .clip(RoundedCornerShape(16.dp))
                     .background(rowBg)
-                    .clickable(onClick = onClick)
-                    .padding(vertical = 9.dp, horizontal = 10.dp),
+                    .then(rowInteractionModifier)
+                    .padding(vertical = 7.dp, horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                SelectionLeading()
                 Artwork(song.artwork, Modifier.size(artworkSize), cornerRadius = ListArtworkCornerRadius)
                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                     Text(
@@ -203,28 +325,38 @@ fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction:
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(durationText(song.duration), fontSize = 12.sp, color = subColor)
-                    IconButton(onClick = { openActions(SongActionRequest(song, backdrop, onLongAction)) }, modifier = Modifier.size(40.dp)) {
-                        Image(AuraMoreHorizontalIcon, tr("more", "更多"), Modifier.size(20.dp), colorFilter = ColorFilter.tint(if (isCurrent) Color(palette.accentDeep) else subColor))
-                    }
+                    TrailingActions(
+                        buttonSize = 40.dp,
+                        iconSize = 20.dp,
+                        moreTint = if (isCurrent) Color(palette.accentDeep) else subColor,
+                        dragTint = subColor,
+                    )
                 }
             }
             return
         }
         AppUiStyle.MATERIAL -> {
             val scheme = rememberActiveExpressiveScheme()
-            val rowBg = if (isCurrent) scheme.secondaryContainer else Color.Transparent
+            val targetBg = when {
+                selectionMode && selected -> scheme.primaryContainer.copy(alpha = 0.52f)
+                isCurrent -> scheme.secondaryContainer
+                else -> Color.Transparent
+            }
+            val rowBg by animateColorAsState(targetBg, tween(180), label = "materialRowBg")
             val titleColor = if (isCurrent) scheme.onSecondaryContainer else scheme.onSurface
             val subColor = if (isCurrent) scheme.onSecondaryContainer.copy(alpha = 0.78f) else scheme.onSurfaceVariant
             val vipTint = if (isCurrent) scheme.onSecondaryContainer else scheme.primary
             Row(
                 Modifier
                     .fillMaxWidth()
+                    .padding(vertical = outerVerticalPadding)
                     .clip(RoundedCornerShape(18.dp))
                     .background(rowBg)
-                    .clickable(onClick = onClick)
-                    .padding(vertical = 8.dp, horizontal = 8.dp),
+                    .then(rowInteractionModifier)
+                    .padding(vertical = 6.dp, horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                SelectionLeading()
                 Artwork(song.artwork, Modifier.size(artworkSize), cornerRadius = ListArtworkCornerRadius)
                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                     Text(
@@ -252,16 +384,35 @@ fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction:
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(durationText(song.duration), fontSize = 12.sp, color = subColor)
-                    IconButton(onClick = { openActions(SongActionRequest(song, backdrop, onLongAction)) }, modifier = Modifier.size(40.dp)) {
-                        Image(AuraMoreHorizontalIcon, tr("more", "更多"), Modifier.size(20.dp), colorFilter = ColorFilter.tint(if (isCurrent) scheme.onSecondaryContainer else scheme.onSurfaceVariant))
-                    }
+                    TrailingActions(
+                        buttonSize = 40.dp,
+                        iconSize = 20.dp,
+                        moreTint = if (isCurrent) scheme.onSecondaryContainer else scheme.onSurfaceVariant,
+                        dragTint = scheme.onSurfaceVariant,
+                    )
                 }
             }
             return
         }
         AppUiStyle.HYPER -> Unit
     }
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(vertical = 7.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    val hyperTargetBg = if (selectionMode && selected) {
+        MiuixTheme.colorScheme.primaryContainer.copy(alpha = 0.38f)
+    } else {
+        Color.Transparent
+    }
+    val hyperRowBg by animateColorAsState(hyperTargetBg, tween(180), label = "hyperRowBg")
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = outerVerticalPadding)
+            .clip(RoundedCornerShape(12.dp))
+            .background(hyperRowBg)
+            .then(rowInteractionModifier)
+            .padding(vertical = 5.5.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SelectionLeading()
         Artwork(song.artwork, Modifier.size(artworkSize), cornerRadius = ListArtworkCornerRadius)
         Column(Modifier.weight(1f).padding(horizontal = 11.dp)) {
             Text(song.title.ifBlank { tr("unknown_title", "未命名歌曲") }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 15.sp,
@@ -279,9 +430,12 @@ fun SongRow(song: Song, model: AuraViewModel, onClick: () -> Unit, onLongAction:
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(durationText(song.duration), style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-            IconButton(onClick = { openActions(SongActionRequest(song, backdrop, onLongAction)) }, modifier = Modifier.size(44.dp)) {
-                Image(AuraMoreHorizontalIcon, tr("more", "更多"), Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary))
-            }
+            TrailingActions(
+                buttonSize = 44.dp,
+                iconSize = 22.dp,
+                moreTint = MiuixTheme.colorScheme.primary,
+                dragTint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
         }
     }
 }
@@ -296,6 +450,10 @@ private fun LazyListScope.songRows(
     horizontalPadding: Dp = 0.dp,
     onRemove: ((Song) -> Unit)? = null,
     onPlay: ((Int) -> Unit)? = null,
+    selectionMode: Boolean = false,
+    selectedKeys: Set<String> = emptySet(),
+    onToggleSelect: ((Song) -> Unit)? = null,
+    onLongPress: ((Song) -> Unit)? = null,
 ) {
     items(tracks.chunked(columns), key = { it.first().key }) { row ->
         Row(
@@ -304,7 +462,19 @@ private fun LazyListScope.songRows(
         ) {
             row.forEach { song ->
                 Box(Modifier.weight(1f)) {
-                    SongRow(song, model, { onPlay?.invoke(tracks.indexOf(song)) ?: model.play(tracks, tracks.indexOf(song)) }, onRemove?.let { { it(song) } })
+                    SongRow(
+                        song = song,
+                        model = model,
+                        onClick = {
+                            if (selectionMode && onToggleSelect != null) onToggleSelect(song)
+                            else onPlay?.invoke(tracks.indexOf(song)) ?: model.play(tracks, tracks.indexOf(song))
+                        },
+                        onLongAction = onRemove?.let { { it(song) } },
+                        selectionMode = selectionMode,
+                        selected = song.key in selectedKeys,
+                        showDragHandle = false,
+                        onLongPress = onLongPress?.let { { it(song) } },
+                    )
                 }
             }
             repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
@@ -323,12 +493,30 @@ internal fun PermissionCard(onClick: () -> Unit) {
 }
 
 @Composable
-fun SongsPage(model: AuraViewModel, padding: PaddingValues, requestPermission: () -> Unit,
-              onOpenSecondary: (Int) -> Unit = {}) {
+fun SongsPage(
+    model: AuraViewModel,
+    padding: PaddingValues,
+    requestPermission: () -> Unit,
+    selectionMode: Boolean = false,
+    selectedKeys: Set<String> = emptySet(),
+    onEnterSelection: (Song) -> Unit = {},
+    onToggleSelect: (Song) -> Unit = {},
+    onOpenSecondary: (Int) -> Unit = {},
+) {
     val songs = model.sortedSongs
     val columns = LocalAuraLayout.current.listColumns
     val pullToRefreshState = rememberPullToRefreshState()
     var isRefreshing by remember { mutableStateOf(false) }
+    val effectivePadding = if (selectionMode) {
+        PaddingValues(
+            start = padding.calculateStartPadding(androidx.compose.ui.platform.LocalLayoutDirection.current),
+            top = padding.calculateTopPadding(),
+            end = padding.calculateEndPadding(androidx.compose.ui.platform.LocalLayoutDirection.current),
+            bottom = padding.calculateBottomPadding() + 72.dp,
+        )
+    } else {
+        padding
+    }
 
     LaunchedEffect(isRefreshing) {
         if (!isRefreshing) return@LaunchedEffect
@@ -348,7 +536,7 @@ fun SongsPage(model: AuraViewModel, padding: PaddingValues, requestPermission: (
         onRefresh = { isRefreshing = true },
         modifier = Modifier.fillMaxSize(),
         pullToRefreshState = pullToRefreshState,
-        contentPadding = padding,
+        contentPadding = effectivePadding,
         topAppBarScrollBehavior = LocalPageScroll.current,
         color = MiuixTheme.colorScheme.primary,
         refreshTexts = listOf(
@@ -358,7 +546,7 @@ fun SongsPage(model: AuraViewModel, padding: PaddingValues, requestPermission: (
             tr("refresh_completed", "刷新完成"),
         ),
     ) {
-        LazyColumn(pageContentModifier(), contentPadding = padding) {
+        LazyColumn(pageContentModifier(), contentPadding = effectivePadding) {
         item("song_categories") {
             if (LocalAppUiStyle.current == AppUiStyle.ONE) {
                 val palette = rememberActiveOneUiPalette()
@@ -436,7 +624,15 @@ fun SongsPage(model: AuraViewModel, padding: PaddingValues, requestPermission: (
         }
         if (!model.hasPermission) item { PermissionCard(requestPermission) }
         else if (model.songs.isEmpty()) item { EmptyState(tr("no_songs", "没有找到歌曲"), tr("check_filters", "请检查音乐权限、文件夹与筛选设置"), tr("rescan", "重新扫描"), { model.refreshLibrary() }) }
-        songRows(songs, model, columns)
+        songRows(
+            tracks = songs,
+            model = model,
+            columns = columns,
+            selectionMode = selectionMode,
+            selectedKeys = selectedKeys,
+            onToggleSelect = onToggleSelect,
+            onLongPress = onEnterSelection,
+        )
         }
     }
 }
@@ -1041,12 +1237,24 @@ internal fun CollectionPage(
     bannerTheme: HomeBannerTheme? = null,
     addToPlaylist: Boolean = false,
     onDismissAddToPlaylist: () -> Unit = {},
+    sortOrder: SongSort = SongSort.DEFAULT,
+    selectionMode: Boolean = false,
+    selectedKeys: Set<String> = emptySet(),
+    onEnterSelection: (Song) -> Unit = {},
+    onToggleSelect: (Song) -> Unit = {},
+    onResetSortToDefault: () -> Unit = {},
 ) {
     val revision = model.history.revision
     val localPlaylist = remember(collection.key, revision) { model.history.playlists().find { "playlist:${it.id}" == collection.key } }
-    val visible = remember(model.songs) { model.songs.map { it.key }.toSet() }
-    val tracks = if (localPlaylist != null) model.songs.filter { it.key in localPlaylist.songKeys }
-        else cloud?.songs ?: collection.songs.filter { it.cloud || it.key in visible }
+    val visibleByKey = remember(model.songs) { model.songs.associateBy { it.key } }
+    val rawTracks = remember(localPlaylist, model.songs, cloud?.songs, collection.songs, visibleByKey) {
+        if (localPlaylist != null) {
+            localPlaylist.songKeys.mapNotNull(visibleByKey::get).distinctBy { it.key }
+        } else {
+            (cloud?.songs ?: collection.songs.filter { it.cloud || it.key in visibleByKey }).distinctBy { it.key }
+        }
+    }
+    val tracks = remember(rawTracks, sortOrder) { sortOrder.applyToPlaylist(rawTracks) }
     val filtering = searchQuery.isNotBlank()
     val searchActive = filtering || searchExpanded
     LaunchedEffect(cloud, searchActive, cloud?.songs?.size, cloud?.loading, cloud?.hasMore, cloud?.failed, model.account != null) {
@@ -1062,8 +1270,12 @@ internal fun CollectionPage(
         }
     }
     val filteredTracks = remember(tracks, searchQuery) { filterPlaylistSongs(tracks, searchQuery) }
-    val coverUri = remember(collection.artwork, tracks) {
-        collection.artwork.ifBlank { tracks.firstOrNull { it.artwork.isNotBlank() }?.artwork.orEmpty() }
+    val isLocalUserPlaylist = localPlaylist != null
+    val isOwnedCloudPlaylist = model.isOwnedNeteasePlaylist(cloud)
+    val canReorder = !filtering && sortOrder == SongSort.DEFAULT && (isLocalUserPlaylist || isOwnedCloudPlaylist)
+
+    val coverUri = remember(collection.artwork, rawTracks) {
+        collection.artwork.ifBlank { rawTracks.firstOrNull { it.artwork.isNotBlank() }?.artwork.orEmpty() }
     }
     val resolvedTheme = bannerTheme ?: rememberHomeBannerTheme(coverUri)
     val listeningRank = cloud?.source == "rank"
@@ -1080,52 +1292,555 @@ internal fun CollectionPage(
         else "${cloud?.total ?: tracks.size} ${tr("song_count", "首歌曲")}"
     val durationText = formatAlbumTotalDuration(if (filtering) filteredTracks else tracks)
     val metaText = listOfNotNull(countText, durationText).joinToString(" · ")
-    LazyColumn(
-        pageContentModifier().imePadding(),
-        state = listState,
-        contentPadding = PaddingValues(bottom = padding.calculateBottomPadding()),
-    ) {
-        item("playlist_hero") {
-            PlaylistHeroHeader(
-                title = collection.title,
-                coverUri = coverUri,
-                metaText = metaText,
-                bannerTheme = resolvedTheme,
-                immersiveTopPadding = activeTopPadding,
-                pageMargin = pageMargin,
-                playEnabled = filteredTracks.isNotEmpty(),
-                onPlay = { model.playCollection(filteredTracks, content = if (filtering) null else cloud) },
-                onShuffle = { model.playCollection(filteredTracks, content = if (filtering) null else cloud, shuffle = true) },
-            )
+
+    val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    var orderedTracks by remember(collection.key) { mutableStateOf(filteredTracks) }
+    var draggingKey by remember(collection.key) { mutableStateOf<String?>(null) }
+    var dragSource by remember(collection.key) { mutableStateOf<String?>(null) }
+    var draggingOffsetY by remember(collection.key) { mutableFloatStateOf(0f) }
+    var settlingKey by remember(collection.key) { mutableStateOf<String?>(null) }
+    val settlingOffset = remember(collection.key) { Animatable(0f) }
+
+    LaunchedEffect(filteredTracks) {
+        if (draggingKey == null && settlingKey != null && orderedTracks != filteredTracks) {
+            settlingKey = null
+            orderedTracks = filteredTracks
         }
-        if (filteredTracks.isEmpty() && (cloud == null || !cloud.loading && !cloud.failed && !cloud.hasMore)) item {
-            Box(Modifier.padding(horizontal = pageMargin)) { EmptyState(tr("no_songs", "没有找到歌曲")) }
+    }
+    LaunchedEffect(selectionMode, canReorder) {
+        if (!selectionMode || !canReorder) {
+            draggingKey = null
+            dragSource = null
+            draggingOffsetY = 0f
+            settlingKey = null
+            settlingOffset.snapTo(0f)
         }
-        if (listeningRank) {
-            itemsIndexed(filteredTracks, key = { _, song -> "rank-${song.key}" }) { index, song ->
-                val rank = rankByKey[song.key] ?: (index + 1)
-                Box(Modifier.padding(horizontal = pageMargin)) {
-                    RankSongRow(rank, song, model) { model.playCollection(filteredTracks, index, if (filtering) null else cloud) }
+    }
+
+    val currentTracks by rememberUpdatedState(orderedTracks)
+    val currentFilteredTracks by rememberUpdatedState(filteredTracks)
+    val currentLocalPlaylist by rememberUpdatedState(localPlaylist)
+    val currentCloud by rememberUpdatedState(cloud)
+    val currentSortOrder by rememberUpdatedState(sortOrder)
+
+    var containerWindowPos by remember { mutableStateOf(Offset.Zero) }
+    var activeSlotWindowPos by remember { mutableStateOf(Offset.Zero) }
+    var activeSlotWidthPx by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(draggingKey) {
+        val key = draggingKey ?: return@LaunchedEffect
+        val topEdgePx = with(density) { 120.dp.toPx() }
+        val bottomEdgePx = with(density) { 120.dp.toPx() }
+        val maxStepPx = with(density) { 14.dp.toPx() }
+        while (draggingKey == key) {
+            val viewportHeight = listState.layoutInfo.viewportSize.height.toFloat()
+            if (viewportHeight > 0f && activeSlotWidthPx > 0) {
+                val relTop = activeSlotWindowPos.y - containerWindowPos.y + draggingOffsetY
+                val relBottom = relTop + with(density) { 64.dp.toPx() }
+                val scrollDelta = when {
+                    relTop < topEdgePx -> -((topEdgePx - relTop) / topEdgePx).coerceIn(0f, 1f) * maxStepPx
+                    relBottom > viewportHeight - bottomEdgePx -> ((relBottom - (viewportHeight - bottomEdgePx)) / bottomEdgePx).coerceIn(0f, 1f) * maxStepPx
+                    else -> 0f
+                }
+                if (abs(scrollDelta) > 0.5f) {
+                    val consumed = listState.scrollBy(scrollDelta)
+                    if (abs(consumed) > 0.5f) {
+                        draggingOffsetY += consumed
+                    }
                 }
             }
-        } else songRows(filteredTracks, model, columns, horizontalPadding = pageMargin, onRemove = localPlaylist?.let { playlist -> { song ->
-                model.history.savePlaylists(model.history.playlists().map { if (it.id == playlist.id) it.copy(songKeys = it.songKeys - song.key) else it })
-        } }, onPlay = { model.playCollection(filteredTracks, it, if (filtering) null else cloud) })
-        if (cloud != null && (cloud.hasMore || cloud.loading || cloud.failed)) item("cloud_song_paging") {
-            val detail = if (searchActive && cloud.total > 0) "(${cloud.songs.size}/${cloud.total})" else ""
-            Box(Modifier.padding(horizontal = pageMargin)) {
-                CloudPagingFooter(cloud.loading, cloud.failed, detail) { model.loadMoreCloudSongsFor(cloud) }
+            delay(16)
+        }
+    }
+
+    fun startDrag(key: String) {
+        if (!canReorder || !selectionMode) return
+        settlingKey = null
+        orderedTracks = currentFilteredTracks
+        scope.launch { settlingOffset.snapTo(0f) }
+        draggingKey = key
+        draggingOffsetY = 0f
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+    }
+
+    fun updateDrag(key: String, deltaY: Float) {
+        if (draggingKey != key) return
+        draggingOffsetY += deltaY
+        val activeTracks = currentTracks
+        val currentIndex = activeTracks.indexOfFirst { it.key == key }
+        if (currentIndex < 0) return
+
+        val visibleItems = listState.layoutInfo.visibleItemsInfo
+        val draggedInfo = visibleItems.firstOrNull { it.key == key } ?: return
+        val draggedCenterY = draggedInfo.offset + draggingOffsetY + draggedInfo.size / 2f
+
+        if (draggingOffsetY > 0f && currentIndex < activeTracks.lastIndex) {
+            val nextSong = activeTracks[currentIndex + 1]
+            val nextInfo = visibleItems.firstOrNull { it.key == nextSong.key }
+            if (nextInfo != null && nextInfo.index == draggedInfo.index + 1 &&
+                draggedCenterY > nextInfo.offset + nextInfo.size / 2f
+            ) {
+                orderedTracks = activeTracks.toMutableList().apply {
+                    add(currentIndex + 1, removeAt(currentIndex))
+                }
+                draggingOffsetY -= nextInfo.size
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                return
             }
+        }
+
+        if (draggingOffsetY < 0f && currentIndex > 0) {
+            val prevSong = activeTracks[currentIndex - 1]
+            val prevInfo = visibleItems.firstOrNull { it.key == prevSong.key }
+            if (prevInfo != null && prevInfo.index == draggedInfo.index - 1 &&
+                draggedCenterY < prevInfo.offset + prevInfo.size / 2f
+            ) {
+                orderedTracks = activeTracks.toMutableList().apply {
+                    add(currentIndex - 1, removeAt(currentIndex))
+                }
+                draggingOffsetY += prevInfo.size
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            }
+        }
+    }
+
+    fun finishDrag(key: String) {
+        if (draggingKey != key) return
+        val settledFrom = draggingOffsetY
+        val finalOrder = currentTracks
+        draggingKey = null
+        draggingOffsetY = 0f
+        if (finalOrder != currentFilteredTracks) {
+            if (currentSortOrder != SongSort.DEFAULT) onResetSortToDefault()
+            val local = currentLocalPlaylist
+            val activeCloud = currentCloud
+            if (local != null) {
+                model.reorderLocalPlaylist(local.id, finalOrder.map { it.key })
+            } else if (activeCloud != null && isOwnedCloudPlaylist) {
+                model.reorderCloudPlaylist(activeCloud, finalOrder)
+            }
+        }
+        if (abs(settledFrom) > 0.5f) {
+            settlingKey = key
+            scope.launch {
+                settlingOffset.snapTo(settledFrom)
+                settlingOffset.animateTo(0f, spring(dampingRatio = 0.86f, stiffness = 420f))
+                if (settlingKey == key) settlingKey = null
+            }
+        }
+    }
+
+    val surfaceBg = MiuixTheme.colorScheme.surface
+    val cardContainerColor = MiuixTheme.colorScheme.surfaceContainerHigh
+    val dark = surfaceBg.luminance() < 0.5f
+    val bottomExtra = if (selectionMode) 76.dp else 0.dp
+    val isDraggingOrSettling = canReorder && (draggingKey != null || settlingKey != null)
+    val displayTracks = if (isDraggingOrSettling) orderedTracks else filteredTracks
+    val pullToRefreshState = rememberPullToRefreshState()
+    var isRefreshing by remember(collection.key) { mutableStateOf(false) }
+
+    LaunchedEffect(isRefreshing) {
+        if (!isRefreshing) return@LaunchedEffect
+        val start = System.currentTimeMillis()
+        try {
+            when {
+                cloud != null -> {
+                    model.refreshCloudSongs()
+                    snapshotFlow { model.cloudCollection?.loading == true }.first { !it }
+                }
+                collection.key == "cloud:daily" -> {
+                    model.refreshCloudDailyCollectionNow()
+                }
+                else -> {
+                    model.refreshLibrary()
+                    snapshotFlow { model.scanning }.first { !it }
+                }
+            }
+            val elapsed = System.currentTimeMillis() - start
+            if (elapsed < 350L) delay(350L - elapsed)
+        } finally {
+            isRefreshing = false
+        }
+    }
+
+    PullToRefresh(
+        isRefreshing = isRefreshing,
+        onRefresh = { if (draggingKey == null) isRefreshing = true },
+        modifier = Modifier.fillMaxSize(),
+        pullToRefreshState = pullToRefreshState,
+        contentPadding = PaddingValues(top = activeTopPadding, bottom = padding.calculateBottomPadding()),
+        topAppBarScrollBehavior = LocalPageScroll.current,
+        color = MiuixTheme.colorScheme.primary,
+        refreshTexts = listOf(
+            tr("pull_to_refresh", "下拉刷新"),
+            tr("release_to_refresh", "松开刷新"),
+            tr("refreshing", "正在刷新…"),
+            tr("refresh_completed", "刷新完成"),
+        ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .onGloballyPositioned {
+                    if (selectionMode && canReorder) containerWindowPos = it.positionInWindow()
+                },
+        ) {
+        LazyColumn(
+            pageContentModifier().let { if (searchActive) it.imePadding() else it },
+            state = listState,
+            contentPadding = PaddingValues(bottom = padding.calculateBottomPadding() + bottomExtra),
+            userScrollEnabled = draggingKey == null,
+        ) {
+            item("playlist_hero") {
+                PlaylistHeroHeader(
+                    title = collection.title,
+                    coverUri = coverUri,
+                    metaText = metaText,
+                    bannerTheme = resolvedTheme,
+                    immersiveTopPadding = activeTopPadding,
+                    pageMargin = pageMargin,
+                    playEnabled = displayTracks.isNotEmpty(),
+                    onPlay = { model.playCollection(displayTracks, content = if (filtering) null else cloud) },
+                    onShuffle = { model.playCollection(displayTracks, content = if (filtering) null else cloud, shuffle = true) },
+                )
+            }
+            if (displayTracks.isEmpty() && (cloud == null || !cloud.loading && !cloud.failed && !cloud.hasMore)) item {
+                Box(Modifier.padding(horizontal = pageMargin)) { EmptyState(tr("no_songs", "没有找到歌曲")) }
+            }
+            if (listeningRank) {
+                itemsIndexed(displayTracks, key = { _, song -> "rank-${song.key}" }) { index, song ->
+                    val rank = rankByKey[song.key] ?: (index + 1)
+                    Box(Modifier.padding(horizontal = pageMargin)) {
+                        RankSongRow(
+                            rank = rank,
+                            song = song,
+                            model = model,
+                            selectionMode = selectionMode,
+                            selected = song.key in selectedKeys,
+                            onClick = {
+                                if (selectionMode) onToggleSelect(song)
+                                else model.playCollection(displayTracks, index, if (filtering) null else cloud)
+                            },
+                            onLongPress = { onEnterSelection(song) },
+                        )
+                    }
+                }
+            } else if (canReorder && (selectionMode || columns == 1)) {
+                itemsIndexed(displayTracks, key = { _, song -> song.key }) { index, song ->
+                    val isDragging = draggingKey == song.key
+                    val isSettling = settlingKey == song.key
+                    val isFloating = isDragging || isSettling
+                    val placementModifier = if (isDragging) {
+                        Modifier
+                    } else {
+                        Modifier.animateItem(
+                            fadeInSpec = tween(220),
+                            fadeOutSpec = tween(200),
+                            placementSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMediumLow,
+                            ),
+                        )
+                    }
+                    var rowCoords by remember(song.key) { mutableStateOf<LayoutCoordinates?>(null) }
+                    var handleCoords by remember(song.key) { mutableStateOf<LayoutCoordinates?>(null) }
+                    var lastRowWindowY by remember(song.key) { mutableFloatStateOf(0f) }
+                    var lastHandleWindowY by remember(song.key) { mutableFloatStateOf(0f) }
+                    val dragEnabled = selectionMode && canReorder
+                    val slotPositionedModifier = if (dragEnabled) {
+                        Modifier.onGloballyPositioned {
+                            rowCoords = it
+                            if (isDragging) {
+                                val pos = it.positionInWindow()
+                                if (pos != activeSlotWindowPos) activeSlotWindowPos = pos
+                                if (it.size.width != activeSlotWidthPx) activeSlotWidthPx = it.size.width
+                            }
+                        }
+                    } else {
+                        Modifier
+                    }
+                    val rowDragModifier = if (dragEnabled) {
+                        Modifier.pointerInput(song.key, selectionMode, canReorder) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { startOffset ->
+                                    if (draggingKey != null) return@detectDragGesturesAfterLongPress
+                                    val coords = rowCoords
+                                    if (coords != null && coords.isAttached) {
+                                        activeSlotWindowPos = coords.positionInWindow()
+                                        activeSlotWidthPx = coords.size.width
+                                        lastRowWindowY = coords.localToWindow(startOffset).y
+                                    } else {
+                                        lastRowWindowY = startOffset.y
+                                    }
+                                    dragSource = "row"
+                                    startDrag(song.key)
+                                },
+                                onDrag = { change, dragAmount ->
+                                    if (dragSource != "row") return@detectDragGesturesAfterLongPress
+                                    change.consume()
+                                    val coords = rowCoords
+                                    val deltaY = if (coords != null && coords.isAttached) {
+                                        val windowY = coords.localToWindow(change.position).y
+                                        val d = windowY - lastRowWindowY
+                                        lastRowWindowY = windowY
+                                        d
+                                    } else {
+                                        dragAmount.y
+                                    }
+                                    updateDrag(song.key, deltaY)
+                                },
+                                onDragEnd = {
+                                    if (dragSource == "row") {
+                                        dragSource = null
+                                        finishDrag(song.key)
+                                    }
+                                },
+                                onDragCancel = {
+                                    if (dragSource == "row") {
+                                        dragSource = null
+                                        finishDrag(song.key)
+                                    }
+                                },
+                            )
+                        }
+                    } else {
+                        Modifier
+                    }
+                    val handleDragModifier = if (dragEnabled) {
+                        Modifier
+                            .onGloballyPositioned { handleCoords = it }
+                            .pointerInput(song.key, selectionMode, canReorder) {
+                                detectDragGestures(
+                                    onDragStart = { startOffset ->
+                                        if (draggingKey != null) return@detectDragGestures
+                                        val slotCoords = rowCoords
+                                        if (slotCoords != null && slotCoords.isAttached) {
+                                            activeSlotWindowPos = slotCoords.positionInWindow()
+                                            activeSlotWidthPx = slotCoords.size.width
+                                        }
+                                        val coords = handleCoords
+                                        lastHandleWindowY = if (coords != null && coords.isAttached) {
+                                            coords.localToWindow(startOffset).y
+                                        } else {
+                                            startOffset.y
+                                        }
+                                        dragSource = "handle"
+                                        startDrag(song.key)
+                                    },
+                                    onDrag = { change, dragAmount ->
+                                        if (dragSource != "handle") return@detectDragGestures
+                                        change.consume()
+                                        val coords = handleCoords
+                                        val deltaY = if (coords != null && coords.isAttached) {
+                                            val windowY = coords.localToWindow(change.position).y
+                                            val d = windowY - lastHandleWindowY
+                                            lastHandleWindowY = windowY
+                                            d
+                                        } else {
+                                            dragAmount.y
+                                        }
+                                        updateDrag(song.key, deltaY)
+                                    },
+                                    onDragEnd = {
+                                        if (dragSource == "handle") {
+                                            dragSource = null
+                                            finishDrag(song.key)
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        if (dragSource == "handle") {
+                                            dragSource = null
+                                            finishDrag(song.key)
+                                        }
+                                    },
+                                )
+                            }
+                    } else {
+                        Modifier
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = pageMargin)
+                            .then(placementModifier)
+                            .graphicsLayer { alpha = if (isFloating) 0f else 1f }
+                            .then(slotPositionedModifier),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(rowDragModifier),
+                        ) {
+                        SongRow(
+                            song = song,
+                            model = model,
+                            onClick = {
+                                if (selectionMode) onToggleSelect(song)
+                                else model.playCollection(displayTracks, index, if (filtering) null else cloud)
+                            },
+                            onLongAction = localPlaylist?.let { playlist ->
+                                {
+                                    model.removeSongsFromLocalPlaylist(playlist.id, setOf(song.key))
+                                }
+                            },
+                            selectionMode = selectionMode,
+                            selected = song.key in selectedKeys,
+                            showDragHandle = true,
+                            onLongPress = { onEnterSelection(song) },
+                            dragHandleModifier = handleDragModifier,
+                        )
+                        }
+                    }
+                }
+            } else {
+                songRows(
+                    tracks = displayTracks,
+                    model = model,
+                    columns = columns,
+                    horizontalPadding = pageMargin,
+                    onRemove = localPlaylist?.let { playlist ->
+                        { song ->
+                            model.removeSongsFromLocalPlaylist(playlist.id, setOf(song.key))
+                        }
+                    },
+                    onPlay = { model.playCollection(displayTracks, it, if (filtering) null else cloud) },
+                    selectionMode = selectionMode,
+                    selectedKeys = selectedKeys,
+                    onToggleSelect = onToggleSelect,
+                    onLongPress = onEnterSelection,
+                )
+            }
+            if (cloud != null && (cloud.hasMore || cloud.loading || cloud.failed)) item("cloud_song_paging") {
+                val detail = if (searchActive && cloud.total > 0) "(${cloud.songs.size}/${cloud.total})" else ""
+                Box(Modifier.padding(horizontal = pageMargin)) {
+                    CloudPagingFooter(cloud.loading, cloud.failed, detail) { model.loadMoreCloudSongsFor(cloud) }
+                }
+            }
+        }
+
+        val activeKey = draggingKey ?: settlingKey
+        val activeSong = activeKey?.let { key -> displayTracks.firstOrNull { it.key == key } }
+        if (activeSong != null && activeSlotWidthPx > 0) {
+            val isDragging = draggingKey == activeSong.key
+            val dragScale by animateFloatAsState(
+                targetValue = if (isDragging) 1.025f else 1f,
+                animationSpec = spring(dampingRatio = 0.82f, stiffness = 460f),
+                label = "playlist_floating_scale",
+            )
+            val dragElevation by animateDpAsState(
+                targetValue = if (isDragging) 12.dp else 0.dp,
+                animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
+                label = "playlist_floating_elevation",
+            )
+            val slotWidthDp = with(density) { activeSlotWidthPx.toDp() }
+            val rowCorner = when (LocalAppUiStyle.current) {
+                AppUiStyle.ONE -> 16.dp
+                AppUiStyle.MATERIAL -> 18.dp
+                AppUiStyle.HYPER -> 12.dp
+            }
+            val rowShape = RoundedCornerShape(rowCorner)
+            val floatingTint = cardContainerColor.copy(alpha = if (dark) 0.94f else 0.96f)
+            Box(
+                modifier = Modifier
+                    .offset {
+                        val activeOffsetY = if (draggingKey == activeSong.key) draggingOffsetY else settlingOffset.value
+                        IntOffset(
+                            (activeSlotWindowPos.x - containerWindowPos.x).roundToInt(),
+                            (activeSlotWindowPos.y - containerWindowPos.y + activeOffsetY).roundToInt(),
+                        )
+                    }
+                    .width(slotWidthDp)
+                    .zIndex(10f)
+                    .graphicsLayer {
+                        scaleX = dragScale
+                        scaleY = dragScale
+                        shape = rowShape
+                        clip = true
+                        shadowElevation = dragElevation.toPx()
+                    }
+                    .clip(rowShape)
+                    .background(floatingTint, rowShape)
+                    .border(0.75.dp, MiuixTheme.colorScheme.onSurface.copy(alpha = if (dark) 0.14f else 0.08f), rowShape),
+            ) {
+                SongRow(
+                    song = activeSong,
+                    model = model,
+                    onClick = {},
+                    selectionMode = true,
+                    selected = activeSong.key in selectedKeys,
+                    showDragHandle = true,
+                    outerVerticalPadding = 0.dp,
+                )
+            }
+        }
         }
     }
     if (addToPlaylist && localPlaylist != null) PlaylistSongPicker(model, localPlaylist, onDismissAddToPlaylist)
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun RankSongRow(rank: Int, song: Song, model: AuraViewModel, onClick: () -> Unit) {
+private fun RankSongRow(
+    rank: Int,
+    song: Song,
+    model: AuraViewModel,
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+) {
     val openActions = LocalSongActions.current
     val backdrop = LocalToolbarBackdrop.current
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(vertical = 7.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    val haptics = LocalHapticFeedback.current
+    val rowBg by animateColorAsState(
+        targetValue = if (selectionMode && selected) MiuixTheme.colorScheme.primaryContainer.copy(alpha = 0.38f) else Color.Transparent,
+        animationSpec = tween(180),
+        label = "rankRowBg",
+    )
+    val interactionModifier = if (onLongPress != null) {
+        Modifier.combinedClickable(
+            onClick = onClick,
+            onLongClick = {
+                if (!selectionMode) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongPress()
+                }
+            },
+        )
+    } else {
+        Modifier.clickable(onClick = onClick)
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(rowBg)
+            .then(interactionModifier)
+            .padding(vertical = 5.5.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AnimatedVisibility(
+            visible = selectionMode,
+            enter = expandHorizontally(tween(240, easing = FastOutSlowInEasing), expandFrom = Alignment.Start) +
+                fadeIn(tween(200)) +
+                scaleIn(tween(240), initialScale = 0.78f),
+            exit = shrinkHorizontally(tween(220, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start) +
+                fadeOut(tween(160)) +
+                scaleOut(tween(220), targetScale = 0.78f),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AuraCheckbox(
+                    checked = selected,
+                    onCheckedChange = onClick,
+                    modifier = Modifier.size(28.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+            }
+        }
         Text(rank.toString(), Modifier.width(30.dp), color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontWeight = FontWeight.Bold)
         Artwork(song.artwork, Modifier.size(44.dp), cornerRadius = ListArtworkCornerRadius)
         Column(Modifier.weight(1f).padding(horizontal = 11.dp)) {
@@ -1142,8 +1857,18 @@ private fun RankSongRow(rank: Int, song: Song, model: AuraViewModel, onClick: ()
             }
         }
         Text("${song.playCount} ${tr("play_count", "次")}", style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-        IconButton(onClick = { openActions(SongActionRequest(song, backdrop)) }, modifier = Modifier.size(44.dp)) {
-            Image(AuraMoreHorizontalIcon, tr("more", "更多"), Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary))
+        AnimatedVisibility(
+            visible = !selectionMode,
+            enter = expandHorizontally(tween(240, easing = FastOutSlowInEasing), expandFrom = Alignment.End) +
+                fadeIn(tween(200)) +
+                scaleIn(tween(240), initialScale = 0.8f),
+            exit = shrinkHorizontally(tween(200, easing = FastOutSlowInEasing), shrinkTowards = Alignment.End) +
+                fadeOut(tween(160)) +
+                scaleOut(tween(200), targetScale = 0.8f),
+        ) {
+            IconButton(onClick = { openActions(SongActionRequest(song, backdrop)) }, modifier = Modifier.size(44.dp)) {
+                Image(AuraMoreHorizontalIcon, tr("more", "更多"), Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary))
+            }
         }
     }
 }
@@ -1152,6 +1877,7 @@ private fun RankSongRow(rank: Int, song: Song, model: AuraViewModel, onClick: ()
 fun LocalPlaylistsPage(model: AuraViewModel, padding: PaddingValues) {
     val revision = model.history.revision
     val playlists = remember(revision) { model.history.playlists() }
+    val songByKey = remember(model.songs) { model.songs.associateBy { it.key } }
     var creating by remember { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
     var editing by remember { mutableStateOf<LocalPlaylist?>(null) }
@@ -1159,7 +1885,7 @@ fun LocalPlaylistsPage(model: AuraViewModel, padding: PaddingValues) {
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         run {
             items(playlists, key = { it.id }) { playlist ->
-                val tracks = model.songs.filter { it.key in playlist.songKeys }
+                val tracks = playlist.songKeys.mapNotNull(songByKey::get)
                 SeamlessCard(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                     Row(Modifier.fillMaxWidth().clickable { model.openCollection(MusicCollection("playlist:${playlist.id}", playlist.name, "", tracks)) }
                         .padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1225,7 +1951,13 @@ private fun PlaylistSongPicker(model: AuraViewModel, playlist: LocalPlaylist, di
             }
         }
         GlassDialogButton({
-            model.history.savePlaylists(model.history.playlists().map { if (it.id == playlist.id) it.copy(songKeys = selected.toList()) else it })
+            model.history.savePlaylists(model.history.playlists().map {
+                if (it.id == playlist.id) {
+                    val retained = it.songKeys.filter { key -> key in selected }
+                    val added = selected.filterNot { key -> key in retained }
+                    it.copy(songKeys = retained + added)
+                } else it
+            })
             dismiss()
         }, Modifier.fillMaxWidth().padding(top = 12.dp), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("save", "保存")) }
     }

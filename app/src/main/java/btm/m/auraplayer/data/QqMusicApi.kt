@@ -326,7 +326,7 @@ class QqMusicApi(
         val data = cachedJson("songlist/$id", CloudMetadataCache.FRESH_MS, refresh) {
             requestBlocking("songlist", mapOf("id" to "$id"))
         }.optJSONObject("data")
-        val songs = parseSongs(data?.optJSONArray("songlist") ?: JSONArray())
+        val songs = parseSongs(data?.optJSONArray("songlist") ?: JSONArray()).distinctBy { it.key }
         CloudPage(songs, songs.size, false, songs.size)
     }
 

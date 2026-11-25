@@ -293,6 +293,13 @@ class UsbExclusiveAudioSink(
     }
 
     override fun reset() {
+        releaseUsbStream(closeDevice = false)
+        if (sonicConfigured) {
+            sonicProcessor.reset()
+            sonicConfigured = false
+        }
+        fixedRateResampler.reset()
+        usbStartMediaTimeNeedsInit = true
         super.reset()
     }
 
@@ -678,17 +685,25 @@ class UsbExclusiveAudioSink(
 }
 
 /**
- * Stateful linear stereo resampler for fixed-rate (48 kHz) USB compatibility mode.
+ * Stateful Catmull-Rom stereo resampler with downsampling lowpass pre-filter for fixed-rate (48 kHz) USB compatibility mode.
  */
 internal class UsbStereoResampler {
-    private var prevL = 0f
-    private var prevR = 0f
+    private var prev2L = 0f
+    private var prev2R = 0f
+    private var prev1L = 0f
+    private var prev1R = 0f
+    private var lpPrevL = 0f
+    private var lpPrevR = 0f
     private var hasPrev = false
     private var phase = 0.0
 
     fun reset() {
-        prevL = 0f
-        prevR = 0f
+        prev2L = 0f
+        prev2R = 0f
+        prev1L = 0f
+        prev1R = 0f
+        lpPrevL = 0f
+        lpPrevR = 0f
         hasPrev = false
         phase = 0.0
     }
@@ -722,36 +737,83 @@ internal class UsbStereoResampler {
             }
         }
 
+        if (inputRate > outputRate && inFrames > 1) {
+            // Lightweight 3-tap [0.25, 0.5, 0.25] zero-phase-ish anti-alias pre-filter before decimation.
+            var prevL = if (hasPrev) lpPrevL else inL[0]
+            var prevR = if (hasPrev) lpPrevR else inR[0]
+            lpPrevL = inL[inFrames - 1]
+            lpPrevR = inR[inFrames - 1]
+            for (i in 0 until inFrames) {
+                val curL = inL[i]
+                val curR = inR[i]
+                val nextL = if (i + 1 < inFrames) inL[i + 1] else curL
+                val nextR = if (i + 1 < inFrames) inR[i + 1] else curR
+                inL[i] = 0.25f * prevL + 0.5f * curL + 0.25f * nextL
+                inR[i] = 0.25f * prevR + 0.5f * curR + 0.25f * nextR
+                prevL = curL
+                prevR = curR
+            }
+        } else {
+            lpPrevL = inL[inFrames - 1]
+            lpPrevR = inR[inFrames - 1]
+        }
+
         val step = inputRate.toDouble() / outputRate.toDouble()
         val estOut = ((inFrames.toDouble() / step) + 4).toInt().coerceAtLeast(1)
         val out = FloatArray(estOut * 2)
         var outCount = 0
 
         if (!hasPrev) {
-            prevL = inL[0]
-            prevR = inR[0]
+            prev2L = inL[0]
+            prev2R = inR[0]
+            prev1L = inL[0]
+            prev1R = inR[0]
             hasPrev = true
             phase = 0.0
         }
 
+        fun sampleAt(arr: FloatArray, p2: Float, p1: Float, idx: Int): Float = when {
+            idx <= -2 -> p2
+            idx == -1 -> p1
+            idx >= inFrames -> arr[inFrames - 1]
+            else -> arr[idx]
+        }
+
         while (phase < inFrames - 1) {
             val idx = kotlin.math.floor(phase).toInt()
-            val frac = (phase - idx).toFloat()
-            val l0 = if (idx < 0) prevL else inL[idx]
-            val r0 = if (idx < 0) prevR else inR[idx]
-            val l1 = if (idx + 1 < 0) prevL else inL[idx + 1]
-            val r1 = if (idx + 1 < 0) prevR else inR[idx + 1]
+            val t = (phase - idx).toFloat()
             if (outCount * 2 + 1 >= out.size) break
-            out[outCount * 2] = l0 + (l1 - l0) * frac
-            out[outCount * 2 + 1] = r0 + (r1 - r0) * frac
+            out[outCount * 2] = cubicHermite(
+                sampleAt(inL, prev2L, prev1L, idx - 1),
+                sampleAt(inL, prev2L, prev1L, idx),
+                sampleAt(inL, prev2L, prev1L, idx + 1),
+                sampleAt(inL, prev2L, prev1L, idx + 2),
+                t,
+            )
+            out[outCount * 2 + 1] = cubicHermite(
+                sampleAt(inR, prev2R, prev1R, idx - 1),
+                sampleAt(inR, prev2R, prev1R, idx),
+                sampleAt(inR, prev2R, prev1R, idx + 1),
+                sampleAt(inR, prev2R, prev1R, idx + 2),
+                t,
+            )
             outCount++
             phase += step
         }
 
         phase -= inFrames
-        prevL = inL[inFrames - 1]
-        prevR = inR[inFrames - 1]
+        prev2L = if (inFrames >= 2) inL[inFrames - 2] else prev1L
+        prev2R = if (inFrames >= 2) inR[inFrames - 2] else prev1R
+        prev1L = inL[inFrames - 1]
+        prev1R = inR[inFrames - 1]
         return if (outCount * 2 == out.size) out else out.copyOf(outCount * 2)
+    }
+
+    private fun cubicHermite(y0: Float, y1: Float, y2: Float, y3: Float, t: Float): Float {
+        val a0 = -0.5f * y0 + 1.5f * y1 - 1.5f * y2 + 0.5f * y3
+        val a1 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3
+        val a2 = -0.5f * y0 + 0.5f * y2
+        return (((a0 * t + a1) * t + a2) * t + y1).coerceIn(-1.0f, 1.0f)
     }
 
     private fun readNormalizedSample(buf: ByteBuffer, encoding: Int): Float = when (encoding) {

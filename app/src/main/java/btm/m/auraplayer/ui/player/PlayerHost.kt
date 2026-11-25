@@ -1036,8 +1036,10 @@ private fun rememberFullPlayerMetrics(
     }
     val baseControlsHeight = (if (appearance.showVolume) 244.dp else 200.dp) * compactScale
     val seekCeiling = h - portraitNav - baseControlsHeight - 10.dp
-    val titleGap = (if (compactWindow) 12.dp else 20.dp * PlayerPaddingScale)
-    val titleToSeek = (if (compactWindow) 48.dp else 63.dp * PlayerPaddingScale)
+    val baseTitleGap = if (compactWindow) 12.dp else 20.dp * PlayerPaddingScale
+    val baseTitleToSeek = if (compactWindow) 48.dp else 63.dp * PlayerPaddingScale
+    val titleGap = baseTitleGap * 0.92f
+    val titleToSeek = baseTitleToSeek * 0.92f
     val coverSize = if (landscapeGeom != null) {
         landscapeGeom.heroCoverSize
     } else {
@@ -1077,6 +1079,8 @@ private fun rememberFullPlayerMetrics(
     } else {
         null
     }
+    val baseTitleY = coverY + coverSize + baseTitleGap
+    val baseSeekY = maxOf(baseTitleY + baseTitleToSeek, h * .637f).coerceAtMost(seekCeiling)
     val normalTitleY = immGeom?.titleY ?: (coverY + coverSize + titleGap)
     val small = if (landscapeGeom != null) {
         landscapeGeom.lyricsCompactCoverSize
@@ -1085,7 +1089,7 @@ private fun rememberFullPlayerMetrics(
     }
     val smallY = effectiveStatus + (if (compactWindow) 14.dp else 48.dp * PlayerPaddingScale)
     val smallX = if (compactWindow) normalMargin else 26.dp * PlayerPaddingScale
-    val normalSeekY = immGeom?.seekY ?: maxOf(normalTitleY + titleToSeek, h * .637f).coerceAtMost(seekCeiling)
+    val normalSeekY = immGeom?.seekY ?: (normalTitleY + (baseSeekY - baseTitleY) * 0.92f).coerceAtMost(seekCeiling)
     val seekY = controlSize(fullCard.top + 64.dp, normalSeekY)
     val titleY = if (squareCardFullscreen && !landscape) fullCard.top + 14.dp else normalTitleY
     val portraitControlsScale = if (squareCardFullscreen) {
@@ -1411,7 +1415,7 @@ private fun FullPlayerArtworkLayer(
                     translationX = m.miniShift
                     this.alpha = m.miniAlpha * (1f - m.coverflowReveal) * m.shareChromeAlpha
                 }
-                .blur(m.shareChromeBlur)
+                .then(if (m.shareChromeBlur > 0.dp) Modifier.blur(m.shareChromeBlur, BlurredEdgeTreatment.Unbounded) else Modifier)
                 .playerTrackSwipe(appearance.swipeTracks && active && m.p < .01f && !m.coverflowActive, model::next, model::previous),
             radius = immCurTopStartRadius,
             topEndRadius = immCurTopEndRadius,
@@ -1498,6 +1502,11 @@ private fun FullPlayerArtworkLayer(
         }
         val cornerProgress = if (m.landscapeGeom != null) m.showSmallLandscapeCover else m.p
         val sharedRadius = lerp(13.dp * m.miniScale, stageCoverHeroRadius + (9.dp - stageCoverHeroRadius) * cornerProgress, m.e)
+        val portraitSlideDistancePx = if (m.landscapeGeom == null) {
+            with(m.density) { (m.w - m.coverX).toPx() }
+        } else {
+            null
+        }
         Cover(
             uri = song.artwork,
             modifier = Modifier
@@ -1511,13 +1520,14 @@ private fun FullPlayerArtworkLayer(
                     val portraitFullscreenHidden = m.fullscreen && !m.landscape && !m.coverflowActive
                     this.alpha = m.miniAlpha * (if (portraitFullscreenHidden) 1f - m.e * (1f - m.p) else 1f) * m.coverflowSharedVis * m.shareChromeAlpha
                 }
-                .blur(m.shareChromeBlur)
+                .then(if (m.shareChromeBlur > 0.dp) Modifier.blur(m.shareChromeBlur, BlurredEdgeTreatment.Unbounded) else Modifier)
                 .playerTrackSwipe(appearance.swipeTracks && active && m.p < .01f && !m.fullscreen && !m.coverflowActive, model::next, model::previous),
             radius = sharedRadius / sharedScale,
             onClick = { if (!m.shareActive && m.coverflowSharedVis > 0.5f) m.sharedClick() },
             animation = appearance.coverAnimation,
             animate = active && m.e > .99f && m.coverflowSharedVis > 0.05f,
             transitionKey = song.key,
+            slideDistancePx = portraitSlideDistancePx,
             mixVisual = mixVisual,
             placeholderTint = m.activeInk.copy(alpha = .3f),
             spatialState = spatialCoverState,
@@ -2979,6 +2989,7 @@ internal fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp
                   topEndRadius: Dp = radius, bottomEndRadius: Dp = bottomRadius,
                   onClick: (() -> Unit)? = null,
                   animation: CoverAnimation = CoverAnimation.DEFAULT, animate: Boolean = false, transitionKey: String = uri,
+                  slideDistancePx: Float? = null,
                   mixVisual: btm.m.auraplayer.auramix.AuraMixVisualTransition? = null,
                   placeholderTint: Color = Color.White.copy(alpha = .3f),
                   showPlaceholderBackground: Boolean = true,
@@ -3065,8 +3076,13 @@ internal fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp
             Box(
                 Modifier
                     .fillMaxSize()
-                    .then(if (coverBlurDp > 0.01f) Modifier.clip(coverShape) else Modifier)
-                    .blur(coverBlurDp.dp),
+                    .then(
+                        if (coverBlurDp > 0.01f) {
+                            Modifier.clip(coverShape).blur(coverBlurDp.dp, BlurredEdgeTreatment(coverShape))
+                        } else {
+                            Modifier
+                        },
+                    ),
             ) {
                 val advancedMaterial = btm.m.auraplayer.ui.LocalAdvancedMaterialEnabled.current
                 Box(
@@ -3082,6 +3098,7 @@ internal fun Cover(uri: String, modifier: Modifier, radius: Dp, bottomRadius: Dp
                             enabled = animate,
                             shape = coverShape,
                             placeholderBackgroundColor = placeholderColor,
+                            slideDistancePx = slideDistancePx,
                             onAspectRatioResolved = if (adaptIrregular) ({ measuredRatio = it }) else null,
                         )
                     } else if (showPlaceholderBackground) {

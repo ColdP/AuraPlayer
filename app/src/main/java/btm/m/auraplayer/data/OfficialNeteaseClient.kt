@@ -39,7 +39,7 @@ internal class OfficialNeteaseClient(
     }
 
     private fun playlistKey(id: String) = "official/" + CloudMetadataCache.digest(webOrigin + "\n" + cookie()) + "/playlist/$id"
-    fun invalidatePlaylist(id: Long) { metadataCache?.removePrefix(playlistKey(id.toString())) }
+    fun invalidatePlaylist(id: Long) { metadataCache?.remove(playlistKey(id.toString())) }
     fun request(path: String, values: Map<String, String>, authenticated: Boolean): JSONObject {
         fun value(key: String, fallback: String = "") = values[key] ?: fallback
         return when (path.trim('/')) {
@@ -193,14 +193,24 @@ internal class OfficialNeteaseClient(
             "likelist" -> call("/api/song/like/get", JSONObject().put("uid", value("uid")), authenticated)
             "like" -> call("/api/radio/like", JSONObject().put("trackId", value("id")).put("like", value("like") == "true").put("alg", "itembased").put("time", "3"), authenticated)
             "playlist/tracks" -> {
+                val op = value("op", "add")
                 val tracks = value("tracks").split(',').filter(String::isNotBlank)
-                fun add(ids: List<String>) = call("/api/playlist/manipulate/tracks", JSONObject()
-                    .put("op", value("op", "add")).put("pid", value("pid"))
+                fun manipulate(ids: List<String>) = call("/api/playlist/manipulate/tracks", JSONObject()
+                    .put("op", op).put("pid", value("pid"))
                     .put("trackIds", JSONArray(ids).toString()).put("imme", "true"), authenticated)
-                try { add(tracks) } catch (e: CloudApiException) {
-                    if (e.status == 512) add(tracks + tracks) else throw e
+                try { manipulate(tracks) } catch (e: CloudApiException) {
+                    if (op == "add" && e.status == 512) manipulate(tracks + tracks) else throw e
                 }
             }
+            "playlist/detail" -> call("/api/v6/playlist/detail", JSONObject().put("id", value("id")).put("n", 0).put("s", 0), authenticated)
+            "song/order/update" -> call(
+                "/api/playlist/manipulate/tracks",
+                JSONObject()
+                    .put("op", "update")
+                    .put("pid", value("pid"))
+                    .put("trackIds", value("ids")),
+                authenticated,
+            )
             "album/sublist" -> call("/api/album/sublist", JSONObject().put("limit", value("limit", "25")).put("offset", value("offset", "0")).put("total", true), authenticated)
             "album/newest" -> call("/api/discovery/newAlbum", JSONObject(), authenticated = false, eapi = true)
             "album/new" -> call(

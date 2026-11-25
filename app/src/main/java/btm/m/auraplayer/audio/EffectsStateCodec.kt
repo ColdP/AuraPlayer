@@ -9,6 +9,8 @@ internal object EffectsStateCodec {
         put("selected", s.selected); put("style", s.style.name); put("custom", PresetCodec.configJson(s.custom))
         put("counts", JSONObject(s.counts)); put("recent", JSONObject(s.recent))
         put("fade", s.fade); put("fadeMs", s.fadeMs); put("alwaysPlay", s.alwaysPlay)
+        put("antiClipping", s.antiClipping)
+        put("decoderMode", s.decoderMode.name)
         put("nativePreviousBehavior", s.nativePreviousBehavior)
         put("usbExclusive", s.usbExclusive)
         put("usbBufferMs", EffectsStore.normalizeUsbBufferMs(s.usbBufferMs))
@@ -40,6 +42,8 @@ internal object EffectsStateCodec {
                 PresetCodec.decode(row.getJSONObject("preset").toString()).copy(id = id)
             }.distinctBy { it.id }, counts = longs("counts").mapValues { it.value.coerceAtMost(1000000).toInt() }, recent = longs("recent"),
             fade = j.optBoolean("fade"), fadeMs = j.optInt("fadeMs", 600).coerceIn(100, 3000), alwaysPlay = j.optBoolean("alwaysPlay"),
+            antiClipping = j.optBoolean("antiClipping", defaults.antiClipping),
+            decoderMode = AudioDecoderMode.entries.firstOrNull { it.name == j.optString("decoderMode") } ?: defaults.decoderMode,
             nativePreviousBehavior = j.optBoolean("nativePreviousBehavior", defaults.nativePreviousBehavior),
             usbExclusive = j.optBoolean("usbExclusive", defaults.usbExclusive),
             usbBufferMs = EffectsStore.normalizeUsbBufferMs(j.optInt("usbBufferMs", defaults.usbBufferMs)),

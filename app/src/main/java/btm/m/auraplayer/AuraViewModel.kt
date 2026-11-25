@@ -44,6 +44,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     val settings get() = app.settings
     val history get() = app.history
     val songSort = SongSortSettings(application)
+    val playlistSort = PlaylistSortSettings(application)
     var sortedSongs by mutableStateOf<List<Song>>(emptyList()); private set
     var roamingPreviewSong by mutableStateOf<Song?>(null); private set
     private var roamingBatch: List<Song> = emptyList()
@@ -51,6 +52,8 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private var roamingLoadMoreJob: Job? = null
     private var sortJob: Job? = null
     fun sortSongs(order: SongSort) { songSort.update(order); updateSortedSongs() }
+    fun playlistSortOrder(collectionKey: String): SongSort = playlistSort.orderFor(collectionKey)
+    fun setPlaylistSortOrder(collectionKey: String, order: SongSort) { playlistSort.update(collectionKey, order) }
     private fun updateSortedSongs() {
         sortJob?.cancel()
         val source = songs
@@ -660,23 +663,34 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun blockSong(song: Song) {
-        if (song.cloud || song.uri.isBlank()) return
-        songs = songs.filterNot { it.uri == song.uri }
+        blockSongs(listOf(song))
+    }
+
+    fun blockSongs(tracks: List<Song>) {
+        val targets = tracks.filter { !it.cloud && it.uri.isNotBlank() }.distinctBy { it.uri }
+        if (targets.isEmpty()) return
+        val targetUris = targets.mapTo(hashSetOf()) { it.uri }
+        val targetKeys = targets.mapTo(hashSetOf()) { it.key }
+        songs = songs.filterNot { it.uri in targetUris }
         updateSortedSongs()
-        searchResults = searchResults.filterNot { !it.cloud && it.uri == song.uri }
-        searchHits = searchHits.filterNot { !it.cloud && it.song?.uri == song.uri }
+        searchResults = searchResults.filterNot { !it.cloud && it.uri in targetUris }
+        searchHits = searchHits.filterNot { !it.cloud && it.song?.uri in targetUris }
         controller?.let { player ->
-            if (player.currentMediaItem?.mediaId == song.key) player.pause()
+            if (player.currentMediaItem?.mediaId in targetKeys) player.pause()
             for (index in player.mediaItemCount - 1 downTo 0) {
-                if (player.getMediaItemAt(index).mediaId == song.key) player.removeMediaItem(index)
+                if (player.getMediaItemAt(index).mediaId in targetKeys) player.removeMediaItem(index)
             }
         }
         viewModelScope.launch {
             val updated = withContext(Dispatchers.IO) {
-                val fileName = blockedSongsStore.resolveFileName(song)
-                blockedSongsStore.add(song, fileName)
+                var latest: List<BlockedSong>? = null
+                for (song in targets) {
+                    val fileName = blockedSongsStore.resolveFileName(song)
+                    latest = blockedSongsStore.add(song, fileName)
+                }
+                latest
             }
-            blockedSongs = updated
+            if (updated != null) blockedSongs = updated
         }
     }
 
@@ -728,8 +742,11 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             player.shuffleModeEnabled = true
             playbackMode = 1
         } else {
-            setListRepeat(player)
-            playbackMode = 0
+            playbackMode = when {
+                player.repeatMode == Player.REPEAT_MODE_ONE -> 2
+                player.shuffleModeEnabled -> 1
+                else -> 0
+            }
         }
         player.setMediaItems(items, startIndex, 0)
         player.prepare()
@@ -1025,6 +1042,14 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         player.addMediaItem(mediaItem(song))
         if (player.playbackState == Player.STATE_IDLE) player.prepare()
     }
+    fun enqueueAll(tracks: List<Song>): Boolean {
+        if (tracks.isEmpty()) return false
+        val player = controller ?: run { error = tr("player_connecting", "播放服务正在连接，请稍后重试"); return false }
+        knownSongs.putAll(tracks.associateBy { it.key })
+        player.addMediaItems(tracks.map(::mediaItem))
+        if (player.playbackState == Player.STATE_IDLE) player.prepare()
+        return true
+    }
     fun refreshDownloadedSongs() { downloadedSongs = btm.m.auraplayer.download.MusicDownloads.downloadedSongs(app) }
     fun changePlaybackSpeed(value: Float) {
         if (value !in listOf(.5f, .75f, 1f, 1.5f, 2f, 3f)) return
@@ -1047,6 +1072,38 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { complete(false) }
             finally { downloadBusy = false }
+        }
+    }
+    fun downloadSongs(
+        tracks: List<Song>,
+        quality: btm.m.auraplayer.playback.StreamQuality,
+        complete: (succeeded: Int, failed: Int) -> Unit,
+    ) {
+        val targets = tracks.filter { it.netease }.distinctBy { it.key }
+        if (targets.isEmpty() || downloadBusy) {
+            complete(0, if (targets.isEmpty()) tracks.size else 0)
+            return
+        }
+        downloadBusy = true
+        viewModelScope.launch {
+            var succeeded = 0
+            var failed = 0
+            try {
+                for (song in targets) {
+                    try {
+                        val source = app.api.downloadSource(song.id, quality)
+                        withContext(Dispatchers.IO) { btm.m.auraplayer.download.MusicDownloads.enqueue(app, song, source) }
+                        succeeded++
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        failed++
+                    }
+                }
+                complete(succeeded, failed)
+            } finally {
+                downloadBusy = false
+            }
         }
     }
     fun openSongAlbum(song: Song) = openSongCatalog(song, false)
@@ -1330,7 +1387,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                     "rank" -> app.api.listeningRank(content.playlist.id, rankType).let { CloudPage(it, it.size, false, it.size) }
                     "radio" -> app.api.radioPrograms(content.playlist.id, content.offset)
                     "style_chart" -> app.api.styleChartSongs(content.playlist.id, content.offset, refresh = refresh)
-                    else -> if (content.playlist.provider == PROVIDER_QQ) app.qq.playlistSongs(content.playlist.id)
+                    else -> if (content.playlist.provider == PROVIDER_QQ) app.qq.playlistSongs(content.playlist.id, refresh = refresh)
                         else app.api.playlistSongs(content.playlist.id, content.offset, refresh = refresh)
                 }
                 ensureActive()
@@ -1343,7 +1400,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 catalog?.info?.let { content.catalog = it }
                 val existing = content.songs.mapTo(hashSetOf()) { it.key }
-                val newSongs = page.items.filterNot { it.key in existing }
+                val newSongs = page.items.distinctBy { it.key }.filterNot { it.key in existing }
                 content.songs = content.songs + newSongs
                 content.offset = page.nextOffset
                 content.loadedAt = System.currentTimeMillis()
@@ -1523,24 +1580,186 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun addSongToCloudPlaylist(playlist: CloudPlaylist, song: Song, complete: (Boolean) -> Unit = {}) {
+        addSongsToCloudPlaylist(playlist, listOf(song), complete)
+    }
+
+    fun addSongsToCloudPlaylist(playlist: CloudPlaylist, tracks: List<Song>, complete: (Boolean) -> Unit = {}) {
         val user = account ?: run { complete(false); return }
-        if (!song.netease || playlist.creatorId != user.userId || playlist.specialType == 5) { complete(false); return }
+        val neteaseSongs = tracks.filter { it.netease && it.id > 0L }.distinctBy { it.key }
+        val songIds = neteaseSongs.map { it.id }.distinct()
+        if (songIds.isEmpty() || playlist.creatorId != user.userId || playlist.specialType == 5) {
+            complete(false)
+            return
+        }
         val generation = cloudGeneration
         viewModelScope.launch {
             try {
-                app.api.addSongToPlaylist(playlist.id, song.id)
+                app.api.addSongsToPlaylist(playlist.id, songIds)
                 if (generation != cloudGeneration) { complete(false); return@launch }
-                cloudContents.remove(playlist.id)
-                collectionDestinations.values.mapNotNull { it.cloud }.filter { it.source == "playlist" && it.playlist.id == playlist.id }.distinct().forEach {
-                    if (it.songs.none { entry -> entry.key == song.key }) {
-                        it.songs = listOf(song) + it.songs; it.total++
+                cloudContents.remove(contentKey(playlist))
+                collectionDestinations.values.mapNotNull { it.cloud }
+                    .filter { it.source == "playlist" && it.playlist.id == playlist.id }
+                    .distinct()
+                    .forEach { content ->
+                        val existingKeys = content.songs.mapTo(hashSetOf()) { it.key }
+                        val appended = neteaseSongs.filterNot { it.key in existingKeys }
+                        if (appended.isNotEmpty()) {
+                            content.songs = appended + content.songs
+                            content.total += appended.size
+                        }
                     }
+                cloudPlaylists = cloudPlaylists.map { entry ->
+                    if (entry.id == playlist.id) entry.copy(count = entry.count + songIds.size) else entry
                 }
                 complete(true)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                complete(false)
             }
-            catch (e: CancellationException) { throw e }
-            catch (_: Exception) { complete(false) }
         }
+    }
+
+    fun removeSongsFromCloudPlaylist(playlist: CloudPlaylist, tracks: List<Song>, complete: (Boolean) -> Unit = {}) {
+        val user = account ?: run { complete(false); return }
+        val ownerId = playlist.creatorId.takeIf { it > 0L }
+            ?: cloudPlaylists.firstOrNull { it.id == playlist.id }?.creatorId
+            ?: 0L
+        val songIds = tracks.filter { it.netease && it.id > 0L }.map { it.id }.distinct()
+        if (songIds.isEmpty() || ownerId != user.userId || playlist.provider == PROVIDER_QQ) {
+            complete(false)
+            return
+        }
+        val idSet = songIds.toHashSet()
+        val generation = cloudGeneration
+        viewModelScope.launch {
+            try {
+                app.api.removeSongsFromPlaylist(playlist.id, songIds)
+                if (generation != cloudGeneration) { complete(false); return@launch }
+                cloudContents.remove(contentKey(playlist))
+                collectionDestinations.values.mapNotNull { it.cloud }
+                    .filter { it.source == "playlist" && it.playlist.id == playlist.id }
+                    .distinct()
+                    .forEach { content ->
+                        val before = content.songs.size
+                        content.songs = content.songs.filterNot { it.id in idSet }
+                        val removedCount = (before - content.songs.size).coerceAtLeast(songIds.size)
+                        content.total = (content.total - removedCount).coerceAtLeast(content.songs.size)
+                    }
+                cloudPlaylists = cloudPlaylists.map { entry ->
+                    if (entry.id == playlist.id) entry.copy(count = (entry.count - songIds.size).coerceAtLeast(0)) else entry
+                }
+                if (playlist.specialType == 5) {
+                    cloudLikedIds = cloudLikedIds - idSet
+                }
+                complete(true)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                complete(false)
+            }
+        }
+    }
+
+    fun isOwnedNeteasePlaylist(content: CloudPlaylistContent?): Boolean {
+        val user = account ?: return false
+        if (content == null || content.source != "playlist" || content.playlist.provider == PROVIDER_QQ) return false
+        val ownerId = content.playlist.creatorId.takeIf { it > 0L }
+            ?: cloudPlaylists.firstOrNull { it.id == content.playlist.id }?.creatorId
+            ?: 0L
+        return ownerId == user.userId && ownerId > 0L
+    }
+
+    fun reorderCloudPlaylist(content: CloudPlaylistContent, orderedSongs: List<Song>) {
+        val user = account ?: return
+        if (content.source != "playlist" || content.playlist.provider == PROVIDER_QQ) return
+        val ownerId = content.playlist.creatorId.takeIf { it > 0L }
+            ?: cloudPlaylists.firstOrNull { it.id == content.playlist.id }?.creatorId
+            ?: 0L
+        if (ownerId != user.userId) return
+        val uniqueOrdered = orderedSongs.distinctBy { it.key }
+        val previousSongs = content.songs
+        content.songs = uniqueOrdered
+        cloudContents[contentKey(content.playlist)]?.let { cached ->
+            if (cached !== content) cached.songs = uniqueOrdered
+        }
+        val generation = cloudGeneration
+        viewModelScope.launch {
+            try {
+                val orderedIds = uniqueOrdered.map { it.id }.filter { it > 0L }
+                val allIds = if (!content.hasMore) {
+                    orderedIds
+                } else {
+                    val fullIds = app.api.playlistTrackIds(content.playlist.id)
+                    if (fullIds.isEmpty()) orderedIds
+                    else {
+                        val orderedSet = orderedIds.toHashSet()
+                        orderedIds + fullIds.filterNot { it in orderedSet }
+                    }
+                }
+                app.api.updatePlaylistSongOrder(content.playlist.id, allIds)
+                if (generation != cloudGeneration) return@launch
+                cloudContents.remove(contentKey(content.playlist))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (generation == cloudGeneration) {
+                    content.songs = previousSongs
+                    cloudFailure(e)
+                }
+            }
+        }
+    }
+
+    fun addSongsToLocalPlaylist(playlistId: String, tracks: List<Song>) {
+        val keys = tracks.filter { !it.cloud }.map { it.key }.distinct()
+        if (keys.isEmpty()) return
+        history.savePlaylists(history.playlists().map { playlist ->
+            if (playlist.id == playlistId) playlist.copy(songKeys = (playlist.songKeys + keys).distinct()) else playlist
+        })
+    }
+
+    fun createLocalPlaylistWithSongs(name: String, tracks: List<Song>) {
+        val trimmed = name.trim()
+        val keys = tracks.filter { !it.cloud }.map { it.key }.distinct()
+        if (trimmed.isEmpty()) return
+        history.savePlaylists(history.playlists() + LocalPlaylist(java.util.UUID.randomUUID().toString(), trimmed, keys))
+    }
+
+    fun removeSongsFromLocalPlaylist(playlistId: String, songKeys: Set<String>) {
+        if (songKeys.isEmpty()) return
+        history.savePlaylists(history.playlists().map { playlist ->
+            if (playlist.id == playlistId) playlist.copy(songKeys = playlist.songKeys.filterNot { it in songKeys }) else playlist
+        })
+    }
+
+    fun reorderLocalPlaylist(playlistId: String, orderedSongKeys: List<String>) {
+        val orderedSet = orderedSongKeys.toSet()
+        history.savePlaylists(history.playlists().map { playlist ->
+            if (playlist.id == playlistId) {
+                val hiddenKeys = playlist.songKeys.filterNot { it in orderedSet }
+                playlist.copy(songKeys = orderedSongKeys + hiddenKeys)
+            } else playlist
+        })
+    }
+
+    suspend fun refreshCloudDailyCollectionNow() {
+        if (!cloudEnabled || account == null) return
+        val generation = cloudGeneration
+        val tracks = fetchCloudDailySongs(refresh = true)
+        if (generation != cloudGeneration) return
+        val artwork = tracks.firstOrNull { it.artwork.isNotBlank() }?.artwork.orEmpty()
+        collectionDestinations.values.filter { it.collection.key == "cloud:daily" }.forEach { destination ->
+            destination.collection = destination.collection.copy(
+                songs = tracks,
+                artwork = artwork.ifBlank { destination.collection.artwork },
+            )
+            if (destination.id == activeCollectionId) collection = destination.collection
+        }
+    }
+
+    fun refreshCloudDailyCollection() {
+        viewModelScope.launch { refreshCloudDailyCollectionNow() }
     }
     fun openListeningRank() {
         val user = account ?: return

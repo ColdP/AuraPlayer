@@ -97,4 +97,35 @@ class AuraAudioProcessorTest {
             }
         }
     }
+    @Test fun antiClippingTamesInterSampleOversInBypassWhileLeavingNormalSignalsUntouched() {
+        val p = AuraAudioProcessor({ BuiltInPresets.all.first().config }, antiClipping = { true }).apply {
+            configure(AudioProcessor.AudioFormat(48000, 2, C.ENCODING_PCM_FLOAT))
+            flush(AudioProcessor.StreamMetadata.DEFAULT)
+        }
+        val quiet = ByteBuffer.allocateDirect(480 * 2 * 4).order(ByteOrder.LITTLE_ENDIAN)
+        repeat(480) {
+            val s = (0.35 * kotlin.math.sin(2 * kotlin.math.PI * 1000 * it / 48000)).toFloat()
+            quiet.putFloat(s); quiet.putFloat(s)
+        }
+        quiet.flip()
+        val quietRaw = ByteArray(quiet.remaining()).also { quiet.duplicate().get(it) }
+        p.queueInput(quiet)
+        val quietOut = ByteArray(p.output.remaining()).also { p.output.get(it) }
+        assertArrayEquals(quietRaw, quietOut)
+
+        val hot = ByteBuffer.allocateDirect(2400 * 2 * 4).order(ByteOrder.LITTLE_ENDIAN)
+        repeat(2400) {
+            val s = (1.20 * kotlin.math.sin(2 * kotlin.math.PI * 6000 * it / 48000)).toFloat()
+            hot.putFloat(s); hot.putFloat(-s)
+        }
+        hot.flip()
+        p.queueInput(hot)
+        val outBuf = p.output.order(ByteOrder.LITTLE_ENDIAN)
+        var maxSample = 0f
+        while (outBuf.remaining() >= 4) {
+            val v = kotlin.math.abs(outBuf.float)
+            if (v > maxSample) maxSample = v
+        }
+        assertTrue("Expected anti-clipping peak <= 0.98, was $maxSample", maxSample <= 0.98f)
+    }
 }

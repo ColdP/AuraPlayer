@@ -18,4 +18,19 @@ class AudioDetailsTest {
         assertEquals(0, AudioDetails.pcmBits(0))
         assertEquals(16, AudioDetails.pcmBits(androidx.media3.common.C.ENCODING_PCM_16BIT))
     }
+    @Test fun readsAlacCookieBitDepthAndExtendedCodecNames() {
+        val rawAlac = ByteArray(24)
+        rawAlac[5] = 24
+        assertEquals(24, AudioDetails.alacBits(rawAlac))
+        val fullAtomAlac = ByteArray(36)
+        fullAtomAlac[4] = 'a'.code.toByte()
+        fullAtomAlac[5] = 'l'.code.toByte()
+        fullAtomAlac[6] = 'a'.code.toByte()
+        fullAtomAlac[7] = 'c'.code.toByte()
+        fullAtomAlac[17] = 16
+        assertEquals(16, AudioDetails.alacBits(fullAtomAlac))
+        assertEquals("ALAC", AudioDetails.codecFor("audio/alac"))
+        assertEquals("TrueHD", AudioDetails.codecFor("audio/true-hd"))
+        assertEquals("DTS", AudioDetails.codecFor("audio/vnd.dts"))
+    }
 }

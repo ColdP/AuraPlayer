@@ -272,7 +272,7 @@ internal class OfficialQqClient(
             val json = getJson(url)
             json.optJSONArray("cdlist")?.optJSONObject(0)?.optJSONArray("songlist") ?: JSONArray()
         }
-        val songs = parseSongs(array)
+        val songs = parseSongs(array).distinctBy { it.key }
         return CloudPage(songs, songs.size, false, songs.size)
     }
 

@@ -16,11 +16,12 @@ internal class ProcessingAudioSink(
     smartStyle: () -> SoundStyle? = { null },
     trackGeneration: () -> Long = { 0L },
     onSmartConfig: (DspConfig) -> Unit = {},
+    antiClipping: () -> Boolean = { false },
     config: () -> DspConfig,
 ) : ForwardingAudioSink(sink) {
     // Process before DefaultAudioSink's format conversion, so 24/32-bit sources are not
     // needlessly reduced to 16-bit to enter Media3's integer-only processor chain.
-    private val processor = AuraAudioProcessor(config, smartStyle, trackGeneration, onSmartConfig)
+    private val processor = AuraAudioProcessor(config, smartStyle, trackGeneration, onSmartConfig, antiClipping)
     private var pendingInput: ByteBuffer? = null
     private var pendingOutput: ByteBuffer? = null
     private var singScratch: ByteBuffer? = null

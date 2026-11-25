@@ -15,6 +15,16 @@ class EffectsRenderersFactory(
     private val auraSing: AuraSingEngine? = null,
     private val onUsbSinkCreated: (UsbExclusiveAudioSink) -> Unit = {},
 ) : DefaultRenderersFactory(context) {
+    init {
+        setExtensionRendererMode(
+            when (store.state.value.decoderMode) {
+                AudioDecoderMode.FFMPEG_FIRST -> EXTENSION_RENDERER_MODE_PREFER
+                AudioDecoderMode.SYSTEM_FIRST -> EXTENSION_RENDERER_MODE_ON
+                AudioDecoderMode.SYSTEM_ONLY -> EXTENSION_RENDERER_MODE_OFF
+            },
+        )
+    }
+
     override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): AudioSink {
         val defaultSink = DefaultAudioSink.Builder(context)
             .setEnableFloatOutput(true)
@@ -39,6 +49,7 @@ class EffectsRenderersFactory(
             smartStyle = { store.activeSmartStyle },
             trackGeneration = { store.trackGeneration },
             onSmartConfig = { store.liveSmartConfig = it },
+            antiClipping = { store.antiClippingEnabled },
         ) { store.realtimeConfig }
     }
 }

@@ -39,6 +39,7 @@ import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.icon.extended.ConvertFile
+import top.yukonga.miuix.kmp.icon.extended.SelectAll
 import top.yukonga.miuix.kmp.icon.extended.Sort
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -57,7 +58,10 @@ internal fun songSortLabel(sort: SongSort): String = when (sort) {
 }
 
 @Composable
-internal fun SongsToolbarMenu(model: AuraViewModel) {
+internal fun SongsToolbarMenu(
+    model: AuraViewModel,
+    onEnterMultiSelect: () -> Unit = {},
+) {
     val iconColor = MiuixTheme.colorScheme.onSurface
     var menuOpen by remember { mutableStateOf(false) }
     var sortExpanded by remember { mutableStateOf(false) }
@@ -77,6 +81,7 @@ internal fun SongsToolbarMenu(model: AuraViewModel) {
     val items = listOf(
         DropdownItem(tr("refresh", "刷新"), icon = { modifier -> Image(MiuixIcons.Regular.Refresh, null, modifier.size(22.dp), colorFilter = ColorFilter.tint(iconColor)) }),
         DropdownItem(tr("shuffle", "随机播放"), icon = { modifier -> Image(MiuixIcons.Regular.ConvertFile, null, modifier.size(22.dp), colorFilter = ColorFilter.tint(iconColor)) }),
+        DropdownItem(tr("multi_select", "多选"), icon = { modifier -> Image(MiuixIcons.Regular.SelectAll, null, modifier.size(22.dp), colorFilter = ColorFilter.tint(iconColor)) }),
         DropdownItem(tr("sort", "排序"),
             icon = { modifier -> Image(MiuixIcons.Regular.Sort, null, modifier.size(22.dp), colorFilter = ColorFilter.tint(iconColor)) }),
     )
@@ -114,11 +119,12 @@ internal fun SongsToolbarMenu(model: AuraViewModel) {
                             item = item, optionSize = items.size, index = index,
                             isSelected = false, dropdownColors = colors, enabled = menuOpen,
                             hasSubmenu = false,
-                            isFirst = index == 0, isLast = index == items.lastIndex,
+                            isFirst = index == 0, isLast = index == items.lastIndex && !sortExpanded,
                             onSelectedIndexChange = {
                                 when (index) {
                                     0 -> select(model::refreshLibrary)
                                     1 -> select { if (model.sortedSongs.isNotEmpty()) model.play(model.sortedSongs, shuffle = true) }
+                                    2 -> select(onEnterMultiSelect)
                                     else -> sortExpanded = !sortExpanded
                                 }
                             },

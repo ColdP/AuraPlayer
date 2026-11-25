@@ -4,6 +4,7 @@ package btm.m.auraplayer.ui
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -51,9 +52,11 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +70,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -94,6 +98,7 @@ import btm.m.auraplayer.ui.navigation.HostTab
 import btm.m.auraplayer.ui.player.PlayerExpressiveColors
 import dev.pascal.oneuikit.BoSwitchView
 import dev.pascal.oneuikit.DragOnlySeekBar
+import dev.pascal.oneuikit.MonetTones
 import dev.pascal.oneuikit.OneUiPalette
 import dev.pascal.oneuikit.OneUiWidgets
 import top.yukonga.miuix.kmp.basic.ButtonColors
@@ -118,14 +123,128 @@ private fun <T> oneUiSpring() = spring<T>(
     stiffness = Spring.StiffnessMediumLow,
 )
 
+private data class OneUiToneSnapshot(
+    val dark: Boolean,
+    val background: Color,
+    val card: Color,
+    val cardAlt: Color,
+    val text: Color,
+    val subText: Color,
+    val divider: Color,
+    val accent: Color,
+    val accentDeep: Color,
+    val onAccent: Color,
+    val chip: Color,
+    val onChip: Color,
+    val track: Color,
+    val segmentTrack: Color,
+    val segmentThumb: Color,
+) {
+    fun toMonetTones(): MonetTones = MonetTones(
+        background = background.toArgb(),
+        card = card.toArgb(),
+        cardAlt = cardAlt.toArgb(),
+        text = text.toArgb(),
+        subText = subText.toArgb(),
+        divider = divider.toArgb(),
+        accent = accent.toArgb(),
+        accentDeep = accentDeep.toArgb(),
+        onAccent = onAccent.toArgb(),
+        chip = chip.toArgb(),
+        onChip = onChip.toArgb(),
+        track = track.toArgb(),
+        segmentTrack = segmentTrack.toArgb(),
+        segmentThumb = segmentThumb.toArgb(),
+    )
+}
+
+private fun OneUiPalette.toToneSnapshot(): OneUiToneSnapshot = OneUiToneSnapshot(
+    dark = dark,
+    background = Color(background),
+    card = Color(card),
+    cardAlt = Color(cardAlt),
+    text = Color(text),
+    subText = Color(subText),
+    divider = Color(divider),
+    accent = Color(accent),
+    accentDeep = Color(accentDeep),
+    onAccent = Color(onAccent),
+    chip = Color(chip),
+    onChip = Color(onChip),
+    track = Color(track),
+    segmentTrack = Color(segmentTrack),
+    segmentThumb = Color(segmentThumb),
+)
+
+private fun lerpOneUiToneSnapshot(start: OneUiToneSnapshot, stop: OneUiToneSnapshot, fraction: Float): OneUiToneSnapshot {
+    val t = fraction.coerceIn(0f, 1f)
+    return OneUiToneSnapshot(
+        dark = stop.dark,
+        background = lerp(start.background, stop.background, t),
+        card = lerp(start.card, stop.card, t),
+        cardAlt = lerp(start.cardAlt, stop.cardAlt, t),
+        text = lerp(start.text, stop.text, t),
+        subText = lerp(start.subText, stop.subText, t),
+        divider = lerp(start.divider, stop.divider, t),
+        accent = lerp(start.accent, stop.accent, t),
+        accentDeep = lerp(start.accentDeep, stop.accentDeep, t),
+        onAccent = lerp(start.onAccent, stop.onAccent, t),
+        chip = lerp(start.chip, stop.chip, t),
+        onChip = lerp(start.onChip, stop.onChip, t),
+        track = lerp(start.track, stop.track, t),
+        segmentTrack = lerp(start.segmentTrack, stop.segmentTrack, t),
+        segmentThumb = lerp(start.segmentThumb, stop.segmentThumb, t),
+    )
+}
+
+@Composable
+internal fun rememberAnimatedOneUiPalette(
+    target: OneUiPalette,
+    durationMillis: Int = THEME_COLOR_TRANSITION_MS,
+): OneUiPalette {
+    val context = LocalContext.current
+    val targetSnapshot = remember(target) { target.toToneSnapshot() }
+    var from by remember { mutableStateOf(targetSnapshot) }
+    var to by remember { mutableStateOf(targetSnapshot) }
+    val progress = remember { Animatable(1f) }
+    val currentSnapshot = if (progress.value >= 1f) {
+        to
+    } else {
+        lerpOneUiToneSnapshot(from, to, progress.value)
+    }
+    val latestCurrent by rememberUpdatedState(currentSnapshot)
+    LaunchedEffect(targetSnapshot) {
+        if (to != targetSnapshot) {
+            from = latestCurrent
+            to = targetSnapshot
+            progress.snapTo(0f)
+            progress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = durationMillis, easing = ThemeColorTransitionEasing),
+            )
+        }
+    }
+    return if (progress.value >= 1f && to == targetSnapshot) {
+        target
+    } else {
+        OneUiPalette(
+            context = context,
+            forceDark = currentSnapshot.dark,
+            useMonet = true,
+            overrideTones = currentSnapshot.toMonetTones(),
+        )
+    }
+}
+
 @Composable
 internal fun rememberOneUiPalette(
     isDark: Boolean,
     useMonet: Boolean,
     customSeed: Int?,
+    durationMillis: Int = THEME_COLOR_TRANSITION_MS,
 ): OneUiPalette {
     val context = LocalContext.current
-    return remember(context, isDark, useMonet, customSeed) {
+    val target = remember(context, isDark, useMonet, customSeed) {
         OneUiPalette(
             context = context,
             forceDark = isDark,
@@ -133,6 +252,7 @@ internal fun rememberOneUiPalette(
             customSeed = customSeed,
         )
     }
+    return rememberAnimatedOneUiPalette(target, durationMillis = durationMillis)
 }
 
 @Composable

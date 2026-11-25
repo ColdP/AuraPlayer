@@ -23,5 +23,7 @@ enum class SongSort(val key: String) {
         }
         return songs.sortedWith(order.then(titles).thenBy { it.key })
     }
+    fun applyToPlaylist(songs: List<Song>): List<Song> = if (this == DEFAULT) songs else apply(songs)
+
     companion object { fun fromKey(key: String) = entries.firstOrNull { it.key == key } ?: DEFAULT }
 }

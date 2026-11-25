@@ -27,7 +27,11 @@ data class PartialScanResult(
 )
 
 class MediaLibrary(private val context: Context) {
-    private val audioExtensions = setOf("mp3", "flac", "m4a", "mp4", "ogg", "opus", "wav", "aac", "wma", "aif", "aiff")
+    private val audioExtensions = setOf(
+        "mp3", "mp2", "mp1", "flac", "m4a", "mp4", "caf", "ogg", "oga", "opus",
+        "wav", "wave", "aac", "wma", "aif", "aiff", "aifc", "ac3", "ec3", "eac3",
+        "mka", "webm", "amr", "3gp", "dsf", "dts", "mlp", "thd",
+    )
 
     suspend fun scan(settings: Appearance, blockedUris: Set<String> = emptySet()): List<Song> = withContext(Dispatchers.IO) {
         val songs = queryMediaStore(settings = settings, blockedUris = blockedUris)

@@ -582,11 +582,13 @@ class CutoutRingOverlayController(
 
     private fun resolveFallbackThemeAccent(): Int {
         val appearance = app.settings.value
+        val systemFallback = MonetTones.seedOf(app).takeIf { it != 0 }
+            ?: runCatching { app.getColor(android.R.color.system_accent1_500) }
+                .getOrDefault(CUTOUT_RING_DEFAULT_CUSTOM_COLOR)
         return when (appearance.color) {
             "custom" -> appearance.customColor
-            "system" -> MonetTones.seedOf(app).takeIf { it != 0 }
-                ?: runCatching { app.getColor(android.R.color.system_accent1_500) }
-                    .getOrDefault(CUTOUT_RING_DEFAULT_CUSTOM_COLOR)
+            "cover" -> coverAccentArgb ?: systemFallback
+            "system" -> systemFallback
             else -> colorPresets.firstOrNull { it.first == appearance.color }?.third?.toInt()
                 ?: CUTOUT_RING_DEFAULT_CUSTOM_COLOR
         } or 0xFF000000.toInt()

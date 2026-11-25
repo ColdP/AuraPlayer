@@ -542,6 +542,7 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
     val state by store.state.collectAsState()
     val usbStatus by store.usbStatus.collectAsState()
     val auraSingState by app.auraSing.uiState.collectAsState()
+    var decoderNoticeMode by remember { mutableStateOf<AudioDecoderMode?>(null) }
     DisposableEffect(context, state.usbExclusive) {
         store.refreshUsbStatus()
         val receiver = object : BroadcastReceiver() {
@@ -606,6 +607,29 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
                 }
             }
             SwitchPreference(tr("audio_always_play", "始终播放"), tr("audio_always_play_summary", "当有其他内容播放时，在后台保持播放"), state.alwaysPlay) { store.audio(always = it) }
+            SwitchPreference(
+                title = tr("audio_anti_clipping", "防爆音削波保护"),
+                summary = tr("audio_anti_clipping_summary", "平滑抑制高响度音轨的真峰值削波与爆音；关闭以在原声直通下无损直出"),
+                checked = state.antiClipping,
+            ) { store.audio(antiClipping = it) }
+            val decoderModes = AudioDecoderMode.entries
+            val decoderModeLabels = listOf(
+                tr("audio_decoder_ffmpeg_first", "FFmpeg 优先（推荐）"),
+                tr("audio_decoder_system_first", "系统解码优先（FFmpeg 补充）"),
+                tr("audio_decoder_system_only", "仅系统原生解码"),
+            )
+            GlassDropdownPreference(
+                title = tr("audio_decoder_mode", "音频解码方式"),
+                items = decoderModeLabels,
+                selectedIndex = decoderModes.indexOf(state.decoderMode).coerceAtLeast(0),
+                backdrop = LocalToolbarBackdrop.current,
+            ) { index ->
+                val selectedMode = decoderModes[index]
+                if (selectedMode != state.decoderMode) {
+                    store.audio(decoderMode = selectedMode)
+                    decoderNoticeMode = selectedMode
+                }
+            }
             SwitchPreference(
                 title = tr("audio_native_previous", "原生上一首逻辑"),
                 summary = tr("audio_native_previous_summary", "播放超过 3 秒时点击上一首回到歌曲开头，否则切换至上一首"),
@@ -738,6 +762,38 @@ private fun decimal(v: Double) = String.format(Locale.ROOT, "%.1f", v)
                     },
                 ) { open("aura_sing") }
             }
+        }
+    }
+    val noticeMode = decoderNoticeMode
+    val noticeSummary = when (noticeMode) {
+        AudioDecoderMode.FFMPEG_FIRST -> tr(
+            "audio_decoder_ffmpeg_first_desc",
+            "已切换为「FFmpeg 优先」。将优先使用内置 FFmpeg 高精度软解播放 FLAC、ALAC、Opus、AC-3、DTS 等格式并输出 32-bit 浮点 PCM，减少系统解码器兼容性爆音。\n\n该设置将在下次重启应用后生效。",
+        )
+        AudioDecoderMode.SYSTEM_FIRST -> tr(
+            "audio_decoder_system_first_desc",
+            "已切换为「系统解码优先」。将优先调用设备原生 MediaCodec 解码器，遇到系统不支持的编码（如 ALAC、AC-3、DTS 等）时自动回退至 FFmpeg 软解。\n\n该设置将在下次重启应用后生效。",
+        )
+        AudioDecoderMode.SYSTEM_ONLY -> tr(
+            "audio_decoder_system_only_desc",
+            "已切换为「仅系统原生解码」。将仅使用 Android 系统 MediaCodec 解码音频，不再启用内置 FFmpeg 扩展；部分未内置硬件或系统解码器的格式（如 ALAC、DTS、TrueHD 等）可能无法播放。\n\n该设置将在下次重启应用后生效。",
+        )
+        null -> ""
+    }
+    WindowDialog(
+        show = noticeMode != null,
+        title = tr("audio_decoder_dialog_title", "解码方式已切换"),
+        summary = noticeSummary,
+        titleTextAlign = TextAlign.Start,
+        summaryTextAlign = TextAlign.Start,
+        onDismissRequest = { decoderNoticeMode = null },
+    ) {
+        GlassDialogButton(
+            onClick = { decoderNoticeMode = null },
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            colors = ButtonDefaults.buttonColorsPrimary(),
+        ) {
+            Text(tr("ok", "确定"))
         }
     }
 }

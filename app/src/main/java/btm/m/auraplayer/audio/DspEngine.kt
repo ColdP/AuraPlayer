@@ -128,8 +128,12 @@ class DspEngine(val config: DspConfig, private val sampleRate: Int, private val 
     private val safetyGain: Double
     private val attack: Double
     private val release: Double
+    private val limiterAttack: Double
     private val limiterRelease: Double
     private val crossPole: Double
+    private val hasCompressor: Boolean
+    private val thresholdLinear: Double
+    private val compSlope: Double
     private var lowL = 0.0
     private var lowR = 0.0
     private var envelope = 0.0
@@ -147,8 +151,12 @@ class DspEngine(val config: DspConfig, private val sampleRate: Int, private val 
         safetyGain = 10.0.pow((headroomDb - config.preampDb) / 20)
         attack = exp(-1 / (sampleRate * config.attackMs / 1000))
         release = exp(-1 / (sampleRate * config.releaseMs / 1000))
+        limiterAttack = exp(-1 / (sampleRate * .0005))
         limiterRelease = exp(-1 / (sampleRate * .08))
         crossPole = exp(-2 * PI * 700 / sampleRate)
+        hasCompressor = config.ratio > 1.0
+        thresholdLinear = safetyGain * 10.0.pow(config.thresholdDb / 20.0)
+        compSlope = 1.0 - 1.0 / config.ratio
     }
 
     private fun estimateEqPeakDb(): Double {
@@ -191,19 +199,26 @@ class DspEngine(val config: DspConfig, private val sampleRate: Int, private val 
         }
         var peak = 0.0
         for (ch in 0 until channels) peak = max(peak, abs(output[ch]))
-        val compressorGain = if (config.ratio > 1.0) {
+        val compressorGain = if (hasCompressor) {
             val pole = if (peak > envelope) attack else release
             envelope = peak + pole * (envelope - peak)
             // Threshold is measured before automatic safety attenuation, after user preamp/EQ.
             // Otherwise adding an EQ band or widening stereo silently disables compression.
-            val levelDb = 20 * log10(max(1e-12, envelope / safetyGain))
-            val reduction = max(0.0, levelDb - config.thresholdDb) * (1 - 1 / config.ratio)
-            10.0.pow(-reduction / 20)
+            if (envelope > thresholdLinear) (thresholdLinear / envelope).pow(compSlope) else 1.0
         } else 1.0
-        val required = min(1.0, .98 / max(1e-12, peak * compressorGain))
-        limiterGain = if (required < limiterGain) required else required + limiterRelease * (limiterGain - required)
-        for (ch in 0 until channels) output[ch] = (output[ch] * compressorGain * limiterGain).let {
-            if (it.isFinite()) it.coerceIn(-.98, .98) else 0.0
-        }
+        val required = min(1.0, .95 / max(1e-12, peak * compressorGain))
+        val limiterPole = if (required < limiterGain) limiterAttack else limiterRelease
+        limiterGain = required + limiterPole * (limiterGain - required)
+        val postGain = compressorGain * limiterGain
+        for (ch in 0 until channels) output[ch] = softLimit(output[ch] * postGain)
+    }
+
+    /** C1-continuous soft-knee ceiling: identity below 0.88 (-1.11 dBFS), smooth tanh saturation up to 0.98. */
+    private fun softLimit(x: Double): Double {
+        if (!x.isFinite()) return 0.0
+        val ax = abs(x)
+        if (ax <= .88) return x
+        val shaped = (.88 + .10 * tanh((ax - .88) / .10)).coerceAtMost(.98)
+        return if (x >= 0.0) shaped else -shaped
     }
 }

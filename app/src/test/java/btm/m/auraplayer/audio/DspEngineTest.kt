@@ -140,4 +140,23 @@ class DspEngineTest {
         val eight = DspConfig(bands = List(8) { EqBand(1000.0, 0.0) })
         SoundStyle.entries.forEach { BuiltInPresets.styled(eight, it).validate() }
     }
+
+    @Test fun hotInterSampleOversAreSmoothlyLimitedWithoutHardStepClicks() {
+        val config = DspConfig(preampDb = 0.0, bands = listOf(EqBand(100.0, 4.0)))
+        val engine = DspEngine(config, 48000, 2)
+        val input = DoubleArray(2)
+        val output = DoubleArray(2)
+        var maxJump = 0.0
+        var prev = 0.0
+        repeat(4800) { i ->
+            val s = 0.998 * sin(2 * PI * 4000 * i / 48000)
+            input[0] = s; input[1] = -s
+            engine.processFrame(input, output)
+            assertTrue(output[0].isFinite() && abs(output[0]) <= 0.98)
+            assertTrue(output[1].isFinite() && abs(output[1]) <= 0.98)
+            if (i > 0) maxJump = max(maxJump, abs(output[0] - prev))
+            prev = output[0]
+        }
+        assertTrue(maxJump < 0.7)
+    }
 }

@@ -39,19 +39,19 @@ static inline float clampf(float v) { return v > 1.0f ? 1.0f : (v < -1.0f ? -1.0
 static void convertFloatToInt16(const float *src, uint8_t *dst, int n, float gain) {
     auto *out = reinterpret_cast<int16_t *>(dst);
     for (int i = 0; i < n; i++) {
-        float s = clampf(src[i] * gain) * 32768.0f;
-        if (s > 32767.0f) s = 32767.0f;
-        if (s < -32768.0f) s = -32768.0f;
-        out[i] = static_cast<int16_t>(s);
+        double s = static_cast<double>(clampf(src[i])) * static_cast<double>(gain) * 32768.0;
+        if (s > 32767.0) s = 32767.0;
+        if (s < -32768.0) s = -32768.0;
+        out[i] = static_cast<int16_t>(llround(s));
     }
 }
 
 static void convertFloatToInt24(const float *src, uint8_t *dst, int n, float gain) {
     for (int i = 0; i < n; i++) {
-        float s = clampf(src[i] * gain) * 8388608.0f;
-        if (s > 8388607.0f) s = 8388607.0f;
-        if (s < -8388608.0f) s = -8388608.0f;
-        auto v = static_cast<int32_t>(s);
+        double s = static_cast<double>(clampf(src[i])) * static_cast<double>(gain) * 8388608.0;
+        if (s > 8388607.0) s = 8388607.0;
+        if (s < -8388608.0) s = -8388608.0;
+        auto v = static_cast<int32_t>(llround(s));
         dst[i * 3] = static_cast<uint8_t>(v & 0xFF);
         dst[i * 3 + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
         dst[i * 3 + 2] = static_cast<uint8_t>((v >> 16) & 0xFF);
@@ -65,7 +65,7 @@ static void convertFloatToInt32(const float *src, uint8_t *dst, int n, float gai
         double s = static_cast<double>(clampf(src[i])) * dGain * 2147483648.0;
         if (s > 2147483647.0) s = 2147483647.0;
         if (s < -2147483648.0) s = -2147483648.0;
-        out[i] = static_cast<int32_t>(s);
+        out[i] = static_cast<int32_t>(llround(s));
     }
 }
 

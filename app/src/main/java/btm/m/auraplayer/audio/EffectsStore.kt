@@ -12,6 +12,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.roundToInt
 
+enum class AudioDecoderMode {
+    FFMPEG_FIRST,
+    SYSTEM_FIRST,
+    SYSTEM_ONLY,
+}
+
 data class EffectsState(
     val selected: String = "reference",
     val style: SoundStyle = SoundStyle.ORIGINAL,
@@ -22,6 +28,8 @@ data class EffectsState(
     val fade: Boolean = false,
     val fadeMs: Int = 600,
     val alwaysPlay: Boolean = false,
+    val antiClipping: Boolean = true,
+    val decoderMode: AudioDecoderMode = AudioDecoderMode.FFMPEG_FIRST,
     val nativePreviousBehavior: Boolean = true,
     val usbExclusive: Boolean = false,
     val usbBufferMs: Int = 100,
@@ -92,6 +100,7 @@ class EffectsStore(context: Context) {
     val usbVolumeHudEvent = usbVolumeHudEventMutable.asStateFlow()
     private var hudEventSeq = 0L
     @Volatile var realtimeConfig: DspConfig = mutable.value.config; private set
+    @Volatile var antiClippingEnabled: Boolean = mutable.value.antiClipping; private set
     @Volatile var usbExclusiveEnabled: Boolean = mutable.value.usbExclusive; private set
     @Volatile var usbBufferDurationMs: Int = normalizeUsbBufferMs(mutable.value.usbBufferMs); private set
     @Volatile var usbLockFixedFormatEnabled: Boolean = mutable.value.usbLockFixedFormat; private set
@@ -133,6 +142,8 @@ class EffectsStore(context: Context) {
         fade: Boolean = state.value.fade,
         ms: Int = state.value.fadeMs,
         always: Boolean = state.value.alwaysPlay,
+        antiClipping: Boolean = state.value.antiClipping,
+        decoderMode: AudioDecoderMode = state.value.decoderMode,
         nativePrevious: Boolean = state.value.nativePreviousBehavior,
         usbExclusive: Boolean = state.value.usbExclusive,
         usbBufferMs: Int = state.value.usbBufferMs,
@@ -148,6 +159,8 @@ class EffectsStore(context: Context) {
             fade = fade,
             fadeMs = ms.coerceIn(100, 3000),
             alwaysPlay = always,
+            antiClipping = antiClipping,
+            decoderMode = decoderMode,
             nativePreviousBehavior = nativePrevious,
             usbExclusive = usbExclusive,
             usbBufferMs = normalizeUsbBufferMs(usbBufferMs),
@@ -261,6 +274,7 @@ class EffectsStore(context: Context) {
         val previous = mutable.value
         val next = block(previous)
         realtimeConfig = next.config
+        antiClippingEnabled = next.antiClipping
         usbExclusiveEnabled = next.usbExclusive
         usbBufferDurationMs = normalizeUsbBufferMs(next.usbBufferMs)
         usbLockFixedFormatEnabled = next.usbLockFixedFormat

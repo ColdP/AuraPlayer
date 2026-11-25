@@ -4,6 +4,7 @@ package btm.m.auraplayer.ui
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -117,6 +118,7 @@ import btm.m.auraplayer.ui.navigation.DampedDragAnimation
 import btm.m.auraplayer.ui.navigation.HostTab
 import btm.m.auraplayer.ui.navigation.NavigationScaleSettings
 import btm.m.auraplayer.ui.player.PlayerExpressiveColors
+import btm.m.auraplayer.ui.player.rememberSmoothArtworkColorSeed
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.hct.Hct
 import com.materialkolor.scheme.SchemeExpressive
@@ -229,9 +231,166 @@ internal fun <T> m3ExpressiveEffectsSpring() = spring<T>(
 )
 
 internal const val DEFAULT_MATERIAL_EXPRESSIVE_SEED: Int = 0xFF6750A4.toInt()
+internal val ThemeColorTransitionEasing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+internal const val THEME_COLOR_TRANSITION_MS: Int = 520
+internal const val THEME_COLOR_PREVIEW_MS: Int = 90
+
+internal fun lerpAuraExpressiveScheme(
+    start: AuraExpressiveScheme,
+    stop: AuraExpressiveScheme,
+    fraction: Float,
+): AuraExpressiveScheme {
+    val t = fraction.coerceIn(0f, 1f)
+    return AuraExpressiveScheme(
+        dark = stop.dark,
+        surface = lerp(start.surface, stop.surface, t),
+        surfaceContainerLowest = lerp(start.surfaceContainerLowest, stop.surfaceContainerLowest, t),
+        surfaceContainerLow = lerp(start.surfaceContainerLow, stop.surfaceContainerLow, t),
+        surfaceContainer = lerp(start.surfaceContainer, stop.surfaceContainer, t),
+        surfaceContainerHigh = lerp(start.surfaceContainerHigh, stop.surfaceContainerHigh, t),
+        surfaceContainerHighest = lerp(start.surfaceContainerHighest, stop.surfaceContainerHighest, t),
+        onSurface = lerp(start.onSurface, stop.onSurface, t),
+        onSurfaceVariant = lerp(start.onSurfaceVariant, stop.onSurfaceVariant, t),
+        primary = lerp(start.primary, stop.primary, t),
+        onPrimary = lerp(start.onPrimary, stop.onPrimary, t),
+        primaryContainer = lerp(start.primaryContainer, stop.primaryContainer, t),
+        onPrimaryContainer = lerp(start.onPrimaryContainer, stop.onPrimaryContainer, t),
+        secondary = lerp(start.secondary, stop.secondary, t),
+        onSecondary = lerp(start.onSecondary, stop.onSecondary, t),
+        secondaryContainer = lerp(start.secondaryContainer, stop.secondaryContainer, t),
+        onSecondaryContainer = lerp(start.onSecondaryContainer, stop.onSecondaryContainer, t),
+        tertiary = lerp(start.tertiary, stop.tertiary, t),
+        onTertiary = lerp(start.onTertiary, stop.onTertiary, t),
+        tertiaryContainer = lerp(start.tertiaryContainer, stop.tertiaryContainer, t),
+        onTertiaryContainer = lerp(start.onTertiaryContainer, stop.onTertiaryContainer, t),
+        error = lerp(start.error, stop.error, t),
+        onError = lerp(start.onError, stop.onError, t),
+        errorContainer = lerp(start.errorContainer, stop.errorContainer, t),
+        onErrorContainer = lerp(start.onErrorContainer, stop.onErrorContainer, t),
+        outline = lerp(start.outline, stop.outline, t),
+        outlineVariant = lerp(start.outlineVariant, stop.outlineVariant, t),
+    )
+}
+
+internal fun lerpMiuixColors(start: Colors, stop: Colors, fraction: Float): Colors {
+    val t = fraction.coerceIn(0f, 1f)
+    return stop.copy(
+        primary = lerp(start.primary, stop.primary, t),
+        onPrimary = lerp(start.onPrimary, stop.onPrimary, t),
+        primaryVariant = lerp(start.primaryVariant, stop.primaryVariant, t),
+        onPrimaryVariant = lerp(start.onPrimaryVariant, stop.onPrimaryVariant, t),
+        error = lerp(start.error, stop.error, t),
+        onError = lerp(start.onError, stop.onError, t),
+        errorContainer = lerp(start.errorContainer, stop.errorContainer, t),
+        onErrorContainer = lerp(start.onErrorContainer, stop.onErrorContainer, t),
+        disabledPrimary = lerp(start.disabledPrimary, stop.disabledPrimary, t),
+        disabledOnPrimary = lerp(start.disabledOnPrimary, stop.disabledOnPrimary, t),
+        disabledPrimaryButton = lerp(start.disabledPrimaryButton, stop.disabledPrimaryButton, t),
+        disabledOnPrimaryButton = lerp(start.disabledOnPrimaryButton, stop.disabledOnPrimaryButton, t),
+        disabledPrimarySlider = lerp(start.disabledPrimarySlider, stop.disabledPrimarySlider, t),
+        primaryContainer = lerp(start.primaryContainer, stop.primaryContainer, t),
+        onPrimaryContainer = lerp(start.onPrimaryContainer, stop.onPrimaryContainer, t),
+        secondary = lerp(start.secondary, stop.secondary, t),
+        onSecondary = lerp(start.onSecondary, stop.onSecondary, t),
+        secondaryVariant = lerp(start.secondaryVariant, stop.secondaryVariant, t),
+        onSecondaryVariant = lerp(start.onSecondaryVariant, stop.onSecondaryVariant, t),
+        disabledSecondary = lerp(start.disabledSecondary, stop.disabledSecondary, t),
+        disabledOnSecondary = lerp(start.disabledOnSecondary, stop.disabledOnSecondary, t),
+        disabledSecondaryVariant = lerp(start.disabledSecondaryVariant, stop.disabledSecondaryVariant, t),
+        disabledOnSecondaryVariant = lerp(start.disabledOnSecondaryVariant, stop.disabledOnSecondaryVariant, t),
+        secondaryContainer = lerp(start.secondaryContainer, stop.secondaryContainer, t),
+        onSecondaryContainer = lerp(start.onSecondaryContainer, stop.onSecondaryContainer, t),
+        secondaryContainerVariant = lerp(start.secondaryContainerVariant, stop.secondaryContainerVariant, t),
+        onSecondaryContainerVariant = lerp(start.onSecondaryContainerVariant, stop.onSecondaryContainerVariant, t),
+        tertiaryContainer = lerp(start.tertiaryContainer, stop.tertiaryContainer, t),
+        onTertiaryContainer = lerp(start.onTertiaryContainer, stop.onTertiaryContainer, t),
+        tertiaryContainerVariant = lerp(start.tertiaryContainerVariant, stop.tertiaryContainerVariant, t),
+        background = lerp(start.background, stop.background, t),
+        onBackground = lerp(start.onBackground, stop.onBackground, t),
+        onBackgroundVariant = lerp(start.onBackgroundVariant, stop.onBackgroundVariant, t),
+        surface = lerp(start.surface, stop.surface, t),
+        onSurface = lerp(start.onSurface, stop.onSurface, t),
+        surfaceVariant = lerp(start.surfaceVariant, stop.surfaceVariant, t),
+        onSurfaceSecondary = lerp(start.onSurfaceSecondary, stop.onSurfaceSecondary, t),
+        onSurfaceVariantSummary = lerp(start.onSurfaceVariantSummary, stop.onSurfaceVariantSummary, t),
+        onSurfaceVariantActions = lerp(start.onSurfaceVariantActions, stop.onSurfaceVariantActions, t),
+        disabledOnSurface = lerp(start.disabledOnSurface, stop.disabledOnSurface, t),
+        surfaceContainer = lerp(start.surfaceContainer, stop.surfaceContainer, t),
+        onSurfaceContainer = lerp(start.onSurfaceContainer, stop.onSurfaceContainer, t),
+        onSurfaceContainerVariant = lerp(start.onSurfaceContainerVariant, stop.onSurfaceContainerVariant, t),
+        surfaceContainerHigh = lerp(start.surfaceContainerHigh, stop.surfaceContainerHigh, t),
+        onSurfaceContainerHigh = lerp(start.onSurfaceContainerHigh, stop.onSurfaceContainerHigh, t),
+        surfaceContainerHighest = lerp(start.surfaceContainerHighest, stop.surfaceContainerHighest, t),
+        onSurfaceContainerHighest = lerp(start.onSurfaceContainerHighest, stop.onSurfaceContainerHighest, t),
+        outline = lerp(start.outline, stop.outline, t),
+        dividerLine = lerp(start.dividerLine, stop.dividerLine, t),
+        windowDimming = lerp(start.windowDimming, stop.windowDimming, t),
+        sliderKeyPoint = lerp(start.sliderKeyPoint, stop.sliderKeyPoint, t),
+        sliderKeyPointForeground = lerp(start.sliderKeyPointForeground, stop.sliderKeyPointForeground, t),
+        sliderBackground = lerp(start.sliderBackground, stop.sliderBackground, t),
+    )
+}
+
+private fun miuixColorsFingerprint(c: Colors): Long {
+    var h = -0x340d631b7bdddcdbL
+    fun mix(color: Color) {
+        h = (h xor color.value.toLong()) * 0x100000001b3L
+    }
+    mix(c.primary); mix(c.onPrimary); mix(c.primaryVariant); mix(c.onPrimaryVariant)
+    mix(c.error); mix(c.onError); mix(c.errorContainer); mix(c.onErrorContainer)
+    mix(c.disabledPrimary); mix(c.disabledOnPrimary); mix(c.disabledPrimaryButton)
+    mix(c.disabledOnPrimaryButton); mix(c.disabledPrimarySlider)
+    mix(c.primaryContainer); mix(c.onPrimaryContainer)
+    mix(c.secondary); mix(c.onSecondary); mix(c.secondaryVariant); mix(c.onSecondaryVariant)
+    mix(c.disabledSecondary); mix(c.disabledOnSecondary); mix(c.disabledSecondaryVariant)
+    mix(c.disabledOnSecondaryVariant); mix(c.secondaryContainer); mix(c.onSecondaryContainer)
+    mix(c.secondaryContainerVariant); mix(c.onSecondaryContainerVariant)
+    mix(c.tertiaryContainer); mix(c.onTertiaryContainer); mix(c.tertiaryContainerVariant)
+    mix(c.background); mix(c.onBackground); mix(c.onBackgroundVariant)
+    mix(c.surface); mix(c.onSurface); mix(c.surfaceVariant); mix(c.onSurfaceSecondary)
+    mix(c.onSurfaceVariantSummary); mix(c.onSurfaceVariantActions); mix(c.disabledOnSurface)
+    mix(c.surfaceContainer); mix(c.onSurfaceContainer); mix(c.onSurfaceContainerVariant)
+    mix(c.surfaceContainerHigh); mix(c.onSurfaceContainerHigh)
+    mix(c.surfaceContainerHighest); mix(c.onSurfaceContainerHighest)
+    mix(c.outline); mix(c.dividerLine); mix(c.windowDimming)
+    mix(c.sliderKeyPoint); mix(c.sliderKeyPointForeground); mix(c.sliderBackground)
+    return h
+}
 
 @Composable
-internal fun rememberAuraExpressiveScheme(seed: Int, isDark: Boolean): AuraExpressiveScheme {
+internal fun rememberAnimatedMiuixColors(
+    target: Colors,
+    durationMillis: Int = THEME_COLOR_TRANSITION_MS,
+): Colors {
+    val targetKey = miuixColorsFingerprint(target)
+    var from by remember { mutableStateOf(target) }
+    var to by remember { mutableStateOf(target) }
+    var toKey by remember { mutableStateOf(targetKey) }
+    val progress = remember { Animatable(1f) }
+    val current = if (progress.value >= 1f) to else lerpMiuixColors(from, to, progress.value)
+    val latestCurrent by rememberUpdatedState(current)
+    val latestTarget by rememberUpdatedState(target)
+    LaunchedEffect(targetKey) {
+        if (toKey != targetKey) {
+            from = latestCurrent
+            to = latestTarget
+            toKey = targetKey
+            progress.snapTo(0f)
+            progress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = durationMillis, easing = ThemeColorTransitionEasing),
+            )
+        }
+    }
+    return current
+}
+
+@Composable
+internal fun rememberAuraExpressiveScheme(
+    seed: Int,
+    isDark: Boolean,
+    durationMillis: Int = THEME_COLOR_TRANSITION_MS,
+): AuraExpressiveScheme {
     val target = remember(seed, isDark) {
         val scheme = SchemeExpressive(Hct.fromInt(seed), isDark, 0.0, ColorSpec.SpecVersion.SPEC_2025)
         AuraExpressiveScheme(
@@ -264,36 +423,23 @@ internal fun rememberAuraExpressiveScheme(seed: Int, isDark: Boolean): AuraExpre
             outlineVariant = Color(scheme.outlineVariant),
         )
     }
-    val spec = tween<Color>(380, easing = FastOutSlowInEasing)
-    return AuraExpressiveScheme(
-        dark = target.dark,
-        surface = animateColorAsState(target.surface, spec, label = "m3eSurface").value,
-        surfaceContainerLowest = animateColorAsState(target.surfaceContainerLowest, spec, label = "m3eSurfaceLowest").value,
-        surfaceContainerLow = animateColorAsState(target.surfaceContainerLow, spec, label = "m3eSurfaceLow").value,
-        surfaceContainer = animateColorAsState(target.surfaceContainer, spec, label = "m3eSurfaceCont").value,
-        surfaceContainerHigh = animateColorAsState(target.surfaceContainerHigh, spec, label = "m3eSurfaceHigh").value,
-        surfaceContainerHighest = animateColorAsState(target.surfaceContainerHighest, spec, label = "m3eSurfaceHighest").value,
-        onSurface = animateColorAsState(target.onSurface, spec, label = "m3eOnSurface").value,
-        onSurfaceVariant = animateColorAsState(target.onSurfaceVariant, spec, label = "m3eOnSurfaceVar").value,
-        primary = animateColorAsState(target.primary, spec, label = "m3ePrimary").value,
-        onPrimary = animateColorAsState(target.onPrimary, spec, label = "m3eOnPrimary").value,
-        primaryContainer = animateColorAsState(target.primaryContainer, spec, label = "m3ePrimaryCont").value,
-        onPrimaryContainer = animateColorAsState(target.onPrimaryContainer, spec, label = "m3eOnPrimaryCont").value,
-        secondary = animateColorAsState(target.secondary, spec, label = "m3eSecondary").value,
-        onSecondary = animateColorAsState(target.onSecondary, spec, label = "m3eOnSecondary").value,
-        secondaryContainer = animateColorAsState(target.secondaryContainer, spec, label = "m3eSecondaryCont").value,
-        onSecondaryContainer = animateColorAsState(target.onSecondaryContainer, spec, label = "m3eOnSecondaryCont").value,
-        tertiary = animateColorAsState(target.tertiary, spec, label = "m3eTertiary").value,
-        onTertiary = animateColorAsState(target.onTertiary, spec, label = "m3eOnTertiary").value,
-        tertiaryContainer = animateColorAsState(target.tertiaryContainer, spec, label = "m3eTertiaryCont").value,
-        onTertiaryContainer = animateColorAsState(target.onTertiaryContainer, spec, label = "m3eOnTertiaryCont").value,
-        error = animateColorAsState(target.error, spec, label = "m3eError").value,
-        onError = animateColorAsState(target.onError, spec, label = "m3eOnError").value,
-        errorContainer = animateColorAsState(target.errorContainer, spec, label = "m3eErrorCont").value,
-        onErrorContainer = animateColorAsState(target.onErrorContainer, spec, label = "m3eOnErrorCont").value,
-        outline = animateColorAsState(target.outline, spec, label = "m3eOutline").value,
-        outlineVariant = animateColorAsState(target.outlineVariant, spec, label = "m3eOutlineVar").value,
-    )
+    var from by remember { mutableStateOf(target) }
+    var to by remember { mutableStateOf(target) }
+    val progress = remember { Animatable(1f) }
+    val current = if (progress.value >= 1f) to else lerpAuraExpressiveScheme(from, to, progress.value)
+    val latestCurrent by rememberUpdatedState(current)
+    LaunchedEffect(target) {
+        if (to != target) {
+            from = latestCurrent
+            to = target
+            progress.snapTo(0f)
+            progress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = durationMillis, easing = ThemeColorTransitionEasing),
+            )
+        }
+    }
+    return current
 }
 
 internal fun Colors.withExpressiveColors(e: AuraExpressiveScheme): Colors = copy(
@@ -351,14 +497,26 @@ internal fun Colors.withExpressiveColors(e: AuraExpressiveScheme): Colors = copy
 internal fun ProvideAuraAppTheme(
     settings: Appearance,
     previewColor: Int? = null,
+    coverArtwork: String = "",
     textStyles: TextStyles = remember { auraTextStyles() },
     content: @Composable () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val systemSeed = MonetTones.seedOf(context).takeIf { it != 0 }
+        ?: context.getColor(android.R.color.system_accent1_500)
+    val coverSeed = if (settings.dynamicColorEnabled && settings.color == "cover") {
+        rememberSmoothArtworkColorSeed(
+            artwork = coverArtwork,
+            useOklab = settings.isOklabColor,
+            fallbackSeed = systemSeed,
+        )
+    } else {
+        null
+    }
     val seed = when (settings.color) {
         "custom" -> previewColor ?: settings.customColor
-        "system" -> MonetTones.seedOf(context).takeIf { it != 0 }
-            ?: context.getColor(android.R.color.system_accent1_500)
+        "cover" -> coverSeed ?: systemSeed
+        "system" -> systemSeed
         else -> colorPresets.firstOrNull { it.first == settings.color }?.third?.toInt()
     }
     val controller = remember(
@@ -387,6 +545,7 @@ internal fun ProvideAuraAppTheme(
     val colorStyle = remember(settings.colorExtractionMode, settings.palette) {
         AuraColorStyle(mode = settings.colorExtractionMode, palette = settings.palette)
     }
+    val colorTransitionMs = if (previewColor != null) THEME_COLOR_PREVIEW_MS else THEME_COLOR_TRANSITION_MS
     CompositionLocalProvider(
         LocalAdvancedMaterialEnabled provides !settings.disableAdvancedMaterial,
         LocalAdaptIrregularCovers provides settings.adaptIrregularCovers,
@@ -399,6 +558,7 @@ internal fun ProvideAuraAppTheme(
             paletteIndex = settings.palette,
             seed = seed,
             useSystemSeed = settings.color == "system",
+            colorTransitionMs = colorTransitionMs,
             controller = controller,
             textStyles = textStyles,
         ) {
@@ -415,6 +575,7 @@ internal fun AuraUiTheme(
     paletteIndex: Int,
     seed: Int?,
     useSystemSeed: Boolean = false,
+    colorTransitionMs: Int = THEME_COLOR_TRANSITION_MS,
     controller: ThemeController,
     textStyles: TextStyles,
     content: @Composable () -> Unit,
@@ -432,13 +593,13 @@ internal fun AuraUiTheme(
     val isOklab = colorExtractionMode == ColorExtractionMode.OKLAB
     val isMonet = colorExtractionMode == ColorExtractionMode.MONET
     val oklabScheme = if (isOklab) {
-        rememberOklabScheme(seed ?: DEFAULT_OKLAB_SEED, isDark, paletteIndex)
+        rememberOklabScheme(seed ?: DEFAULT_OKLAB_SEED, isDark, paletteIndex, durationMillis = colorTransitionMs)
     } else null
     val expressiveSeed = if (colorExtractionMode != ColorExtractionMode.OFF && seed != null) seed else DEFAULT_MATERIAL_EXPRESSIVE_SEED
     val expressiveScheme = if (isOklab && oklabScheme != null) {
         oklabScheme.toAuraExpressiveScheme()
     } else {
-        rememberAuraExpressiveScheme(expressiveSeed, isDark)
+        rememberAuraExpressiveScheme(expressiveSeed, isDark, durationMillis = colorTransitionMs)
     }
     when (style) {
         AppUiStyle.MATERIAL -> {
@@ -455,23 +616,30 @@ internal fun AuraUiTheme(
         }
         AppUiStyle.ONE -> {
             val context = androidx.compose.ui.platform.LocalContext.current
-            val oklabTones = remember(oklabScheme) { oklabScheme?.toOneUiMonetTones() }
-            val onePalette = if (isOklab && oklabTones != null) {
-                remember(context, isDark, oklabTones) {
+            val targetOnePalette = if (isOklab) {
+                val targetOklabTones = remember(seed, isDark, paletteIndex) {
+                    OklabThemeEngine.generateScheme(seed ?: DEFAULT_OKLAB_SEED, isDark, paletteIndex).toOneUiMonetTones()
+                }
+                remember(context, isDark, targetOklabTones) {
                     OneUiPalette(
                         context = context,
                         forceDark = isDark,
                         useMonet = true,
-                        overrideTones = oklabTones,
+                        overrideTones = targetOklabTones,
                     )
                 }
             } else {
-                rememberOneUiPalette(
-                    isDark = isDark,
-                    useMonet = isMonet,
-                    customSeed = if (useSystemSeed) null else seed,
-                )
+                val customSeed = if (useSystemSeed) null else seed
+                remember(context, isDark, isMonet, customSeed) {
+                    OneUiPalette(
+                        context = context,
+                        forceDark = isDark,
+                        useMonet = isMonet,
+                        customSeed = customSeed,
+                    )
+                }
             }
+            val onePalette = rememberAnimatedOneUiPalette(targetOnePalette, durationMillis = colorTransitionMs)
             val oneWidgets = remember(context, onePalette) {
                 OneUiWidgets(context, onePalette)
             }
@@ -511,26 +679,23 @@ internal fun AuraUiTheme(
             }
         }
         AppUiStyle.HYPER -> {
-            if (isOklab && oklabScheme != null) {
+            val targetColors = if (isOklab) {
+                val rawOklab = remember(seed, isDark, paletteIndex) {
+                    OklabThemeEngine.generateScheme(seed ?: DEFAULT_OKLAB_SEED, isDark, paletteIndex)
+                }
                 val base = if (isDark) darkColorScheme() else lightColorScheme()
-                val mapped = base.withOklabColors(oklabScheme)
-                MiuixTheme(colors = mapped, textStyles = textStyles) {
-                    CompositionLocalProvider(
-                        LocalAppUiStyle provides AppUiStyle.HYPER,
-                        LocalAuraExpressiveScheme provides expressiveScheme,
-                        LocalAuraOklabScheme provides oklabScheme,
-                        content = content,
-                    )
-                }
+                remember(base, rawOklab) { base.withOklabColors(rawOklab) }
             } else {
-                MiuixTheme(controller = controller, textStyles = textStyles) {
-                    CompositionLocalProvider(
-                        LocalAppUiStyle provides AppUiStyle.HYPER,
-                        LocalAuraExpressiveScheme provides expressiveScheme,
-                        LocalAuraOklabScheme provides null,
-                        content = content,
-                    )
-                }
+                controller.currentColors()
+            }
+            val animatedColors = rememberAnimatedMiuixColors(targetColors, durationMillis = colorTransitionMs)
+            MiuixTheme(colors = animatedColors, textStyles = textStyles) {
+                CompositionLocalProvider(
+                    LocalAppUiStyle provides AppUiStyle.HYPER,
+                    LocalAuraExpressiveScheme provides expressiveScheme,
+                    LocalAuraOklabScheme provides if (isOklab) oklabScheme else null,
+                    content = content,
+                )
             }
         }
     }

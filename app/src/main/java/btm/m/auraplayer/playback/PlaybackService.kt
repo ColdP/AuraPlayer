@@ -170,7 +170,7 @@ class PlaybackService : MediaSessionService() {
             }
         }
         val source = DefaultDataSource.Factory(this, cloudSource)
-        val mediaSourceFactory = DefaultMediaSourceFactory(source)
+        val mediaSourceFactory = DefaultMediaSourceFactory(source, AuraExtractorsFactory())
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
             .setBufferDurationsMs(15_000, 30_000, 1_500, 3_000)
             .setBackBuffer(0, false)

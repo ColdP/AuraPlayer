@@ -1,5 +1,6 @@
 package btm.m.auraplayer.data
 
+import android.util.JsonReader
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
@@ -51,10 +52,38 @@ class CloudMetadataCache(
         }
     }
 
+    private fun readEntryKey(file: File): String? = runCatching {
+        JsonReader(file.bufferedReader()).use { reader ->
+            reader.beginObject()
+            while (reader.hasNext()) {
+                if (reader.nextName() == "key") {
+                    return@runCatching reader.nextString()
+                } else {
+                    reader.skipValue()
+                }
+            }
+            null
+        }
+    }.getOrNull()
+
+    @Synchronized
+    fun remove(key: String) {
+        runCatching { File(directory, digest(key) + ".json").delete() }
+    }
+
     @Synchronized
     fun removePrefix(prefix: String) {
+        removePrefixes(listOf(prefix))
+    }
+
+    @Synchronized
+    fun removePrefixes(prefixes: Collection<String>) {
+        if (prefixes.isEmpty()) return
         directory.listFiles { f -> f.extension == "json" }.orEmpty().forEach { file ->
-            runCatching { if (JSONObject(file.readText()).getString("key").startsWith(prefix)) file.delete() }
+            val key = readEntryKey(file) ?: return@forEach
+            if (prefixes.any { key.startsWith(it) }) {
+                runCatching { file.delete() }
+            }
         }
     }
 

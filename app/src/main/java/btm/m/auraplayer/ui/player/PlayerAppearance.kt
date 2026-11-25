@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
@@ -492,6 +493,7 @@ internal fun AnimatedPlayerArtwork(
     enabled: Boolean,
     shape: Shape = RectangleShape,
     placeholderBackgroundColor: Color = Color.Transparent,
+    slideDistancePx: Float? = null,
     onAspectRatioResolved: ((Float) -> Unit)? = null,
 ) {
     var current by remember { mutableStateOf(artwork) }
@@ -511,47 +513,51 @@ internal fun AnimatedPlayerArtwork(
         previous = null
     }
     val t = progress.value
-    fun Modifier.frame(incoming: Boolean): Modifier = graphicsLayer {
-        val at = if (incoming) 1f - t else t
-        cameraDistance = 14f * density
-        this.shape = shape
-        clip = true
-        when (animation) {
-            CoverAnimation.DEFAULT -> alpha = if (incoming) t else 1f - t
-            CoverAnimation.CARD -> {
-                translationX = size.width * at * if (incoming) 1f else -.35f
-                rotationZ = at * if (incoming) 8f else -6f
-                scaleX = 1f - .08f * at; scaleY = scaleX; alpha = 1f - at
-            }
-            CoverAnimation.BLUR -> alpha = 1f - at
-            CoverAnimation.COVER -> { if (incoming) translationX = size.width * (1f - t) }
-            CoverAnimation.PAGE -> {
-                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, .5f)
-                rotationY = if (incoming) 90f * (1f - t) else -90f * t
-                alpha = if (at < .999f) 1f else 0f
-            }
-            CoverAnimation.STACK -> {
-                if (incoming) {
-                    val stackScale = 0.86f + 0.14f * t
-                    scaleX = stackScale
-                    scaleY = stackScale
-                    translationY = size.height * 0.065f * (1f - t)
-                    alpha = 0.90f + 0.10f * t
-                } else {
-                    val exitFade = ((t - 0.30f) / 0.65f).coerceIn(0f, 1f)
-                    translationY = -size.height * 0.38f * t
-                    alpha = 1f - exitFade * exitFade
-                    shadowElevation = 10.dp.toPx() * sin(PI.toFloat() * t)
+    fun Modifier.frame(incoming: Boolean): Modifier {
+        val blurDp = if (animation == CoverAnimation.BLUR) 18f * if (incoming) 1f - t else t else 0f
+        return graphicsLayer {
+            val at = if (incoming) 1f - t else t
+            val slideWidth = maxOf(size.width, slideDistancePx ?: size.width)
+            cameraDistance = 14f * density
+            this.shape = shape
+            clip = true
+            when (animation) {
+                CoverAnimation.DEFAULT -> alpha = if (incoming) t else 1f - t
+                CoverAnimation.CARD -> {
+                    translationX = slideWidth * at * if (incoming) 1f else -.35f
+                    rotationZ = at * if (incoming) 8f else -6f
+                    scaleX = 1f - .08f * at; scaleY = scaleX; alpha = 1f - at
+                }
+                CoverAnimation.BLUR -> alpha = 1f - at
+                CoverAnimation.COVER -> { if (incoming) translationX = slideWidth * (1f - t) }
+                CoverAnimation.PAGE -> {
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, .5f)
+                    rotationY = if (incoming) 90f * (1f - t) else -90f * t
+                    alpha = if (at < .999f) 1f else 0f
+                }
+                CoverAnimation.STACK -> {
+                    if (incoming) {
+                        val stackScale = 0.86f + 0.14f * t
+                        scaleX = stackScale
+                        scaleY = stackScale
+                        translationY = size.height * 0.065f * (1f - t)
+                        alpha = 0.90f + 0.10f * t
+                    } else {
+                        val exitFade = ((t - 0.30f) / 0.65f).coerceIn(0f, 1f)
+                        translationY = -size.height * 0.38f * t
+                        alpha = 1f - exitFade * exitFade
+                        shadowElevation = 10.dp.toPx() * sin(PI.toFloat() * t)
+                    }
+                }
+                CoverAnimation.VERTICAL_FLIP, CoverAnimation.HORIZONTAL_FLIP -> {
+                    val angle = if (incoming) 180f * (1f - t) else -180f * t
+                    if (animation == CoverAnimation.VERTICAL_FLIP) rotationX = angle else rotationY = angle
+                    alpha = if (abs(angle) < 90f) 1f else 0f
                 }
             }
-            CoverAnimation.VERTICAL_FLIP, CoverAnimation.HORIZONTAL_FLIP -> {
-                val angle = if (incoming) 180f * (1f - t) else -180f * t
-                if (animation == CoverAnimation.VERTICAL_FLIP) rotationX = angle else rotationY = angle
-                alpha = if (abs(angle) < 90f) 1f else 0f
-            }
-        }
-    }.then(if (placeholderBackgroundColor.alpha > 0f) Modifier.background(placeholderBackgroundColor) else Modifier)
-        .then(if (animation == CoverAnimation.BLUR) Modifier.blur((18f * if (incoming) 1f - t else t).dp) else Modifier)
+        }.then(if (placeholderBackgroundColor.alpha > 0f) Modifier.background(placeholderBackgroundColor) else Modifier)
+            .then(if (blurDp > 0.01f) Modifier.blur(blurDp.dp, BlurredEdgeTreatment(shape)) else Modifier)
+    }
     val context = LocalContext.current
     val previousRequest = remember(previous, context) {
         previous?.let {

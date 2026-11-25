@@ -76,23 +76,49 @@ class OutputWaveform {
         val channelCount = channels.coerceAtLeast(1)
         val analyzeSpectrum = spectrumEnabled
         val analyzeLevel = levelEnabled
+        val frameBytes = bytes * channelCount
+        val fast16Le = encoding == C.ENCODING_PCM_16BIT
+        val fastFloatLe = encoding == C.ENCODING_PCM_FLOAT
         var offset = pcm.position()
-        while (offset + bytes * channelCount <= pcm.limit()) {
+        val limit = pcm.limit()
+        while (offset + frameBytes <= limit) {
             var monoSum = 0f
-            repeat(channelCount) { channel ->
-                val index = offset + channel * bytes
-                var value = 0
-                if (bytes > 1) for (b in 0 until bytes) {
-                    val shift = 8 * (if (bigEndian) bytes - 1 - b else b)
-                    value = value or ((pcm.get(index + b).toInt() and 255) shl shift)
+            if (fast16Le) {
+                for (channel in 0 until channelCount) {
+                    val idx = offset + (channel shl 1)
+                    val lo = pcm.get(idx).toInt() and 0xFF
+                    val hi = pcm.get(idx + 1).toInt()
+                    val sample = ((hi shl 8) or lo) / 32768f
+                    low = min(low, sample); high = max(high, sample)
+                    monoSum += sample
                 }
-                val sample = when (encoding) {
-                    C.ENCODING_PCM_8BIT -> ((pcm.get(index).toInt() and 255) - 128) / 128f
-                    C.ENCODING_PCM_FLOAT -> Float.fromBits(value)
-                    else -> ((value shl (32 - bytes * 8)) shr (32 - bytes * 8)).toDouble().div(1L shl (bytes * 8 - 1)).toFloat()
-                }.let { if (it.isFinite()) it.coerceIn(-1f, 1f) else 0f }
-                low = min(low, sample); high = max(high, sample)
-                monoSum += sample
+            } else if (fastFloatLe) {
+                for (channel in 0 until channelCount) {
+                    val idx = offset + (channel shl 2)
+                    val bits = (pcm.get(idx).toInt() and 0xFF) or
+                        ((pcm.get(idx + 1).toInt() and 0xFF) shl 8) or
+                        ((pcm.get(idx + 2).toInt() and 0xFF) shl 16) or
+                        ((pcm.get(idx + 3).toInt() and 0xFF) shl 24)
+                    val raw = Float.fromBits(bits)
+                    val sample = if (raw.isFinite()) raw.coerceIn(-1f, 1f) else 0f
+                    low = min(low, sample); high = max(high, sample)
+                    monoSum += sample
+                }
+            } else {
+                for (channel in 0 until channelCount) {
+                    val index = offset + channel * bytes
+                    var value = 0
+                    if (bytes > 1) for (b in 0 until bytes) {
+                        val shift = 8 * (if (bigEndian) bytes - 1 - b else b)
+                        value = value or ((pcm.get(index + b).toInt() and 255) shl shift)
+                    }
+                    val sample = when (encoding) {
+                        C.ENCODING_PCM_8BIT -> ((pcm.get(index).toInt() and 255) - 128) / 128f
+                        else -> ((value shl (32 - bytes * 8)) shr (32 - bytes * 8)).toDouble().div(1L shl (bytes * 8 - 1)).toFloat()
+                    }.let { if (it.isFinite()) it.coerceIn(-1f, 1f) else 0f }
+                    low = min(low, sample); high = max(high, sample)
+                    monoSum += sample
+                }
             }
             val mono = monoSum / channelCount
             if (analyzeLevel) {

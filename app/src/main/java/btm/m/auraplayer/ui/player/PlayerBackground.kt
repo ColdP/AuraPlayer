@@ -183,6 +183,75 @@ internal fun rememberPlayerArtworkColorSeed(artwork: String, useOklab: Boolean):
     return seed
 }
 
+/**
+ * Resolves a seed color from [artwork] for app-wide dynamic theming without flashing to a
+ * fallback color between track switches. Keeps the previously resolved seed until the next
+ * cover finishes decoding, and falls back to [fallbackSeed] when no artwork is available.
+ */
+@Composable
+internal fun rememberSmoothArtworkColorSeed(
+    artwork: String,
+    useOklab: Boolean,
+    fallbackSeed: Int,
+): Int {
+    val context = LocalContext.current
+    var seed by remember {
+        mutableIntStateOf(
+            if (artwork.isBlank()) {
+                fallbackSeed
+            } else {
+                cachedInitialArtworkSeed(artwork, useOklab) ?: fallbackSeed
+            },
+        )
+    }
+    LaunchedEffect(artwork, useOklab, fallbackSeed) {
+        if (artwork.isBlank()) {
+            seed = fallbackSeed
+            return@LaunchedEffect
+        }
+        val primaryCache = if (useOklab) oklabArtworkSeedCache else artworkSeedCache
+        synchronized(primaryCache) { primaryCache[artwork] }?.let {
+            seed = it
+            return@LaunchedEffect
+        }
+        val imageLoader = SingletonImageLoader.get(context)
+        val cachedSoftware = findCachedArtworkMemoryEntry(
+            imageLoader = imageLoader,
+            artwork = artwork,
+            requireSoftwareBitmap = true,
+        )
+        val computed = withContext(Dispatchers.IO) {
+            val bitmap = if (cachedSoftware != null && cachedSoftware.exactUriMatch) {
+                runCatching { cachedSoftware.image.toBitmap() }.getOrNull()
+            } else {
+                runCatching {
+                    (imageLoader.execute(
+                        ImageRequest.Builder(context)
+                            .data(artwork)
+                            .size(128)
+                            .allowHardware(false)
+                            .build(),
+                    ) as? SuccessResult)?.image?.toBitmap()
+                }.getOrNull()
+            }
+            if (bitmap == null) {
+                null
+            } else if (useOklab) {
+                btm.m.auraplayer.ui.OklabThemeEngine.extractOklabSeed(bitmap, fallbackSeed)
+            } else {
+                coverMonetSeed(bitmap)
+            }
+        }
+        if (computed != null) {
+            recordArtworkSeed(artwork, computed, useOklab)
+            seed = computed
+        } else {
+            seed = fallbackSeed
+        }
+    }
+    return seed
+}
+
 @Composable
 internal fun rememberPlayerMonetPalette(artwork: String): CorePalette {
     val seed = rememberPlayerArtworkSeed(artwork)

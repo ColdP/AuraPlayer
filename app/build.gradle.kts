@@ -116,6 +116,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.9.0")
     implementation("androidx.media3:media3-session:1.9.0")
     implementation("androidx.media3:media3-datasource-okhttp:1.9.0")
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.9.0+1")
     implementation("io.coil-kt.coil3:coil-compose:3.3.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.3.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

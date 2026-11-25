@@ -184,8 +184,8 @@ internal fun BlacklistDialog(model: AuraViewModel, close: () -> Unit) {
 fun ThemePage(model: AuraViewModel, padding: PaddingValues) {
     val value = model.settings.value
     DisposableEffect(Unit) { onDispose { model.settings.previewColor = null } }
-    val colorIds = listOf("system") + colorPresets.map { it.first } + "custom"
-    val colorNames = listOf(tr("follow_system", "跟随系统")) + colorPresets.map { tr("color_${it.first}", it.second) } + tr("custom", "自定义")
+    val colorIds = listOf("system", "cover") + colorPresets.map { it.first } + "custom"
+    val colorNames = listOf(tr("follow_system", "跟随系统"), tr("follow_cover", "跟随封面")) + colorPresets.map { tr("color_${it.first}", it.second) } + tr("custom", "自定义")
     LazyColumn(pageContentModifier(), contentPadding = padding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Group(tr("theme", "主题")) {
